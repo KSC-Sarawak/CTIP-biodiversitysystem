@@ -9,6 +9,9 @@ import StoreProvider from '../shared/StoreProvider.js';
 import { ThemeProvider, FONT_FILES } from './components/Theme.js';
 import AppNavigator from './navigation/AppNavigator.js';
 import { secureStorage } from './secureStorage.js';
+import { getLocalDb } from './offline/localDb.js';
+import { createSqliteOutbox } from './offline/outboxStore.js';
+import { createTagCache } from './offline/tagCache.js';
 
 // Persist user sessions securely in Keystore/Keychain across mobile app restarts (CTIP-119)
 setStorageAdapter(secureStorage);
@@ -17,6 +20,11 @@ setStorageAdapter(secureStorage);
 
 // Pre-warm secure session restoration in parallel with font loading for fast app initialisation
 restoreSession().catch(() => {});
+
+// Records are saved on the phone first and sent when there is signal (CTIP-83).
+// Both live in the encrypted SQLite file, and are made once for the app's lifetime.
+const outbox = createSqliteOutbox(getLocalDb);
+const tagCache = createTagCache(getLocalDb);
 
 export default function App() {
   const [fontsLoaded] = useFonts(FONT_FILES);
@@ -27,7 +35,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <StoreProvider>
+        <StoreProvider outbox={outbox} tagCache={tagCache}>
           <AppNavigator />
         </StoreProvider>
       </ThemeProvider>

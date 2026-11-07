@@ -559,6 +559,9 @@ export const findSpecimenByQrApi = (qrId, { token } = {}) => apiFetch(`/specimen
 export const createSpecimenApi = (specimen, { token } = {}) => send("POST", "/specimens", specimen, token);
 export const updateSpecimenApi = (id, changes, { token } = {}) => send("PATCH", `/specimens/${enc(id)}`, changes, token);
 export const createObservationApi = (obs, { token } = {}) => send("POST", "/observations", obs, token);
+export const fetchObservationApi = (id, { token } = {}) => apiFetch(`/observations/${enc(id)}`, { token });
+// Records saved on the phone (CTIP-16): { device_id, observations: [...] }, up to 20 at a time.
+export const syncApi = (body, { token } = {}) => send("POST", "/sync", body, token);
 // Draft/queued: sent as it is. Returned: with fixes (height_cm, morphology, notes) and an optional comment.
 export const submitObservationApi = (id, body = {}, { token } = {}) => send("POST", `/observations/${enc(id)}/submit`, body, token);
 export const addCommentApi = (id, body, { token } = {}) => send("POST", `/observations/${enc(id)}/comments`, { body }, token);

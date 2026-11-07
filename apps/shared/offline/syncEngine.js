@@ -109,6 +109,61 @@ const pick = (source, fields) =>
 const stepOf = (record) => record.step ?? (record.kind === "new_plant" ? "specimen" : "observation");
 
 /**
+ * The promise's result, or null if it has not settled within `ms`. The promise
+ * keeps running either way; this only stops waiting for it. A rejection inside
+ * the wait is passed on.
+ */
+export function waitAtMost(promise, ms) {
+  if (ms == null) return promise;
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * Save first, then send (CTIP-44, CTIP-83). Writes the record and its photos
+ * to the outbox, and only then starts a sync and waits up to `waitMs` for it.
+ *
+ * Answers:
+ *   { ok: false, code, message }  the outbox write failed: nothing was saved and
+ *                                 no sync starts. The caller keeps the draft.
+ *   { ok: true, queued, id, state, error }
+ *                                 saved. `queued` is false only when the record
+ *                                 already left the outbox (the API confirmed it).
+ *
+ * Never throws. A sync that throws or is slow leaves the record safely queued.
+ */
+export async function saveFirst({ outbox, record, photos = [], syncNow, waitMs = 8000 }) {
+  try {
+    await outbox.add(record, photos);
+  } catch (err) {
+    return {
+      ok: false,
+      code: err?.code || "OUTBOX_WRITE_FAILED",
+      message: "This record could not be saved on this phone. Your draft is kept. Free up some space on the phone and try again.",
+      error: err,
+    };
+  }
+
+  try {
+    await syncNow({ waitMs });
+  } catch (err) {
+    console.warn("saveFirst: sync after save failed:", err?.message || err);
+  }
+
+  // Still in the outbox means not sent yet (or refused, see state and error).
+  let left = record;
+  try {
+    left = await outbox.get(record.id);
+  } catch {
+    // Could not read it back: it was saved, so say it is waiting.
+  }
+  return { ok: true, queued: Boolean(left), id: record.id, state: left?.state ?? null, error: left?.error ?? null };
+}
+
+/**
  * createSyncEngine({ outbox, api, deviceId, currentUserId }) → { run(userId) }
  * `api` holds createSpecimen(body), sync(body), uploadPhoto(observationId, photo),
  * submit(observationId), getObservation(id) and addComment(observationId, body),

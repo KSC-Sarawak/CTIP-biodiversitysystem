@@ -79,8 +79,16 @@ async function openDb() {
  * The encrypted local database, opened and migrated once and then reused.
  * Resolves to null if SQLite is not available; callers decide what to do then
  * (drafts fall back to AsyncStorage, the outbox refuses with OUTBOX_UNAVAILABLE).
+ * A failed open is not remembered: the next call tries again, so one bad
+ * moment (say the key store was locked) does not stop the outbox until restart.
  */
 export function getLocalDb() {
-  dbPromise ??= openDb();
+  if (!dbPromise) {
+    const opening = openDb();
+    dbPromise = opening;
+    opening.then((db) => {
+      if (!db && dbPromise === opening) dbPromise = null;
+    });
+  }
   return dbPromise;
 }
