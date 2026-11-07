@@ -16,6 +16,19 @@ that. The idea is simple:
 
 The rest of this page says how, what the botanist sees, and what we test.
 
+**Stories covered**
+
+| Story | Title | Where |
+|---|---|---|
+| CTIP-16 | Sync queue upload with idempotency keys (includes `POST /sync`) | This design; [§3](#3-ids-and-repeating-safely) and [§4](#4-sync-order) |
+| CTIP-44 | Local-first record store | [§2](#2-save-first) |
+| CTIP-83 | Offline capture in airplane mode | [§2](#2-save-first) |
+| CTIP-84 | Cache species reference for offline search | [§10](#10-species-offline) |
+| CTIP-66 | Resumable photo upload during sync | [§4](#4-sync-order) |
+| CTIP-67 | Sync conflict handling for two devices | [§8](#8-conflicts) |
+| CTIP-68 | Sync status and sync triggers | [§6](#6-local-states-what-the-botanist-sees) and [§11](#11-when-the-app-syncs) |
+| CTIP-116 | Generate a QR tag offline (reserved tag IDs) | [§7](#7-tags-offline) |
+
 ---
 
 ## 1. Decisions already made
@@ -35,7 +48,9 @@ These were agreed with the Product Owner and are not open for debate in code rev
 ## 2. Save first
 
 On the phone, `addPlant` and `addRevisit` write the record and its photos to the
-**outbox** before any network call (CTIP-44). Then they start a sync and wait up to 8 s.
+**outbox** before any network call (CTIP-44). This is what makes capture work in
+airplane mode (CTIP-83): with no signal the record is already safe on the phone. Then
+they start a sync and wait up to 8 s.
 
 | What happens in 8 s | What the botanist sees |
 |---|---|
