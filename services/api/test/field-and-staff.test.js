@@ -29,7 +29,12 @@ function checkInsert(table, row) {
   if (db[table].some((r) => r[key] === row[key])) return pgError('23505', `duplicate key value violates unique constraint "${table}_pkey"`);
   if (table === 'specimens') {
     if (db.specimens.some((r) => r.qr_id === row.qr_id)) return pgError('23505', 'duplicate key value violates unique constraint "specimens_qr_id_key"');
-    if (!db.qr_tags.some((t) => t.qr_id === row.qr_id)) return pgError('23503', 'violates foreign key constraint "specimens_qr_id_fkey"');
+    const tagRow = db.qr_tags.find((t) => t.qr_id === row.qr_id);
+    if (!tagRow) return pgError('23503', 'violates foreign key constraint "specimens_qr_id_fkey"');
+    // The tag trigger (migration 20261028000000) refuses a retired or damaged tag.
+    if (['retired', 'damaged'].includes(tagRow.status)) {
+      return pgError('CTTG0', `Tag ${row.qr_id} is ${tagRow.status}, use another tag`);
+    }
   }
   return null;
 }
@@ -157,6 +162,18 @@ test('a tag already on another plant gets 409 TAG_IN_USE; an unknown tag 422 TAG
   const unknown = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-9999' });
   assert.equal(unknown.status, 422);
   assert.equal(unknown.body.code, 'TAG_NOT_FOUND');
+});
+
+test('a retired or damaged tag gets 409 TAG_RETIRED, not a 500', async () => {
+  tag('NIAH-0002', 'retired');
+  tag('NIAH-0003', 'damaged');
+  for (const qr_id of ['NIAH-0002', 'NIAH-0003']) {
+    const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ id: crypto.randomUUID(), qr_id });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.code, 'TAG_RETIRED');
+    assert.equal(res.body.message, `Tag ${qr_id} has been retired. Pick or scan an unused tag.`);
+  }
+  assert.equal(db.specimens.length, 0);
 });
 
 test('clients cannot set registered_by or species_id when registering', async () => {

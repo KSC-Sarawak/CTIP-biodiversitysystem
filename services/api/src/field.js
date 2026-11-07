@@ -249,6 +249,11 @@ export const fieldHandlers = {
     if (error.code === '23503') {
       return fail(res, 422, 'TAG_NOT_FOUND', `Tag ${body.qr_id} is not in the tag list. Ask an officer to create it.`);
     }
+    // The tag trigger (migration 20261028000000) refuses a retired or damaged tag.
+    // Without this it would be a 500, which the phone's sync retries for ever.
+    if (error.code === 'CTTG0') {
+      return fail(res, 409, 'TAG_RETIRED', `Tag ${body.qr_id} has been retired. Pick or scan an unused tag.`);
+    }
     return dbError(res, error);
   },
 

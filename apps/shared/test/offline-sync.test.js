@@ -68,7 +68,8 @@ function photos(n = 2) {
 function setup(serverOptions) {
   const outbox = createMemoryOutbox();
   const server = createFakeServer(serverOptions);
-  const engine = createSyncEngine({ outbox, api: server.api, deviceId: "phone-1" });
+  // The signed-in user is whoever the fake server's token belongs to.
+  const engine = createSyncEngine({ outbox, api: server.api, deviceId: "phone-1", currentUserId: () => server.state.userId });
   return { outbox, server, engine };
 }
 
@@ -308,6 +309,7 @@ test("another user's records are neither sent nor listed", async () => {
   assert.equal((await outbox.photos(theirs.id))[0].uploaded, 0);
 
   // user-2 signs in later on the same phone: their record sends then.
+  server.state.userId = "user-2";
   const later = await engine.run("user-2");
   assert.equal(later.sent, 1);
 });
@@ -390,7 +392,7 @@ test("413 on a photo fails the record with remove_photo", async () => {
 
 // Beyond the brief's list: rules from the design that the engine must keep.
 
-test("a per-item DB_ERROR is retried later, and the other items of the batch are kept", async () => {
+test("a per-item DB_ERROR is retried later, and the other items of the batch go on", async () => {
   const { outbox, server, engine } = setup();
   const a = plantRecord({ kind: "revisit", specimen: null, step: "observation" });
   const b = plantRecord({ kind: "revisit", specimen: null, step: "observation" });
@@ -405,15 +407,171 @@ test("a per-item DB_ERROR is retried later, and the other items of the batch are
   };
 
   const summary = await engine.run(U);
-  assert.equal(summary.stoppedBy, "offline");
+  // A server-side failure keeps that record for later; it does not stop the run.
+  assert.deepEqual(summary, { sent: 1, pending: 1, failed: 0, conflicts: 0, stoppedBy: null });
   const retry = await outbox.get(a.id);
   assert.equal(retry.state, "pending");
   assert.equal(retry.attempts, 1);
   assert.equal(retry.step, "observation");
-  const kept = await outbox.get(b.id);
-  assert.equal(kept.step, "photos", "b's confirmed create is written back");
-  assert.equal(kept.state, "pending", "the run stopped, so nothing is left sending");
-  assert.equal(summary.pending, 2);
+  assert.equal(await outbox.get(b.id), null, "b was sent and removed");
+});
+
+// Fix round 1, finding 1: every call carries the current token, so the run must
+// stop as soon as someone else is signed in.
+
+test("a user switch mid-run stops the run before anything is sent as the new user", async () => {
+  const { outbox, server, engine } = setup();
+  const a = plantRecord();
+  const b = plantRecord();
+  await outbox.add(a, photos(2));
+  await outbox.add(b, photos(1));
+  // user-1 signs out and user-2 signs in while photo 1 of record a is uploading
+  // (that request already went out with user-1's token).
+  const upload = server.api.uploadPhoto;
+  server.api.uploadPhoto = async (...args) => {
+    const res = await upload(...args);
+    server.state.userId = "user-2";
+    return res;
+  };
+
+  const summary = await engine.run(U);
+  assert.equal(summary.stoppedBy, "signed_out");
+  assert.equal(summary.sent, 0);
+  const names = server.state.calls.map((c) => c.name);
+  assert.deepEqual(names, ["createSpecimen", "createSpecimen", "sync", "uploadPhoto"], "nothing after the switch");
+  for (const r of await outbox.list(U)) assert.equal(r.state, "pending");
+  assert.equal(server.state.specimens.some((s) => s.registered_by === "user-2"), false);
+  assert.equal(server.state.observations.some((o) => o.recorded_by === "user-2"), false);
+});
+
+test("run(B) during run(A) returns B's own summary", async () => {
+  const { outbox, server, engine } = setup();
+  const mineA = plantRecord();
+  const mineB = plantRecord({ user_id: "user-2" });
+  await outbox.add(mineA, photos(1));
+  await outbox.add(mineB, photos(1));
+  // A signs out and B signs in during A's first call.
+  const create = server.api.createSpecimen;
+  server.api.createSpecimen = async (...args) => {
+    server.api.createSpecimen = create;
+    const res = await create(...args);
+    server.state.userId = "user-2";
+    return res;
+  };
+
+  const runA = engine.run(U);
+  const runB = engine.run("user-2");
+  assert.notEqual(runA, runB);
+  const [a, b] = await Promise.all([runA, runB]);
+  assert.equal(a.stoppedBy, "signed_out");
+  assert.equal(a.sent, 0);
+  assert.equal(a.pending, 1);
+  assert.deepEqual(b, { sent: 1, pending: 0, failed: 0, conflicts: 0, stoppedBy: null });
+  assert.equal((await outbox.get(mineA.id)).state, "pending");
+  assert.equal(server.state.observations.find((o) => o.id === mineB.id).recorded_by, "user-2");
+});
+
+// Fix round 1, finding 2: a resent submit must not bounce the officer's decision.
+
+for (const decided of ["returned", "approved"]) {
+  test(`a submit that landed is done when the officer has ${decided} the record meanwhile`, async () => {
+    const { outbox, server, engine } = setup();
+    const rec = plantRecord();
+    await outbox.add(rec, []);
+    dropOnCall(server, 2, { afterStore: true }); // the submit lands, its answer is lost
+    await engine.run(U);
+    assert.equal((await outbox.get(rec.id)).step, "submit");
+    const obs = server.state.observations[0];
+    obs.status = decided;
+    const version = obs.version;
+
+    const summary = await engine.run(U);
+    assert.equal(summary.sent, 1);
+    assert.equal(await outbox.get(rec.id), null);
+    assert.equal(server.state.observations[0].status, decided, "not sent for review again");
+    assert.equal(server.state.observations[0].version, version);
+    assert.equal(callsTo(server, "submit").length, 1, "the submit is not resent");
+  });
+}
+
+test("a WRONG_STATUS submit answer is done when the server holds a decided record", async () => {
+  const { outbox, server, engine } = setup();
+  const rec = plantRecord({ kind: "revisit", specimen: null, step: "photos" });
+  server.state.specimens.push({ id: rec.specimen_id, qr_id: rec.qr_id });
+  server.state.observations.push({ id: rec.id, specimen_id: rec.specimen_id, status: "rejected", recorded_by: U, version: 1 });
+  await outbox.add(rec, []);
+
+  const summary = await engine.run(U);
+  assert.equal(summary.sent, 1);
+  assert.equal(server.state.observations[0].status, "rejected");
+});
+
+test("a resumed submit of a record still queued sends it for review", async () => {
+  const { outbox, server, engine } = setup();
+  const rec = plantRecord({ kind: "revisit", specimen: null, step: "submit" });
+  server.state.specimens.push({ id: rec.specimen_id, qr_id: rec.qr_id });
+  server.state.observations.push({ id: rec.id, specimen_id: rec.specimen_id, status: "queued", recorded_by: U, version: 1 });
+  await outbox.add(rec, []);
+
+  const summary = await engine.run(U);
+  assert.equal(summary.sent, 1);
+  assert.equal(server.state.observations[0].status, "synced");
+});
+
+// Fix round 1, finding 3: one record the server keeps refusing must not block the rest.
+
+test("a record that always gets 500 doesn't stop younger records from syncing", async () => {
+  const { outbox, server, engine } = setup();
+  const broken = plantRecord();
+  const fine = plantRecord();
+  await outbox.add(broken, photos(1));
+  await outbox.add(fine, photos(1));
+  const create = server.api.createSpecimen;
+  server.api.createSpecimen = (body) =>
+    body.qr_id === broken.qr_id ? Promise.resolve({ ok: false, status: 500, code: "DB_ERROR", message: "boom" }) : create(body);
+
+  for (const round of [1, 2]) {
+    const summary = await engine.run(U);
+    assert.equal(summary.stoppedBy, null);
+    assert.equal(summary.pending, 1);
+    const kept = await outbox.get(broken.id);
+    assert.equal(kept.state, "pending");
+    assert.equal(kept.attempts, round);
+  }
+  assert.equal(await outbox.get(fine.id), null, "the younger record was sent");
+});
+
+test("a retired tag fails the record with pick_tag", async () => {
+  const { outbox, server, engine } = setup({ retiredTags: ["DS-OLD"] });
+  const rec = plantRecord({ qr_id: "DS-OLD" });
+  const next = plantRecord();
+  await outbox.add(rec, []);
+  await outbox.add(next, []);
+
+  const summary = await engine.run(U);
+  const failed = await outbox.get(rec.id);
+  assert.equal(failed.state, "failed");
+  assert.equal(failed.error.code, "TAG_RETIRED");
+  assert.equal(failed.error.action, "pick_tag");
+  assert.equal(summary.sent, 1);
+});
+
+test("429 stops the run", async () => {
+  const { outbox, server, engine } = setup();
+  const a = plantRecord();
+  const b = plantRecord();
+  await outbox.add(a, []);
+  await outbox.add(b, []);
+  const create = server.api.createSpecimen;
+  server.api.createSpecimen = (body) => {
+    server.api.createSpecimen = create;
+    return Promise.resolve({ ok: false, status: 429, code: "RATE_LIMITED", message: "Slow down" });
+  };
+
+  const summary = await engine.run(U);
+  assert.equal(summary.stoppedBy, "offline");
+  assert.equal((await outbox.get(a.id)).attempts, 1);
+  assert.equal((await outbox.get(b.id)).attempts, 0, "the run stopped before the second record");
 });
 
 test("REVIEW_IN_PROGRESS fails the record with wait_review", async () => {
@@ -484,7 +642,7 @@ test("classify and actionFor follow the error rules", () => {
   assert.equal(classify({ ok: false, status: 409, code: "TAG_IN_USE" }), "fail");
   assert.equal(classify({ ok: false, status: 422, code: "VALIDATION_ERROR" }), "fail");
 
-  for (const code of ["TAG_IN_USE", "TAG_NOT_FOUND", "TAG_RESERVED"]) assert.equal(actionFor(code, 409), "pick_tag");
+  for (const code of ["TAG_IN_USE", "TAG_NOT_FOUND", "TAG_RESERVED", "TAG_RETIRED"]) assert.equal(actionFor(code, 409), "pick_tag");
   assert.equal(actionFor("REVIEW_IN_PROGRESS", 409), "wait_review");
   assert.equal(actionFor("FILE_TOO_LARGE", 413), "remove_photo");
   assert.equal(actionFor("UNSUPPORTED_FILE_TYPE", 415), "remove_photo");

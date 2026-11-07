@@ -13,8 +13,9 @@
 // With { afterStore: true } the server does the work first and only the answer
 // is lost: the case that would make a duplicate if the engine were careless.
 //
-// Extra knobs on `state` for tests: `signedOut` (every call answers 401) and
-// `calls` (every call made, with a copy of its arguments).
+// Extra knobs on `state` for tests: `signedOut` (every call answers 401),
+// `userId` (whose token the calls carry: change it to model a user switch),
+// `retiredTags`, and `calls` (every call made, with a copy of its arguments).
 import { randomUUID } from "node:crypto";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -36,8 +37,12 @@ const offline = () => ({ ok: false, offline: true, status: 0, code: "NETWORK_ERR
 const unknownKeys = (body, allowed) => Object.keys(body ?? {}).filter((k) => !allowed.includes(k));
 const byteLength = (text) => new TextEncoder().encode(text).length;
 
-export function createFakeServer({ userId = "user-1", tags = null, maxPhotoBytes = 10 * 1024 * 1024 } = {}) {
-  const state = { specimens: [], observations: [], photos: [], comments: [], calls: [], signedOut: false, userId };
+export function createFakeServer({ userId = "user-1", tags = null, retiredTags = [], maxPhotoBytes = 10 * 1024 * 1024 } = {}) {
+  const state = {
+    specimens: [], observations: [], photos: [], comments: [], calls: [], signedOut: false,
+    userId, // who the current token belongs to; a test may change it mid-run (a user switch)
+    retiredTags: [...retiredTags], // retired or damaged tags; a test may retire one later
+  };
   const drops = []; // one entry per call still to drop: { afterStore }
   const now = () => new Date().toISOString();
   const findObs = (id) => state.observations.find((o) => o.id === id && !o.is_deleted);
@@ -49,6 +54,10 @@ export function createFakeServer({ userId = "user-1", tags = null, maxPhotoBytes
     if (body.id !== undefined && !UUID.test(body.id)) return fail(422, "VALIDATION_ERROR", "id must be a UUID");
     const existing = body.id && state.specimens.find((s) => s.id === body.id);
     if (existing) return ok(200, existing);
+    // The tag trigger refuses a retired or damaged tag (field.js maps CTTG0).
+    if (state.retiredTags.includes(body.qr_id)) {
+      return fail(409, "TAG_RETIRED", `Tag ${body.qr_id} has been retired. Pick or scan an unused tag.`);
+    }
     if (state.specimens.some((s) => s.qr_id === body.qr_id)) {
       return fail(409, "TAG_IN_USE", `Tag ${body.qr_id} is already on another plant. Pick or scan an unused tag.`);
     }
@@ -57,7 +66,7 @@ export function createFakeServer({ userId = "user-1", tags = null, maxPhotoBytes
     }
     const row = {
       id: body.id ?? randomUUID(), qr_id: body.qr_id, species_id: null,
-      proposed_species_name: body.proposed_species_name ?? null, registered_by: userId,
+      proposed_species_name: body.proposed_species_name ?? null, registered_by: state.userId,
       lat: body.lat ?? null, lng: body.lng ?? null, gps_accuracy_m: body.gps_accuracy_m ?? null,
       is_deleted: false, created_at: now(),
     };
@@ -87,7 +96,7 @@ export function createFakeServer({ userId = "user-1", tags = null, maxPhotoBytes
       if (waiting) return failed("REVIEW_IN_PROGRESS", "This plant has a record waiting for an officer. You can add to it once a decision is returned.");
       const existing = state.observations.find((o) => o.id === item.id);
       if (existing) {
-        if (existing.recorded_by === userId && !existing.is_deleted) return { id: item.id, result: "created", server_version: existing.version };
+        if (existing.recorded_by === state.userId && !existing.is_deleted) return { id: item.id, result: "created", server_version: existing.version };
         return failed("ID_TAKEN", "That id belongs to another record. Make a new id.");
       }
       if (!state.specimens.some((s) => s.id === item.specimen_id)) return failed("VALIDATION_ERROR", "That plant does not exist");
@@ -97,7 +106,7 @@ export function createFakeServer({ userId = "user-1", tags = null, maxPhotoBytes
         device_id: fields.device_id ?? deviceId,
         status: "queued",
         observed_at: fields.observed_at ?? now(),
-        recorded_by: userId,
+        recorded_by: state.userId,
         version: 1,
         last_synced_at: null,
         is_deleted: false,
@@ -107,7 +116,7 @@ export function createFakeServer({ userId = "user-1", tags = null, maxPhotoBytes
 
     // An edit: only while it is still the caller's unsent record at base_version.
     const row = findObs(item.id);
-    if (!row || row.recorded_by !== userId) return failed("NOT_FOUND", "Observation not found");
+    if (!row || row.recorded_by !== state.userId) return failed("NOT_FOUND", "Observation not found");
     const changes = Object.fromEntries(EDIT_FIELDS.filter((f) => item[f] !== undefined).map((f) => [f, item[f]]));
     if (EDITABLE.includes(row.status) && row.version === item.base_version) {
       Object.assign(row, changes, { version: item.base_version + 1 });
@@ -171,7 +180,7 @@ export function createFakeServer({ userId = "user-1", tags = null, maxPhotoBytes
 
   function addComment(observationId, body) {
     if (!findObs(observationId)) return fail(404, "NOT_FOUND", "Observation not found");
-    const row = { id: randomUUID(), observation_id: observationId, author_id: userId, body, created_at: now() };
+    const row = { id: randomUUID(), observation_id: observationId, author_id: state.userId, body, created_at: now() };
     state.comments.push(row);
     return ok(201, row);
   }
