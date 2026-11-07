@@ -3,7 +3,7 @@
 // published species it saved, and answers in the same shape as GET /public/species.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { searchSpeciesOffline, cleanSpeciesRow, cacheIsFresh, CACHE_MAX_AGE_MS } from "../offline/offlineSearch.js";
+import { searchSpeciesOffline, shouldUseCache, cleanSpeciesRow, cacheIsFresh, CACHE_MAX_AGE_MS } from "../offline/offlineSearch.js";
 
 const LIST = [
   { id: "3", scientific_name: "Rafflesia keithii", common_name: "Keith's rafflesia", family: "Rafflesiaceae", genus: "Rafflesia" },
@@ -90,4 +90,13 @@ test("cacheIsFresh is true for 24 hours after the last refresh", () => {
   assert.equal(cacheIsFresh("not a date", now), false);
   // A clock set back must not freeze the cache for days.
   assert.equal(cacheIsFresh(new Date(now + 3600 * 1000).toISOString(), now), false);
+});
+
+test("shouldUseCache: page 1 may use the cache; later pages only when already offline", () => {
+  assert.equal(shouldUseCache({ page: 1, offline: false }), true);
+  assert.equal(shouldUseCache({ page: 1, offline: true }), true);
+  assert.equal(shouldUseCache({ page: 2, offline: true }), true);
+  // Signal lost while scrolling an online search: do not append a cached page.
+  assert.equal(shouldUseCache({ page: 2, offline: false }), false);
+  assert.equal(shouldUseCache({ page: 3 }), false);
 });

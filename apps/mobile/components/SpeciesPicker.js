@@ -8,7 +8,7 @@ import { View, Text, Pressable } from 'react-native';
 
 import { summarize, isStillPicked } from '../../shared/speciesSearch.js';
 import { useSpeciesSearch } from '../hooks/useSpeciesSearch.js';
-import { shortDate } from './format.js';
+import { OfflineCaption, speciesPhoto } from './OfflineSpecies.js';
 import { useTheme, font } from './Theme.js';
 import { Field, Sci, Txt, Thumb, DotLabel, SkeletonRow, Notice, Button, TextLink } from './Bits.js';
 
@@ -22,8 +22,7 @@ function Result({ s, onPress }) {
     <Pressable accessibilityRole="button" accessibilityLabel={`Pick ${s.common_name || s.scientific_name}`} onPress={onPress}
       style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 12,
         borderRadius: 10, backgroundColor: c.bg, opacity: pressed ? 0.7 : 1 })}>
-      {/* Saved species have their picture on the phone (thumb_path); online ones have a URL. */}
-      <Thumb uri={s.thumb_path || s.primary_image_url || undefined} size={48} />
+      <Thumb uri={speciesPhoto(s)} size={48} />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <Text numberOfLines={1} style={{ fontFamily: font('text', 700), fontSize: 15, color: c.ink }}>{s.common_name || s.scientific_name}</Text>
         <Sci size={14}>{s.scientific_name}</Sci>
@@ -52,13 +51,9 @@ export default function SpeciesPicker({ value, onChange, onPick, picked, error }
     ? [exact.common_name, exact.family].filter(Boolean).join(' · ') + '. From the species list.'
     : 'Type at least 2 letters to search the species list, or enter the name yourself.';
 
-  // With no connection the list comes from the phone. Say so, and when it was saved;
-  // if nothing was ever saved, say how to still record the plant.
+  // With no connection the list comes from the phone (caption: OfflineSpecies.js).
+  // With nothing saved, the caption says so, so the "no match" line is left out.
   const offlineEmpty = searching && search.offline && search.cachedCount === 0;
-  const caption = !searching || !search.offline ? null
-    : offlineEmpty
-    ? 'Species search needs a connection the first time. Type the name you know; an officer will match it.'
-    : `Offline: searching ${search.cachedCount} species saved on this phone (updated ${shortDate(search.cachedAt)}).`;
 
   return (
     <View style={{ gap: 6 }}>
@@ -71,7 +66,7 @@ export default function SpeciesPicker({ value, onChange, onPick, picked, error }
           <TextLink label="Clear" onPress={() => onChange('')} />
         </View>
       ) : null}
-      {caption ? <Txt v="caption" color={c.ink2}>{caption}</Txt> : null}
+      {searching ? <OfflineCaption search={search} /> : null}
       {searching && search.loading && results.length === 0 ? <SkeletonRow /> : null}
       {results.map((s) => <Result key={s.id} s={s} onPress={() => onPick(s)} />)}
       {searching && search.error ? (

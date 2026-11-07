@@ -36,6 +36,15 @@ export function searchSpeciesOffline(list, { q, family, page = 1, limit = PAGE_S
   return { data: matches.slice(start, start + limit), meta: { page, limit, total: matches.length } };
 }
 
+// When a request fails with no connection, may the saved species answer it?
+// Page 1: yes, that is a fresh search. A later page: only if the search is already
+// being answered from the phone. A search that began online has online page 1 on
+// screen, and a cached page N has other matches, order and total, so appending it
+// would repeat or skip rows; that page fails with the normal error and a retry.
+export function shouldUseCache({ page, offline }) {
+  return page === 1 || offline === true;
+}
+
 // The row that is saved on the phone: only these public fields, whatever the
 // server sent. The description is cut because the picker shows one line of it.
 export function cleanSpeciesRow(s) {

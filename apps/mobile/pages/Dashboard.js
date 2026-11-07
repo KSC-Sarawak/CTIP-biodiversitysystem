@@ -15,6 +15,7 @@ import {
   SkeletonRow, LoadingMore, Empty, Notice, Button,
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
+import { OfflineCaption, OFFLINE_EMPTY_TEXT, speciesPhoto } from '../components/OfflineSpecies.js';
 import { useSpeciesSearch } from '../hooks/useSpeciesSearch.js';
 import { cleanTerm, isTagSearch } from '../../shared/speciesSearch.js';
 import { can } from '../../shared/permissions.js';
@@ -193,6 +194,8 @@ function SpeciesCatalogue({ nav, params, onView }) {
         <SearchField value={q} onChangeText={setQ} placeholder="Search name or tag ID" />
         <Pills value={family} onChange={setFamily} items={[{ key: 'all', label: 'All families' }, ...families.map((f) => ({ key: f, label: f }))]} />
         {apiMode ? null : <SortBar items={SORT_SPECIES} value={sort} onChange={setSort} />}
+        {/* With nothing saved, the empty state below carries the same sentence. */}
+        {apiMode && search.cachedCount > 0 ? <OfflineCaption search={search} /> : null}
         {apiMode && search.error ? (
           <View style={{ gap: 8 }}>
             <Notice tone="warning" icon="info" title="Species search unavailable" body={search.error} />
@@ -227,7 +230,11 @@ function SpeciesCatalogue({ nav, params, onView }) {
             )}
           </View>
         )}
-        ListEmptyComponent={loading || (apiMode && search.error) ? null : <Empty icon="search">No species match. Try another name or family.</Empty>}
+        ListEmptyComponent={
+          loading || (apiMode && search.error) ? null
+          : apiMode && search.offline && search.cachedCount === 0 ? <Empty icon="search">{OFFLINE_EMPTY_TEXT}</Empty>
+          : <Empty icon="search">No species match. Try another name or family.</Empty>
+        }
         ListFooterComponent={
           loading ? (
             <View>
@@ -251,7 +258,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
 }
 
 function SpeciesRow({ s, plants, staff, onPress }) {
-  const photo = s.photo || s.primary_image_url || s.media?.[0]?.url || plants.find((p) => p.species_id === s.id && p.photos?.length)?.photos[0]?.url;
+  const photo = speciesPhoto(s) || plants.find((p) => p.species_id === s.id && p.photos?.length)?.photos[0]?.url;
   return (
     <View style={{ height: ROW_HEIGHT }}>
       <Row

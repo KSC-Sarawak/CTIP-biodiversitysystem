@@ -11,7 +11,7 @@ import { apiFetch, userMessage } from '../../shared/api.js';
 import {
   buildSpeciesQuery, initialSearchState, nextSearchState, failSearchState, hasMore as more,
 } from '../../shared/speciesSearch.js';
-import { searchSpeciesOffline } from '../../shared/offline/offlineSearch.js';
+import { searchSpeciesOffline, shouldUseCache } from '../../shared/offline/offlineSearch.js';
 import { speciesCache } from '../offline/speciesCache.js';
 
 const IDLE = { key: null, items: [], page: 0, total: null, loading: false, error: null };
@@ -45,7 +45,12 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
     fetchSpeciesPage(query)
       .then(({ data, meta }) => setState((s) => ({ ...nextSearchState(s, { key: forKey, data, meta }), offline: false })))
       .catch(async (error) => {
-        if (error?.code !== 'NETWORK_ERROR') {
+        // Only a new search, or one already answered from the phone, falls back to the
+        // saved species. A later page that fails while online keeps what is shown and
+        // reports the error (with retry), so pages from two sources are never mixed.
+        const cur = latest.current;
+        const alreadyOffline = cur.key === forKey && cur.offline === true;
+        if (error?.code !== 'NETWORK_ERROR' || !shouldUseCache({ page: query.page, offline: alreadyOffline })) {
           setState((s) => failSearchState(s, { key: forKey, error }));
           return;
         }
