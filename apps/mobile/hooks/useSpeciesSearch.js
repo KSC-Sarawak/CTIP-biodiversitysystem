@@ -3,12 +3,16 @@
 // a time. The rules (what to send, which answers to keep) live in
 // apps/shared/speciesSearch.js, where they are tested; this hook only adds the
 // typing delay, the requests and React state.
+// With no connection it answers from the species saved on the phone instead
+// (CTIP-84, offlineSearch.js) and reports `offline`, so the picker can say so.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { apiFetch, userMessage } from '../../shared/api.js';
 import {
   buildSpeciesQuery, initialSearchState, nextSearchState, failSearchState, hasMore as more,
 } from '../../shared/speciesSearch.js';
+import { searchSpeciesOffline } from '../../shared/offline/offlineSearch.js';
+import { speciesCache } from '../offline/speciesCache.js';
 
 const IDLE = { key: null, items: [], page: 0, total: null, loading: false, error: null };
 
@@ -35,10 +39,20 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
 
   // One page for the search named `forKey`. Late answers to an older search are
   // dropped by nextSearchState/failSearchState, because their key no longer matches.
+  // With no connection the same page comes from the saved species. `offline` rides
+  // along in the state, so a late answer to an older search cannot set it either.
   const fetchPage = useCallback((forKey, query) => {
     fetchSpeciesPage(query)
-      .then(({ data, meta }) => setState((s) => nextSearchState(s, { key: forKey, data, meta })))
-      .catch((error) => setState((s) => failSearchState(s, { key: forKey, error })));
+      .then(({ data, meta }) => setState((s) => ({ ...nextSearchState(s, { key: forKey, data, meta }), offline: false })))
+      .catch(async (error) => {
+        if (error?.code !== 'NETWORK_ERROR') {
+          setState((s) => failSearchState(s, { key: forKey, error }));
+          return;
+        }
+        const { list, cachedAt } = await speciesCache.all();
+        const { data, meta } = searchSpeciesOffline(list, query);
+        setState((s) => ({ ...nextSearchState(s, { key: forKey, data, meta }), offline: true, cachedAt, cachedCount: list.length }));
+      });
   }, []);
 
   // A new search waits until typing pauses, then asks for page 1.
@@ -47,7 +61,8 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
       setState(IDLE);
       return undefined;
     }
-    setState(initialSearchState(key));
+    // Keep what is known about being offline, so the caption does not blink while typing.
+    setState((prev) => ({ ...initialSearchState(key), offline: prev.offline, cachedAt: prev.cachedAt, cachedCount: prev.cachedCount }));
     const { q: term, family: fam } = JSON.parse(key);
     const timer = setTimeout(() => fetchPage(key, buildSpeciesQuery({ q: term, family: fam, page: 1 })), debounceMs);
     return () => clearTimeout(timer);
@@ -77,6 +92,9 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
     error: state.error,
     total: state.total,
     hasMore: more(state),
+    offline: state.offline === true,
+    cachedAt: state.cachedAt ?? null,
+    cachedCount: state.cachedCount ?? 0, // species saved on the phone (the "n" in the picker's caption)
     loadMore,
     retry,
   };
