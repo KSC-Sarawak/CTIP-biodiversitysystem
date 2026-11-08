@@ -9,9 +9,30 @@
 //
 // Like tag_cache, losing this list costs nothing but a top-up on the next
 // connection, so when SQLite is not available it saves nothing and reads empty.
+//
+// The "Keep tags for offline use" switch is saved per person in the meta table
+// (key keep_offline_tags:<userId>, value "1" or "0"). No row means on. With no
+// database it answers on and saves nothing.
+const keepKey = (userId) => `keep_offline_tags:${userId}`;
+
 export function createReservedTags(getLocalDb) {
   const norm = (id) => String(id || '').trim().toUpperCase();
   return {
+    async getKeepOffline(userId) {
+      if (!userId) return true;
+      const db = await getLocalDb();
+      if (!db) return true;
+      const row = db.getFirstSync('SELECT value FROM meta WHERE key = ?;', [keepKey(userId)]);
+      return row?.value !== '0';
+    },
+
+    async setKeepOffline(userId, on) {
+      if (!userId) return;
+      const db = await getLocalDb();
+      if (!db) return;
+      db.runSync('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?);', [keepKey(userId), on ? '1' : '0']);
+    },
+
     // Replace this person's list with `qrIds`, in one transaction.
     async save(userId, qrIds = []) {
       if (!userId) return;

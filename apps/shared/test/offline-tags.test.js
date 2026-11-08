@@ -7,7 +7,10 @@ import {
   lookupTagOffline, tagCacheRows, cleanTagRow, outboxTagsFrom, revisitTarget,
   isReservedForOther, myKeptTags, reservedToCreate, nextReservedTag, RESERVED_LABEL, RESERVED_KEEP,
 } from "../offline/tags.js";
-import { createTopUp } from "../offline/reservedTopUp.js";
+import { createTopUp, shouldTopUp } from "../offline/reservedTopUp.js";
+import { DatabaseSync } from "node:sqlite";
+import { migrate } from "../offline/schema.js";
+import { createReservedTags } from "../../mobile/offline/reservedTags.js";
 
 const ME = "user-1";
 // What the store holds before any workspace has loaded (staffStart in StoreProvider).
@@ -215,4 +218,39 @@ test("another botanist's kept tag is not offered as unused, online or offline", 
     // My own kept tag is still mine to use.
     assert.equal(lookupTagOffline(db, "NIAH-0202", { meId: "me-id", offline }).kind, "unused");
   }
+});
+
+// Kept tags are a fallback, on by default, and one switch per person (CTIP-116).
+test("top-up never runs while keeping offline tags is off", () => {
+  const ready = { keepOffline: true, role: "botanist", online: true, loaded: true };
+  assert.equal(shouldTopUp(ready), true);
+  assert.equal(shouldTopUp({ ...ready, keepOffline: false }), false);
+  // The other conditions still apply with the switch on.
+  assert.equal(shouldTopUp({ ...ready, role: "officer" }), false);
+  assert.equal(shouldTopUp({ ...ready, online: false }), false);
+  assert.equal(shouldTopUp({ ...ready, loaded: false }), false);
+});
+
+test("the keep-offline setting is on by default, kept per person, and a no-op with no database", async () => {
+  const raw = new DatabaseSync(":memory:");
+  const db = {
+    execSync: (sql) => raw.exec(sql),
+    runSync: (sql, params = []) => raw.prepare(sql).run(...params),
+    getFirstSync: (sql, params = []) => raw.prepare(sql).get(...params) ?? null,
+    getAllSync: (sql, params = []) => raw.prepare(sql).all(...params),
+    withTransactionSync(task) { raw.exec("BEGIN;"); try { task(); raw.exec("COMMIT;"); } catch (e) { raw.exec("ROLLBACK;"); throw e; } },
+  };
+  migrate(db);
+  const store = createReservedTags(async () => db);
+  assert.equal(await store.getKeepOffline("a"), true); // no row: on
+  await store.setKeepOffline("a", false);
+  assert.equal(await store.getKeepOffline("a"), false);
+  assert.equal(await store.getKeepOffline("b"), true); // another person is not affected
+  await store.setKeepOffline("a", true);
+  assert.equal(await store.getKeepOffline("a"), true);
+
+  const none = createReservedTags(async () => null);
+  assert.equal(await none.getKeepOffline("a"), true);
+  await none.setKeepOffline("a", false); // nothing to save into, and no error
+  assert.equal(await none.getKeepOffline("a"), true);
 });

@@ -11,7 +11,7 @@ import { useStore } from '../../shared/store.js';
 import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
-  Screen, Header, IconButton, TextLink, Txt, Mono, Section, Field, Area, Button, Thumb, Empty, DotLabel, Notice,
+  Screen, Header, IconButton, TextLink, Txt, Mono, Section, Field, Area, Button, Thumb, Empty, DotLabel, Notice, Check,
 } from '../components/Bits.js';
 import LeafletMap from '../components/LeafletMap.js';
 import { PHOTO_TRAITS, PHOTO_CAPTION_MAX, isThreatened } from '../../shared/data.js';
@@ -315,9 +315,12 @@ function SetByHand({ typed, gps, qr, protect, onChange }) {
 }
 
 const NO_KEPT_TAGS = 'No offline tags left. Connect to the internet to get more, or scan a pre-printed tag.';
+// The switch is off: nothing is kept, so a new tag needs a connection.
+const TAGS_OFF = 'Offline tags are turned off. Connect to the internet, or scan a pre-printed tag.';
+const KEEP_HINT = 'Keeps 3 tag IDs for you, so you can make a tag with no connection. Write the ID on a spare tag only if you run out of printed ones.';
 
 export function AddPlant({ nav, params = {} }) {
-  const { db, me, addPlant, generateTags, outboxItems = [], apiStatus, keptTags = [], releaseTag, takeReservedTag } = useStore();
+  const { db, me, addPlant, generateTags, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag } = useStore();
   const { c } = useTheme();
   const [qr, setQr] = useState(params.qr || '');
   // A tag a record on this phone already uses is taken, though the server does not know yet.
@@ -332,6 +335,15 @@ export function AddPlant({ nav, params = {} }) {
   const online = apiStatus === 'connected';
   // With no signal a new tag comes from the kept ones (nothing to make on the server).
   const noKeptLeft = !online && !takeReservedTag?.();
+  const isBotanist = me?.role === 'botanist';
+  const [changingKeep, setChangingKeep] = useState(false); // the switch is being changed
+  const changeKeep = async (on) => {
+    if (changingKeep) return;
+    setChangingKeep(true);
+    const res = await setKeepOffline(on);
+    setChangingKeep(false);
+    if (!res?.ok) Alert.alert('Could not change this', res?.message || 'Try again in a moment.');
+  };
   const [photos, setPhotos] = useState([]);
   const [sp, setSp] = useState('');
   const [picked, setPicked] = useState(null); // species chosen from search (CTIP-63)
@@ -367,7 +379,7 @@ export function AddPlant({ nav, params = {} }) {
       // The tag now on this screen (when changing a tag) stays kept, so skip it.
       const id = takeReservedTag?.(qr ? [qr] : []);
       if (id) showNewTag(id);
-      else Alert.alert('No offline tags left', NO_KEPT_TAGS);
+      else Alert.alert(keepOffline ? 'No offline tags left' : 'Offline tags are off', keepOffline ? NO_KEPT_TAGS : TAGS_OFF);
       return;
     }
     setGenerating(true);
@@ -500,7 +512,7 @@ export function AddPlant({ nav, params = {} }) {
             disabled={generating || noKeptLeft}
             onPress={generateNewTag}
           />
-          {noKeptLeft ? <Txt v="caption" color={c.ink2}>{NO_KEPT_TAGS}</Txt> : null}
+          {noKeptLeft ? <Txt v="caption" color={c.ink2}>{keepOffline ? NO_KEPT_TAGS : TAGS_OFF}</Txt> : null}
           {params.make ? <Button label="Scan tag with camera" icon="camera" kind="secondary" onPress={() => nav.replace('scan')} /> : null}
           <Button label="Choose QR from gallery" icon="plus" kind="secondary" onPress={pickQrFromGallery} />
         </View>
@@ -530,16 +542,12 @@ export function AddPlant({ nav, params = {} }) {
           </Section>
         )}
 
-        {/* Tags made ahead of time for this botanist, so a new tag works with no signal (CTIP-116). */}
-        {keptTags.length > 0 && (
+        {/* Tags made ahead of time for this botanist, as a fallback for when they run out of
+            printed tags and have no signal (CTIP-116). One switch, no per-tag buttons. */}
+        {isBotanist && (
           <Section title="Kept for offline use" gap={10}>
-            <Txt v="body" color={c.ink2}>These tags are kept for you, so you can make a new tag with no connection.</Txt>
-            {keptTags.map((id) => (
-              <View key={id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Mono size={15} color={c.ink}>{id}</Mono>
-                {online ? <TextLink label="Release" size={14} onPress={() => releaseTag(id)} /> : null}
-              </View>
-            ))}
+            <Check label="Keep tags for offline use" hint={KEEP_HINT} value={keepOffline} onChange={changeKeep} disabled={!online || changingKeep} />
+            {keepOffline && keptTags.length > 0 ? keptTags.map((id) => <Mono key={id} size={15} color={c.ink}>{id}</Mono>) : null}
           </Section>
         )}
       </Screen>

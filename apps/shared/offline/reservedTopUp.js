@@ -25,3 +25,12 @@ export function createTopUp(run) {
     return going;
   };
 }
+
+/**
+ * May the phone make kept tags now? Only for a botanist who has the "Keep tags for
+ * offline use" switch on, is online, and whose workspace has loaded. Kept in one
+ * place so the rule can be tested: with the switch off nothing is ever made.
+ */
+export function shouldTopUp({ keepOffline, role, online, loaded }) {
+  return !!keepOffline && role === "botanist" && !!online && !!loaded;
+}

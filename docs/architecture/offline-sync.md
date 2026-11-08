@@ -40,8 +40,11 @@ These were agreed with the Product Owner and are not open for debate in code rev
   does not depend on the sensors.
 - **Signing out keeps unsent records.** They stay on the phone, encrypted, after a
   warning. They send the next time that same person signs in on that phone.
-- **A botanist may release (delete) their own unused reserved tags** (see
-  [§7](#7-tags-offline)).
+- **Kept tags are a fallback only (user decision, 9 Nov 2026).** Botanists carry
+  pre-printed tags and write a kept tag ID on a spare tag only when they run out. One
+  switch, "Keep tags for offline use", turns the kept tags on or off (see
+  [§7](#7-tags-offline)). A botanist may still release (delete) their own unused
+  reserved tags: switching off does exactly that.
 
 ---
 
@@ -194,10 +197,31 @@ Every record on the phone can also be deleted with "Delete from this phone". It 
   load.
 - An unknown tag offline can still start a record. The API checks it at sync, and a
   clash becomes `pick_tag`.
-- **Reserved tags (CTIP-116).** While online, the phone keeps 3 tags made for this
-  botanist (`batch_label: 'reserved'`). The API refuses them to anyone else
-  (`409 TAG_RESERVED`). Only their owner may release (delete) them, and a botanist may
-  release their own unused ones.
+- **Reserved tags (CTIP-116).** While online, and while the switch below is on, the phone
+  keeps 3 tags made for this botanist (`batch_label: 'reserved'`). The API refuses them
+  to anyone else (`409 TAG_RESERVED`). Only their owner may release (delete) them, and a
+  botanist may release their own unused ones.
+- **Kept tags are a fallback only, and one switch controls them.** A botanist carries
+  pre-printed tags and writes a kept tag ID on a spare tag only when they run out, so
+  there is no per-tag "Release": releasing one tag only for the phone to make a new one
+  would be pointless. On Add plant, botanists see the section "Kept for offline use" with
+  the switch "Keep tags for offline use" (hint: "Keeps 3 tag IDs for you, so you can make
+  a tag with no connection. Write the ID on a spare tag only if you run out of printed
+  ones."). While it is on, the section lists the kept tag IDs.
+  - **Where it is saved:** per person on the phone, in the `meta` table (schema v3), key
+    `keep_offline_tags:<userId>`, value `"1"` or `"0"`. No row means on. With no database
+    the phone reads it as on and saves nothing.
+  - **Off:** the phone releases every free kept tag with `DELETE /qr-tags/{id}`, one by
+    one. Only if every release works does it save `"0"` and clear the phone's list. If
+    one fails, the switch stays on, the list is reloaded and the API's message is shown
+    (until the migration `20261108000000` is pushed, a botanist's release answers "not
+    found"). Tags a record on the phone has already taken are not released.
+  - **On:** the phone saves `"1"` and the normal top-up makes 3 tags again.
+  - **While off:** nothing is made (`shouldTopUp` in `reservedTopUp.js`), `takeReservedTag()`
+    answers `null`, and "Generate new QR tag" with no connection is disabled with
+    "Offline tags are turned off. Connect to the internet, or scan a pre-printed tag."
+  - The switch can only be changed online (it is disabled offline), because turning it off
+    needs the API.
 - Only a botanist's phone may make a `reserved` tag, one at a time (`count: 1`); anyone
   else gets `403 FORBIDDEN`. The web QR tags page leaves unused kept tags out of
   printing, labels them "Kept for a botanist", and asks before Delete or Retire.
