@@ -200,6 +200,9 @@ export function MyRecords({ nav }) {
   );
 }
 
+// The edit form's fields, filled from the record (or empty when there is none yet).
+const editForm = (o) => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' });
+
 const lastReview = (db, obsId) => db.reviews.filter((r) => r.observation_id === obsId).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
 
 export function RecordDetail({ nav, params = {} }) {
@@ -215,7 +218,17 @@ export function RecordDetail({ nav, params = {} }) {
   // brings in a newer version: only fields changed against it are saved, with its
   // version, so another device's edit is never silently overwritten (editSnapshot).
   const [opened, setOpened] = useState(() => (o ? editSnapshot(o) : null));
-  const [edit, setEdit] = useState(() => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' }));
+  const [edit, setEdit] = useState(() => editForm(o));
+  // The screen can open before the record has loaded (`o` missing at first). The
+  // form and its snapshot are then filled together the first time `o` exists,
+  // never one without the other: an empty form compared with a loaded record
+  // would send its empty fields and clear the record's values.
+  useEffect(() => {
+    if (o && !opened) {
+      setOpened(editSnapshot(o));
+      setEdit(editForm(o));
+    }
+  }, [o, opened]);
   const [sending, setSending] = useState(false);
   const plant = o ? plantView(db, db.plants.find((p) => p.id === o.specimen_id)) : null;
   if (!o || !plant) {
@@ -237,14 +250,15 @@ export function RecordDetail({ nav, params = {} }) {
   // Only the record's own botanist edits it, and only while it is not sent for review.
   const canEdit = unsent && o.recorded_by === me?.id;
   const saveChanges = async () => {
-    if (sending) return;
+    if (sending || !opened) return; // no snapshot yet: nothing to compare the form with
     // The API's limit, checked before the edit can reach the outbox (CTIP-68).
     if (!heightOk(edit.height_cm)) {
       Alert.alert('Height not valid', HEIGHT_PROBLEM);
       return;
     }
     setSending(true);
-    const r = await editUnsent(opened || editSnapshot(o), edit); // shows its own success or error message
+    // Always the snapshot the form opened on, never the live record (see `opened`).
+    const r = await editUnsent(opened, edit); // shows its own success or error message
     setSending(false);
     // Saved on the server: the record is now at its new version, so the next save builds on that.
     if (r.ok && !r.queued && r.observation) setOpened(editSnapshot(r.observation));
@@ -322,7 +336,7 @@ export function RecordDetail({ nav, params = {} }) {
           <Field label="Height (cm)" optional value={edit.height_cm} onChangeText={(t) => setEdit({ ...edit, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} error={heightOk(edit.height_cm) ? undefined : HEIGHT_PROBLEM} />
           <Area label="Appearance" optional value={edit.morphology} onChangeText={(t) => setEdit({ ...edit, morphology: t })} maxLength={LIMITS.text} />
           <Area label="Notes" optional value={edit.notes} onChangeText={(t) => setEdit({ ...edit, notes: t })} rows={2} maxLength={LIMITS.text} />
-          <Button label="Save changes" kind="secondary" onPress={saveChanges} disabled={sending} />
+          <Button label="Save changes" kind="secondary" onPress={saveChanges} disabled={sending || !opened} />
         </Section>
       ) : null}
 
