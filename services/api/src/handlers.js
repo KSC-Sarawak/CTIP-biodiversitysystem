@@ -1,4 +1,6 @@
 import { supabaseAnon, supabaseAs } from './supabase.js';
+import { fail, dbError, UUID } from './validate.js';
+import { publicMediaUrl } from './photoLinks.js';
 import { speciesHandlers, applySearch, parsePublicList } from './species.js';
 import { distributionHandlers } from './distribution.js';
 import { speciesMediaHandlers } from './speciesMedia.js';
@@ -7,21 +9,15 @@ import { fieldHandlers } from './field.js';
 import { staffHandlers } from './staff.js';
 import { discussionHandlers } from './discussions.js';
 import { sessionHandlers } from './session.js';
+import { mfaHandlers } from './mfa.js';
 import { protectSpecimen } from './distribution.js';
 import { tooMany } from './rateLimit.js';
 import { dbLoad } from './dbLoad.js';
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Public link for a species photo. Rows saved by older web builds may hold a
-// full link instead of a Storage path.
-const mediaUrl = (db, { s3_bucket, s3_key }) =>
-  /^https?:/i.test(s3_key) ? s3_key : db.storage.from(s3_bucket).getPublicUrl(s3_key).data.publicUrl;
-
 // The species' cover photo: the one marked primary, else the first by sort order.
 export function coverUrl(db, media = []) {
   const cover = media.find((m) => m.is_primary) ?? [...media].sort((a, b) => a.sort_order - b.sort_order)[0];
-  return cover ? mediaUrl(db, cover) : null;
+  return cover ? publicMediaUrl(db, cover) : null;
 }
 
 // One published species with its gallery, visitor fields only (listed one by
@@ -41,7 +37,7 @@ async function loadPublicSpecies(db, id) {
   if (error) throw error;
   if (!species) return null;
   const { species_media, ...fields } = species;
-  const media = species_media.map(({ s3_bucket, s3_key, ...m }) => ({ ...m, url: mediaUrl(db, { s3_bucket, s3_key }) }));
+  const media = species_media.map(({ s3_bucket, s3_key, ...m }) => ({ ...m, url: publicMediaUrl(db, { s3_bucket, s3_key }) }));
   return { ...fields, primary_image_url: coverUrl(db, species_media), media };
 }
 
@@ -80,7 +76,7 @@ export const handlers = {
     const limit = askedLimit ?? 20;
     if (paged) published = published.range((page - 1) * limit, page * limit - 1);
     const { data, count, error } = await published;
-    if (error) return res.status(500).json({ code: 'DB_ERROR', message: error.message });
+    if (error) return dbError(res, error);
 
     // Fields listed one by one, so nothing internal can reach a visitor.
     const rows = data.map((s) => ({
@@ -100,13 +96,13 @@ export const handlers = {
   // A species page for visitors. Nothing here joins specimens, so no
   // coordinates can leak. RLS hides unpublished species as a second guard.
   'get /public/species/:id': async (req, res) => {
-    if (!UUID.test(req.params.id)) return res.status(404).json({ code: 'NOT_FOUND', message: 'Species not found' });
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Species not found');
     try {
       const species = await loadPublicSpecies(supabaseAnon(), req.params.id);
-      if (!species) return res.status(404).json({ code: 'NOT_FOUND', message: 'Species not found' });
+      if (!species) return fail(res, 404, 'NOT_FOUND', 'Species not found');
       res.json(species);
     } catch (error) {
-      res.status(500).json({ code: 'DB_ERROR', message: error.message });
+      dbError(res, error);
     }
   },
 
@@ -120,9 +116,9 @@ export const handlers = {
   'get /public/tags/:qrId': async (req, res) => {
     if (tooMany(req, 'public-tag', { limit: TAG_LOOKUP_LIMIT, windowMs: TAG_LOOKUP_WINDOW_MS })) {
       res.set('Retry-After', String(TAG_LOOKUP_WINDOW_MS / 1000));
-      return res.status(429).json({ code: 'TOO_MANY_ATTEMPTS', message: 'Too many tag lookups. Wait a minute and try again.' });
+      return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many tag lookups. Wait a minute and try again.');
     }
-    const notFound = () => res.status(404).json({ code: 'NOT_FOUND', message: 'No published plant on this tag' });
+    const notFound = () => fail(res, 404, 'NOT_FOUND', 'No published plant on this tag');
     const qrId = String(req.params.qrId).trim().toUpperCase();
     if (!QR_ID.test(qrId)) return notFound();
 
@@ -147,7 +143,7 @@ export const handlers = {
         species,
       });
     } catch (error) {
-      res.status(500).json({ code: 'DB_ERROR', message: error.message });
+      dbError(res, error);
     }
   },
 
@@ -157,7 +153,7 @@ export const handlers = {
       .select('id, full_name, email, role, is_active, created_at, updated_at')
       .eq('id', req.user.id)
       .single();
-    if (error) return res.status(500).json({ code: 'DB_ERROR', message: error.message });
+    if (error) return dbError(res, error);
     res.json(data);
   },
 
@@ -169,4 +165,5 @@ export const handlers = {
   ...staffHandlers,
   ...discussionHandlers,
   ...sessionHandlers,
+  ...mfaHandlers,
 };
