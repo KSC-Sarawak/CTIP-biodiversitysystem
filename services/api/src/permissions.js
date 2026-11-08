@@ -115,6 +115,9 @@ export const routes = [
   ['patch', '/discussions/:id', ANY_STAFF], // owner only
   ['delete', '/discussions/:id', ANY_STAFF], // owner or admin
   ['post', '/discussions/:id/posts', ANY_STAFF],
+  ['patch', '/discussions/:id/posts/:postId', ANY_STAFF], // author only
+  ['delete', '/discussions/:id/posts/:postId', ANY_STAFF], // author or admin
+  ['post', '/discussions/:id/posts/:postId/restore', ANY_STAFF], // whoever deleted it
 
   // Notifications
   ['get', '/notifications', ANY_STAFF],

@@ -106,6 +106,7 @@ button.textlink:hover { text-decoration: underline; }
 .login-browse { margin-top: var(--s-5, 24px); padding-top: var(--s-4, 16px); border-top: 1px solid var(--line); }
 .login-browse p { margin: 0 0 var(--s-2); }
 .login-browse .textlinks a { display: inline-flex; align-items: center; gap: var(--s-1); color: var(--acc); font-weight: 700; }
+.loginerr { display: flex; align-items: center; gap: var(--s-2); margin: var(--s-2) 0 0; padding: var(--s-2) var(--s-3); border: 1px solid var(--bad-line); border-radius: var(--r-control); background: var(--bad-soft); color: var(--bad); font-weight: 600; }
 .login-browse .textlinks a:hover { text-decoration: underline; }
 
 .row { display: flex; align-items: center; gap: var(--s-3); }
@@ -1001,6 +1002,9 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 .token { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px 2px var(--s-3); border: 1px solid var(--acc-line); border-radius: var(--r-pill); background: var(--acc-soft); font-size: var(--t-small-size); }
 .token button { display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink2); cursor: pointer; }
 .token button:hover { background: var(--raised); color: var(--ink); }
+.token.member { padding: 2px var(--s-3); }
+.groupmembers { margin: var(--s-2) 0 var(--s-3); }
+.groupmembers > p { margin: 0 0 var(--s-1); }
 .suggest { position: relative; }
 .popover.suggestions { left: 0; right: auto; top: calc(100% + 4px); min-width: min(320px, 100%); max-height: 260px; overflow-y: auto; margin: 0; padding: var(--s-1); list-style: none; gap: 2px; }
 .suggestions button { display: block; width: 100%; padding: var(--s-2) var(--s-3); border: 0; border-radius: var(--r-control); background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
@@ -1474,3 +1478,6 @@ mark.mention { padding: 0 2px; border-radius: var(--r-tag); background: var(--ac
   .tagprint.label .tagface { break-after: page; }
   .tagprint.label .tagface:last-child { break-after: auto; }
 }
+kbd { padding: 0 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--raised); font: inherit; font-size: 0.9em; }
+.post .postactions { margin-left: auto; display: inline-flex; gap: 2px; }
+.post.deleted { background: transparent; border-style: dashed; }

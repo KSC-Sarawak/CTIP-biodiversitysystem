@@ -139,7 +139,9 @@ function sessionFromOtherTab() {
 
 const expiresAt = (session) => session?.expires_at || tokenClaims(session?.access_token)?.exp || null;
 
-// Called when a refresh is refused, so the app can show the signed-out state.
+// Called when a refresh is refused, or the API says an admin turned the account
+// off, so the app can show the signed-out state. Listeners get
+// { reason: "expired" | "disabled", message }.
 const endedListeners = new Set();
 export function onSessionEnded(fn) {
   endedListeners.add(fn);
@@ -178,7 +180,7 @@ export async function freshAuthToken({ force = false } = {}) {
       // Lost the race with another tab: its new session is still good.
       if (sessionFromOtherTab()) return getSession().access_token;
       setSession(null);
-      endedListeners.forEach((fn) => fn());
+      endedListeners.forEach((fn) => fn({ reason: "expired" }));
       return null;
     }
     return session.access_token;
@@ -293,6 +295,13 @@ export async function apiFetch(path, options = {}) {
     // the API itself is not running. Treat it like a network failure.
     if (!json && (res.status === 502 || res.status === 504)) {
       return { ok: false, offline: true, status: res.status, code: "API_UNREACHABLE", message: "Cannot reach the API server" };
+    }
+
+    // An admin turned this account off (sign-in, refresh or the workspace load):
+    // forget the session and tell the app, which signs out and shows why.
+    if (json?.code === "ACCOUNT_DISABLED" && getSession()) {
+      setSession(null);
+      endedListeners.forEach((fn) => fn({ reason: "disabled", message: json.message }));
     }
 
     // Backend returned an error envelope (e.g. { code, message, details })
@@ -569,6 +578,11 @@ export const fetchDiscussionApi = (id, { token } = {}) => apiFetch(`/discussions
 export const updateDiscussionApi = (id, changes, { token } = {}) => send("PATCH", `/discussions/${enc(id)}`, changes, token);
 export const deleteDiscussionApi = (id, { token } = {}) => send("DELETE", `/discussions/${enc(id)}`, undefined, token);
 export const addDiscussionPostApi = (id, post, { token } = {}) => send("POST", `/discussions/${enc(id)}/posts`, post, token);
+// One message: edit (author), delete (author or admin), undo a delete (whoever deleted it).
+const postPath = (id, postId) => `/discussions/${enc(id)}/posts/${enc(postId)}`;
+export const editDiscussionPostApi = (id, postId, changes, { token } = {}) => send("PATCH", postPath(id, postId), changes, token);
+export const deleteDiscussionPostApi = (id, postId, { token } = {}) => send("DELETE", postPath(id, postId), undefined, token);
+export const restoreDiscussionPostApi = (id, postId, { token } = {}) => send("POST", `${postPath(id, postId)}/restore`, undefined, token);
 
 // The file part of an upload. In the browser a File or Blob; in React Native / Expo,
 // standard Blob, File or WinterCG part with bytes, with fallback to legacy URI.

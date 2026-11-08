@@ -42,7 +42,42 @@ const PostCreate = z.strictObject({
   mentions: ids(20).default([]),
 });
 
-const POST_COLUMNS = 'id, discussion_id, author_id, body, mentions, created_at';
+const PostEdit = z.strictObject({
+  body,
+  mentions: ids(20).default([]),
+});
+
+// One message in a thread the caller can read (RLS).
+// Returns null when it has already answered (not found or a database error).
+async function findPost(req, res, db) {
+  const messageNotFound = () => {
+    fail(res, 404, 'NOT_FOUND', 'Message not found');
+    return null;
+  };
+  if (!UUID.test(req.params.id) || !UUID.test(req.params.postId)) return messageNotFound();
+  const { data, error } = await db.from('discussion_posts').select(POST_COLUMNS)
+    .eq('id', req.params.postId).eq('discussion_id', req.params.id).maybeSingle();
+  if (error) {
+    dbError(res, error);
+    return null;
+  }
+  return data ?? messageNotFound();
+}
+
+// Saves a change to one message. The database trigger
+// (20261108120000_discussion_post_edit_delete) decides who may do it, sets the
+// times, and writes the audit log; this answers its refusals in plain words.
+async function changePost(req, res, db, changes, refused) {
+  const { data, error } = await db.from('discussion_posts').update(changes)
+    .eq('id', req.params.postId).eq('discussion_id', req.params.id).select(POST_COLUMNS).maybeSingle();
+  if (error?.code === '42501') return fail(res, 403, 'NOT_ALLOWED', refused);
+  if (error?.code === 'P0002') return fail(res, 409, 'CANNOT_UNDO', 'The deleted text could not be found, so it cannot be put back');
+  if (error) return dbError(res, error);
+  if (!data) return fail(res, 403, 'NOT_ALLOWED', refused);
+  res.json(data);
+}
+
+const POST_COLUMNS = 'id, discussion_id, author_id, body, mentions, created_at, edited_at, deleted_at, deleted_by';
 
 // One thread with its audience and posts, as the caller may see them.
 async function loadThread(db, discussionId) {
@@ -164,5 +199,43 @@ export const discussionHandlers = {
     if (error?.code === '42501') return notFound(res);
     if (error) return dbError(res, error);
     res.status(201).json(data);
+  },
+
+  // The author changes the text of their own message. It shows "edited", and
+  // the text before and after goes to the audit log.
+  'patch /discussions/:id/posts/:postId': async (req, res) => {
+    const db = supabaseAs(req.user);
+    const post = await findPost(req, res, db);
+    if (!post) return;
+    const b = parseBody(PostEdit, req, res);
+    if (!b) return;
+    if (post.deleted_at) return fail(res, 409, 'MESSAGE_DELETED', 'A deleted message cannot be edited. Undo the delete first.');
+    if (post.author_id !== req.user.id) return fail(res, 403, 'NOT_ALLOWED', 'Only the author can edit this message');
+    if (post.body === b.body) return res.json(post); // nothing changed: not marked edited
+    await changePost(req, res, db, { body: b.body, mentions: b.mentions }, 'Only the author can edit this message');
+  },
+
+  // The author, or an admin (moderation). The message stays in the thread as
+  // "Message deleted"; its text is kept only in the audit log, for undo.
+  'delete /discussions/:id/posts/:postId': async (req, res) => {
+    const db = supabaseAs(req.user);
+    const post = await findPost(req, res, db);
+    if (!post) return;
+    if (post.deleted_at) return res.json(post); // already deleted (a retry)
+    if (post.author_id !== req.user.id && req.user.role !== 'admin') {
+      return fail(res, 403, 'NOT_ALLOWED', 'Only the author or an admin can delete this message');
+    }
+    await changePost(req, res, db, { deleted_at: new Date().toISOString() }, 'Only the author or an admin can delete this message');
+  },
+
+  // Undo a delete: whoever deleted the message. The database puts back the
+  // exact text from the audit log.
+  'post /discussions/:id/posts/:postId/restore': async (req, res) => {
+    const db = supabaseAs(req.user);
+    const post = await findPost(req, res, db);
+    if (!post) return;
+    if (!post.deleted_at) return res.json(post); // not deleted (a retry)
+    if (post.deleted_by !== req.user.id) return fail(res, 403, 'NOT_ALLOWED', 'Only the person who deleted this message can undo it');
+    await changePost(req, res, db, { deleted_at: null }, 'Only the person who deleted this message can undo it');
   },
 };

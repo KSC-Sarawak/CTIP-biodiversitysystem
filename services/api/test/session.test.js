@@ -15,6 +15,7 @@ const app = createApp({ verify });
 
 let calls; // what the API sent to Supabase Auth
 let password; // the officer's current password
+let profile; // the officer's own profile row, or undefined: the read fails
 
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const session = (n) => ({
@@ -37,6 +38,11 @@ async function fakeAuth(input, init = {}) {
     return json(400, { code: 400, error_code: 'refresh_token_not_found', msg: 'Invalid Refresh Token' });
   }
   if (url.pathname === '/auth/v1/logout') return new Response(null, { status: 204 });
+  if (url.pathname === '/rest/v1/profiles') {
+    if (!profile) return json(404, { message: 'no fake profile' });
+    const one = /vnd\.pgrst\.object/.test(new Headers(init.headers).get('Accept') ?? '');
+    return json(200, one ? profile : [profile]);
+  }
   if (url.pathname === '/auth/v1/recover') return json(200, {});
   if (url.pathname === '/auth/v1/user' && init.method === 'PUT') {
     if (body.password === 'weakweak') return json(422, { code: 422, error_code: 'weak_password', msg: 'Password is too weak' });
@@ -49,6 +55,7 @@ async function fakeAuth(input, init = {}) {
 beforeEach((t) => {
   calls = [];
   password = 'old-password';
+  profile = undefined;
   resetAttemptLimits();
   t.mock.method(globalThis, 'fetch', fakeAuth);
 });
@@ -71,14 +78,46 @@ test('wrong password: 401 INVALID_CREDENTIALS; a bad body: 422', async () => {
   assert.equal(bad.status, 422);
 });
 
-test(`more than ${ATTEMPT_LIMIT} sign-in attempts from one address in 5 minutes: 429`, async () => {
-  for (let i = 0; i < ATTEMPT_LIMIT; i++) {
+// The API's own sign-in limit was removed on 8 Nov 2026 (team decision), so
+// repeated tries all reach Supabase. Supabase may still refuse with its own limit.
+test(`sign-in has no API limit: more than ${ATTEMPT_LIMIT} tries all reach Supabase`, async () => {
+  for (let i = 0; i <= ATTEMPT_LIMIT; i++) {
     assert.equal((await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'nope' })).status, 401);
   }
-  const blocked = await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' });
-  assert.equal(blocked.status, 429);
-  assert.equal(blocked.body.code, 'TOO_MANY_ATTEMPTS');
-  assert.equal(calls.length, ATTEMPT_LIMIT, 'the blocked attempt never reaches Supabase');
+  assert.equal(calls.filter((c) => c.path.startsWith('/auth/v1/token')).length, ATTEMPT_LIMIT + 1);
+});
+
+test('a disabled account: sign-in says so, gives no session and ends the one Supabase made', async () => {
+  profile = { is_active: false, deleted_at: null };
+  const res = await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'ACCOUNT_DISABLED');
+  assert.match(res.body.message, /disabled/);
+  assert.equal(res.body.access_token, undefined);
+  assert.ok(calls.some((c) => c.path.startsWith('/auth/v1/logout')), 'the new session is ended');
+});
+
+test('a deleted account is told it was deleted; an active one signs in as usual', async () => {
+  profile = { is_active: false, deleted_at: '2026-11-01T00:00:00Z' };
+  const gone = await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' });
+  assert.equal(gone.status, 403);
+  assert.match(gone.body.message, /deleted/);
+  profile = { is_active: true, deleted_at: null };
+  assert.equal((await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' })).status, 200);
+});
+
+test('a wrong password for a disabled account still only says wrong email or password', async () => {
+  profile = { is_active: false, deleted_at: null };
+  const res = await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'nope' });
+  assert.equal(res.status, 401);
+  assert.equal(res.body.code, 'INVALID_CREDENTIALS');
+});
+
+test('refresh for an account disabled since sign-in: 403 ACCOUNT_DISABLED', async () => {
+  profile = { is_active: false, deleted_at: null };
+  const res = await request(app).post('/v1/auth/refresh').send({ refresh_token: 'refresh-ok' });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'ACCOUNT_DISABLED');
 });
 
 test('refresh swaps a refresh token for a new session; an unknown one ends it', async () => {

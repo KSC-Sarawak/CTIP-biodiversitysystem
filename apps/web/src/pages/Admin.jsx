@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
-import { Chip } from "../components/Bits.jsx";
+import { Chip, PasswordInput } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
 import { fuzzyMatch } from "../../../shared/fuzzy.js";
@@ -145,7 +145,7 @@ export function Users() {
         <div className="row wrap invite">
           <label>Name<input id="invite-name" value={name} onChange={edit("name", setName)} autoComplete="off" {...fieldProps("name")} />{fieldError("name")}</label>
           <label>Email<input id="invite-email" type="email" value={email} onChange={edit("email", setEmail)} autoComplete="off" {...fieldProps("email")} />{fieldError("email")}</label>
-          <label>Temporary Password<input id="invite-password" type="password" value={password} onChange={edit("password", setPassword)} placeholder="At least 8 characters" autoComplete="new-password" {...fieldProps("password")} />{fieldError("password")}</label>
+          <label>Temporary Password<PasswordInput id="invite-password" value={password} onChange={edit("password", setPassword)} placeholder="At least 8 characters" autoComplete="new-password" {...fieldProps("password")} />{fieldError("password")}</label>
           <label>Role
             <select value={newRole} onChange={(e) => setNewRole(e.target.value)}>
               {Object.entries(ROLE_LABEL).map(([r, text]) => <option key={r} value={r}>{text}</option>)}
@@ -238,6 +238,16 @@ export function Users() {
   );
 }
 
+// A discussion message that was edited, deleted or put back, in words.
+function postChange(a) {
+  const before = a.old_value || {};
+  const after = a.new_value || {};
+  const quote = (t) => `"${t}"`;
+  if (!before.deleted_at && after.deleted_at) return `Deleted message: ${quote(before.body)}`;
+  if (before.deleted_at && !after.deleted_at) return `Undid delete, message back: ${quote(after.body)}`;
+  return `Edited message: ${quote(before.body)} → ${quote(after.body)}`;
+}
+
 // Every change recorded by the actions (audit_logs table), newest first.
 export function Audit() {
   const { db } = useStore();
@@ -256,7 +266,7 @@ export function Audit() {
                 <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || "System"}</td>
                 <td>{a.table_name}</td>
                 <td><Chip value={a.action} /></td>
-                <td className="code">{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</td>
+                <td className="code">{a.table_name === "discussion_posts" ? postChange(a) : <>{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</>}</td>
               </tr>
             ))}
           </tbody>
