@@ -697,14 +697,18 @@ export function AddPlant({ nav, params = {} }) {
   );
 }
 
-// After a submit. `queued`: saved on this phone with no connection (UI A in the
-// offline design); it is sent for review by itself once the phone is back online.
+// After a submit. `queued`: saved on this phone and not sent yet (UI A in the
+// offline design); it is sent for review by itself, now or once the phone is back online.
 export function Submitted({ nav, params = {} }) {
   const { c } = useTheme();
+  const { apiStatus } = useStore();
   const queued = !!params.queued;
   // Saved, but the server refused it within the first few seconds: "No
   // connection" would be wrong, and the record says why (UI D).
   const failed = queued && !!params.failed;
+  // Saved and online, but not sent within the first few seconds (a slow
+  // connection, or the photos are still uploading): it is still on its way.
+  const stillSending = queued && !failed && apiStatus === 'connected';
   const tone = failed ? 'warning' : queued ? 'neutral' : 'success';
   return (
     <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.home} />} />} top={0} gap={24}>
@@ -717,6 +721,8 @@ export function Submitted({ nav, params = {} }) {
         <Txt v="body" color={c.ink2} style={{ textAlign: 'center', maxWidth: 300 }}>
           {failed
             ? "Saved on this phone, but it couldn't be sent. Open it in My records to see why."
+            : stillSending
+            ? 'Still sending in the background. It goes for review by itself, so you can carry on.'
             : queued
             ? "No connection right now. It will be sent for review automatically when you're back online."
             : `An officer will check ${params.qr}. You'll get an alert when it is approved or returned.`}

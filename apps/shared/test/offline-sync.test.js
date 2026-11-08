@@ -278,6 +278,35 @@ test("401 stops the run and leaves every record pending", async () => {
   assert.equal(server.state.calls.length, 1, "nothing more is tried after the 401");
 });
 
+test("403 MFA_REQUIRED stops the run and leaves every record pending", async () => {
+  // An account problem (a password-only session, or an account switched off)
+  // pauses sending like a 401: it is not any one record's fault.
+  for (const code of ["MFA_REQUIRED", "ACCOUNT_NOT_ACTIVE"]) {
+    const { outbox, server, engine } = setup();
+    await outbox.add(plantRecord(), photos(1));
+    await outbox.add(plantRecord({ kind: "revisit", specimen: null, step: "observation" }), []);
+    for (const name of Object.keys(server.api)) {
+      server.api[name] = async () => {
+        server.state.calls.push({ name });
+        return { ok: false, status: 403, code, message: "Account problem" };
+      };
+    }
+
+    const summary = await engine.run(U);
+    assert.equal(summary.stoppedBy, "signed_out", code);
+    assert.equal(summary.sent, 0);
+    assert.equal(summary.pending, 2);
+    assert.equal(summary.failed, 0);
+    for (const r of await outbox.list(U)) {
+      assert.equal(r.state, "pending", code);
+      assert.notEqual(r.state, "failed");
+      assert.equal(r.error, null);
+      assert.equal(r.attempts, 0, "no attempt is counted");
+    }
+    assert.equal(server.state.calls.length, 1, `nothing more is tried after the 403 ${code}`);
+  }
+});
+
 test("offline stops the run with stoppedBy offline and counts an attempt", async () => {
   const { outbox, server, engine } = setup();
   const a = plantRecord();
@@ -346,6 +375,38 @@ test("two runs at once send nothing twice", async () => {
   const three = engine.run(U);
   assert.notEqual(three, one);
   assert.equal((await three).sent, 0);
+});
+
+test("a record saved during a run is sent in the same burst", async () => {
+  const { outbox, server, engine } = setup();
+  const first = plantRecord();
+  await outbox.add(first, photos(1));
+
+  // The first record's photo upload is slow: the botanist saves the next plant meanwhile.
+  const realUpload = server.api.uploadPhoto;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let reached;
+  const uploading = new Promise((resolve) => { reached = resolve; });
+  server.api.uploadPhoto = async (...args) => {
+    reached();
+    await gate;
+    return realUpload(...args);
+  };
+
+  const one = engine.run(U);
+  await uploading; // the run listed its queue before the second record existed
+  const second = plantRecord();
+  await outbox.add(second, photos(1));
+  const two = engine.run(U); // saveFirst's trigger while the run is going
+  release();
+
+  await Promise.all([one, two]);
+  assert.equal(await outbox.get(second.id), null, "the second record was sent without a third trigger");
+  assert.equal(server.state.observations.find((o) => o.id === second.id)?.status, "synced");
+  assert.deepEqual(await outbox.list(U), []);
+  assert.equal(callsTo(server, "createSpecimen").length, 2, "nothing was sent twice");
+  assert.equal(callsTo(server, "submit").length, 2);
 });
 
 test("packBatches keeps each batch at 20 items or fewer and under 80,000 characters", () => {
@@ -714,15 +775,28 @@ test("keep mine while offline keeps the choice and sends the comment after the e
   assert.ok(names.lastIndexOf("addComment") > names.lastIndexOf("sync"), "the comment follows the edit");
 });
 
-test("keep mine still counts the edit done when its comment cannot be sent", async () => {
+test("a failed keep-mine comment is sent on the next run, and the edit is not sent again", async () => {
   const { outbox, server, engine, obsId } = await conflictedEdit();
   await resolveConflict({ outbox, addComment: server.api.addComment, id: obsId, choice: "mine" });
+  const realComment = server.api.addComment;
   server.api.addComment = async () => ({ ok: false, offline: true, status: 0, code: "NETWORK_ERROR", message: "Network request failed" });
 
-  const summary = await engine.run(U);
-  assert.equal(summary.sent, 1);
-  assert.equal(server.state.observations[0].height_cm, 40);
-  assert.equal(await outbox.get(obsId), null, "the edit landed, so the record is gone");
+  const first = await engine.run(U);
+  assert.equal(first.sent, 0);
+  assert.equal(first.stoppedBy, "offline");
+  assert.equal(server.state.observations[0].height_cm, 40, "the edit landed");
+  const waiting = await outbox.get(obsId);
+  assert.equal(waiting.state, "pending", "kept until the comment is posted");
+  assert.equal(waiting.step, "comment");
+  assert.equal(server.state.comments.length, 0);
+
+  server.api.addComment = realComment;
+  const syncCalls = callsTo(server, "sync").length;
+  const second = await engine.run(U);
+  assert.equal(second.sent, 1);
+  assert.deepEqual(server.state.comments.map((c) => c.body), [MINE_COMMENT]);
+  assert.equal(callsTo(server, "sync").length, syncCalls, "the edit is not sent again");
+  assert.equal(await outbox.get(obsId), null);
 });
 
 test("keep theirs removes the phone's edit and adds a comment", async () => {
@@ -790,6 +864,9 @@ test("classify and actionFor follow the error rules", () => {
   assert.equal(classify({ ok: false, status: 503, code: "INTERNAL_ERROR" }), "retry");
   assert.equal(classify({ ok: false, status: 429, code: "RATE_LIMITED" }), "retry");
   assert.equal(classify({ ok: false, status: 401, code: "UNAUTHORIZED" }), "signed_out");
+  assert.equal(classify({ ok: false, status: 403, code: "MFA_REQUIRED" }), "signed_out");
+  assert.equal(classify({ ok: false, status: 403, code: "ACCOUNT_NOT_ACTIVE" }), "signed_out");
+  assert.equal(classify({ ok: false, status: 403, code: "FORBIDDEN" }), "fail");
   assert.equal(classify({ ok: false, status: 409, code: "TAG_IN_USE" }), "fail");
   assert.equal(classify({ ok: false, status: 422, code: "VALIDATION_ERROR" }), "fail");
 

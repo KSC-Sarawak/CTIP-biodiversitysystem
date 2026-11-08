@@ -15,6 +15,8 @@
 //   observation  POST /sync                 several records per request
 //   photos       POST /observations/:id/photos, one photo at a time
 //   submit       POST /observations/:id/submit (edits stop after photos)
+//   comment      POST /observations/:id/comments, only for an edit kept with
+//                "Keep this phone's version" (CTIP-67)
 //
 // No React Native imports: this runs under plain Node in the tests.
 import { MINE_COMMENT } from "./conflicts.js";
@@ -28,15 +30,20 @@ const SPECIMEN_FIELDS = ["proposed_species_name", "lat", "lng", "gps_accuracy_m"
 const OBSERVATION_FIELDS = ["observed_at", "height_cm", "morphology", "notes", "lat", "lng", "gps_accuracy_m"];
 
 const PICK_TAG = ["TAG_IN_USE", "TAG_NOT_FOUND", "TAG_RESERVED", "TAG_RETIRED"];
-const PHOTO_CODES = ["FILE_TOO_LARGE", "UNSUPPORTED_FILE_TYPE", "UNREADABLE_PHOTO"];
-// Officers only decide records that were sent for review, so a server copy in
+const PHOTO_CODES = ["FILE_TOO_LARGE", "UNSUPPORTED_FILE_TYPE", "UNREADABLE_PHOTO"];// Officers only decide records that were sent for review, so a server copy in
 // one of these states proves our submit landed.
 const SUBMITTED = ["synced", "returned", "approved", "rejected"];
+
+// 403 answers about the person's account, not about the record: a session that
+// has not finished two-step sign-in, or an account an admin switched off
+// (services/api/src/auth/middleware.js). Every record would get the same answer.
+const ACCOUNT_CODES = ["MFA_REQUIRED", "ACCOUNT_NOT_ACTIVE"];
 
 /**
  * What a failed call means for the record:
  *   'retry'      no connection, timeout, 5xx or 429: keep it pending, try later
- *   'signed_out' 401: stop, keep every record pending until the person signs in
+ *   'signed_out' 401, or a 403 about the account: stop, keep every record
+ *                pending until the person signs in properly
  *   'fail'       anything else: the API refused this record; move on to the next
  * Only some retries stop the whole run: see stopsRun.
  */
@@ -44,6 +51,7 @@ export function classify(res) {
   // apiFetch marks a failed connection or timeout with offline: true (status 0).
   if (res.offline) return "retry";
   if (res.status === 401) return "signed_out";
+  if (res.status === 403 && ACCOUNT_CODES.includes(res.code)) return "signed_out";
   if (res.status >= 500 || res.status === 429) return "retry";
   return "fail";
 }
@@ -182,7 +190,7 @@ export async function saveFirst({ outbox, record, photos = [], syncNow, waitMs =
  */
 export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
   if (typeof currentUserId !== "function") throw new Error("createSyncEngine needs currentUserId()");
-  let running = null; // { userId, promise } of the run going now (or queued next)
+  let running = null; // { userId, started, promise } of the newest run (going now, or booked next)
   let runUser = null; // whose records the current run sends
 
   // Every api call goes out with whatever token is current. If someone else has
@@ -308,15 +316,23 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     return null;
   }
 
-  // The botanist chose "Keep this phone's version" for this edit and the server
-  // has now accepted it: say so on the record. Written only now, so a choice
-  // made with no connection never leaves a comment for an edit that was not
-  // sent. A failed comment is only logged: the edit has landed, and the record
-  // must leave the outbox, or the edit would be sent again.
+  // Step "comment": the botanist chose "Keep this phone's version" for this edit
+  // and the server has accepted it, so say so on the record. Written only now,
+  // so a choice made with no connection never leaves a comment for an edit that
+  // was not sent. The comment is the officer's only trace of the clash, so when
+  // the connection fails the record stays pending at this step: the next run
+  // posts the comment and never sends the edit again. (If the answer was lost
+  // after the server saved it, the comment appears twice, which is harmless.)
   async function noteKeptMine(record) {
-    if (record.resolution !== "mine") return;
     const res = await call("addComment", record.id, MINE_COMMENT);
-    if (!res.ok) console.warn("sync: the comment for a kept edit could not be added:", res.message || res.code);
+    if (res.ok) return { done: true };
+    if (classify(res) === "fail") {
+      // The API refused the comment itself (say the record is gone). Posting it
+      // again cannot help, and the edit has landed, so the record is done.
+      console.warn("sync: the comment for a kept edit was refused:", res.message || res.code);
+      return { done: true };
+    }
+    return { stop: await setBack(record, res) };
   }
 
   // After a submit we could not confirm: has it landed? Answers { done: true },
@@ -329,8 +345,11 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     return { submit: true };
   }
 
-  // Steps 3 and 4: the photos still missing, then the submit.
+  // Steps 3 and 4: the photos still missing, then the submit (or, for an edit
+  // kept with "Keep this phone's version", the comment).
   async function finish(record) {
+    if (stepOf(record) === "comment") return noteKeptMine(record);
+
     if (stepOf(record) === "submit") {
       // A resume: an earlier run may have sent the submit and lost the answer.
       // Look first, because submitting again could undo an officer's decision
@@ -349,8 +368,11 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
       }
       // An edit changes a record the server already holds; it does not send it for review.
       if (record.kind === "edit") {
-        await noteKeptMine(record);
-        return { done: true };
+        if (record.resolution !== "mine") return { done: true };
+        // Saved before the comment is posted, so a failed comment never sends the edit again.
+        record = await save(record, { step: "comment" });
+        if (!record) return { gone: true }; // deleted from the phone meanwhile
+        return noteKeptMine(record);
       }
       record = await save(record, { step: "submit" });
       if (!record) return { gone: true }; // deleted from the phone meanwhile
@@ -413,7 +435,7 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     // Steps 3 and 4, one record at a time, oldest first.
     for (const id of ids) {
       const record = await current(id);
-      if (!record || !["photos", "submit"].includes(stepOf(record))) continue;
+      if (!record || !["photos", "submit", "comment"].includes(stepOf(record))) continue;
       const marked = await sending(record);
       if (!marked) continue;
       const out = await finish(marked);
@@ -447,19 +469,31 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
   }
 
   return {
-    // One run at a time. A second call for the same person while one is going
-    // (or waiting to start) gets that same promise. A call for someone else
-    // waits for it to end, then runs for them, so each caller gets their own summary.
+    // One run at a time.
+    //   - A second call for the same person while their run waits to start gets
+    //     that same promise: the run has not listed its queue yet, so it will
+    //     see every record saved so far.
+    //   - A call for the same person while their run is going (say a record was
+    //     just saved, while the last one's photos upload) books one follow-up
+    //     run for when it ends: the going run listed its queue before the new
+    //     record existed, so it would not send it. Further calls before the
+    //     follow-up starts share it, so there is only ever one follow-up.
+    //   - A call for someone else waits for the run to end, then runs for
+    //     them, so each caller gets their own summary.
     run(userId) {
-      if (running?.userId === userId) return running.promise;
+      if (running?.userId === userId && !running.started) return running.promise;
       const before = running ? running.promise.catch(() => {}) : Promise.resolve();
-      const promise = before
-        .then(() => runOnce(userId))
+      const entry = { userId, started: false, promise: null };
+      entry.promise = before
+        .then(() => {
+          entry.started = true;
+          return runOnce(userId);
+        })
         .finally(() => {
-          if (running?.promise === promise) running = null;
+          if (running === entry) running = null;
         });
-      running = { userId, promise };
-      return promise;
+      running = entry;
+      return entry.promise;
     },
   };
 }
