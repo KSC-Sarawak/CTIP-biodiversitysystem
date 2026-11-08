@@ -42,6 +42,7 @@ import {
   findSpecimenByQrApi,
   createSpecimenApi,
   updateSpecimenApi,
+  updateObservationApi,
   createObservationApi,
   submitObservationApi,
   addCommentApi,
@@ -66,7 +67,7 @@ import {
   markReadApi,
   markAllReadApi,
 } from "./api.js";
-import { newPlantRecord, revisitRecord } from "./offline/records.js";
+import { newPlantRecord, revisitRecord, editRecord } from "./offline/records.js";
 import { tagCacheRows } from "./offline/tags.js";
 import { useOutboxSync } from "./offline/useOutboxSync.js";
 import { useReservedTags } from "./offline/useReservedTags.js";
@@ -624,7 +625,7 @@ function collectionMatches(a = [], b = []) {
 
   const {
     outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
-    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
+    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, resolveConflict,
   } = useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify });
 
   // The 3 tags kept for a botanist, so a new tag can be made with no signal (CTIP-116).
@@ -1031,6 +1032,55 @@ function collectionMatches(a = [], b = []) {
     }
     notify("Record sent for review");
     return { ok: true };
+  };
+
+  // Change a draft or queued record of the botanist's own: "Save changes" in My
+  // records. `changes` may hold height_cm, morphology and notes. Answers
+  // { ok, queued?, message? }.
+  //   online         PATCH /observations/:id with the version the screen shows. If the
+  //                  record changed meanwhile (409 VERSION_CONFLICT) the message says so
+  //                  and nothing is saved.
+  //   no connection  (or the PATCH could not reach the API) on the phone: the edit is
+  //                  saved in the outbox and sent later. If the record changed on another
+  //                  device by then, the botanist chooses which version to keep (CTIP-67).
+  const editUnsent = async (obs, changes) => {
+    const userId = currentUserId();
+    if (!userId) return { ok: false, message: "Sign in again to save changes." };
+    const record = editRecord({
+      userId,
+      obs,
+      changes,
+      qr_id: (db.plants || []).find((p) => p.id === obs.specimen_id)?.qr_id ?? null,
+    });
+    const body = record.observation;
+    if (!Object.keys(body).length) return { ok: false, message: "Nothing was changed." };
+    if (body.height_cm != null && !(body.height_cm >= 0)) return { ok: false, message: "Height must be a number of 0 or more" };
+
+    // Changes already waiting on this phone for this record: one edit at a time.
+    if (outboxItems.some((r) => r.id === obs.id)) {
+      return { ok: false, message: "This record already has changes waiting on this phone." };
+    }
+
+    const saveOnThePhone = async () => {
+      const saved = await saveOnPhone(record, [], "Changes saved");
+      if (!saved.ok) return { ok: false, message: saved.code === "OUTBOX_UNAVAILABLE" ? API_DOWN : saved.message };
+      if (saved.queued) notify("Saved on this phone. It sends when you're back online.");
+      await loadFromApi(true);
+      return { ok: true, queued: saved.queued };
+    };
+
+    if (outbox && apiStatus === "offline") return saveOnThePhone();
+    const res = await callApi(updateObservationApi, obs.id, { ...body, version: obs.version });
+    if (res.ok) {
+      notify("Changes saved");
+      await loadFromApi(true);
+      return { ok: true, queued: false };
+    }
+    if (res.offline && outbox) return saveOnThePhone();
+    await loadFromApi(true); // a record that changed meanwhile shows its newest version
+    const message = res.code === "WRONG_STATUS" ? "This record can no longer be changed. Refresh and check its status." : res.message;
+    notify(`Changes not saved: ${message}`);
+    return { ok: false, message };
   };
 
   // Send a returned record again, with the botanist's fixes and an optional
@@ -1514,7 +1564,8 @@ function collectionMatches(a = [], b = []) {
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,
     keptTags, topUpReservedTags, releaseTag, takeReservedTag,
-    recordPhotos, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
+    recordPhotos, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, resolveConflict,
+    editUnsent,
     loadFromApi,
     pollFromBackend: () => loadFromApi(true),
     nextPollDelay,

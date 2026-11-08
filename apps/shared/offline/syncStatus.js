@@ -199,5 +199,31 @@ export function resetsOnManualSync(record) {
   return record?.state === "failed" && record.error?.action === "wait_review";
 }
 
+/* ---------- two devices edited one record (CTIP-67) ---------- */
+
+const CONFLICT_FIELDS = [
+  { field: "height_cm", label: "Height", show: (v) => (v == null || v === "" ? "-" : `${v} cm`) },
+  { field: "morphology", label: "Appearance", show: (v) => v || "-" },
+  { field: "notes", label: "Notes", show: (v) => v || "-" },
+];
+
+// "" and null both mean "empty", so they never count as a difference.
+const sameValue = (a, b) => (a ?? "") === (b ?? "");
+
+/**
+ * The table in the conflict view (UI E): [{ field, label, mine, theirs }] for the
+ * fields where this phone's edit and the server's copy differ, in the order
+ * Height, Appearance, Notes. Only fields the phone changed can differ: an edit
+ * record holds just those. `mine` and `theirs` are the words to show.
+ */
+export function conflictRows(record) {
+  const mine = record?.observation || {};
+  const theirs = record?.server;
+  if (!theirs) return [];
+  return CONFLICT_FIELDS
+    .filter(({ field }) => field in mine && !sameValue(mine[field], theirs[field]))
+    .map(({ field, label, show }) => ({ field, label, mine: show(mine[field]), theirs: show(theirs[field]) }));
+}
+
 /** The sign-out alert's title (UI G). */
 export const unsentTitle = (n) => `${records(n)} not sent yet`;

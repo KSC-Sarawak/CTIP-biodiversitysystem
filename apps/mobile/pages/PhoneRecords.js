@@ -9,7 +9,7 @@ import { View, Text, Alert } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { STATUS_TEXT } from '../../shared/tokens.js';
-import { outboxRowView, failureNotice } from '../../shared/offline/syncStatus.js';
+import { outboxRowView, failureNotice, conflictRows } from '../../shared/offline/syncStatus.js';
 import { useTheme, font } from '../components/Theme.js';
 import SyncBar from '../components/SyncBar.js';
 import {
@@ -80,6 +80,30 @@ export function OnThisPhone({ nav, q = '', top = false }) {
   );
 }
 
+// The two copies of a record that two devices edited, side by side (UI E). Only
+// the fields that differ are listed (conflictRows).
+function ConflictTable({ rows }) {
+  const { c } = useTheme();
+  const cell = { flex: 1, minWidth: 0 };
+  const head = { fontSize: 13, color: c.ink2, fontFamily: font('text', 700) };
+  return (
+    <View accessibilityLabel="The two versions of this record">
+      <View style={{ flexDirection: 'row', gap: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: c.line }}>
+        <Text style={[cell, head]}>Field</Text>
+        <Text style={[cell, head]}>This phone</Text>
+        <Text style={[cell, head]}>Other device</Text>
+      </View>
+      {rows.map((r, i) => (
+        <View key={r.field} style={{ flexDirection: 'row', gap: 12, paddingVertical: 12, borderBottomWidth: i === rows.length - 1 ? 0 : 1, borderBottomColor: c.line }}>
+          <Text style={[cell, { fontFamily: font('text', 700), fontSize: 15, lineHeight: 22, color: c.ink2 }]}>{r.label}</Text>
+          <View style={cell}><Txt v="body" style={{ fontSize: 15, lineHeight: 22 }}>{r.mine}</Txt></View>
+          <View style={cell}><Txt v="body" style={{ fontSize: 15, lineHeight: 22 }}>{r.theirs}</Txt></View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // Where the plant was seen: the visit's own fix, else the new plant's.
 function placeOf(record) {
   const o = record.observation || {};
@@ -89,7 +113,7 @@ function placeOf(record) {
 
 /** One record on this phone (route "phoneRecord", params { id }). */
 export function PhoneRecordDetail({ nav, params = {} }) {
-  const { db, outboxItems = [], cachedTags = [], recordPhotos, retryRecord, discardRecord, removeRecordPhoto } = useStore();
+  const { db, outboxItems = [], cachedTags = [], recordPhotos, retryRecord, discardRecord, removeRecordPhoto, resolveConflict } = useStore();
   const { c } = useTheme();
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -113,6 +137,8 @@ export function PhoneRecordDetail({ nav, params = {} }) {
 
   const view = outboxRowView(record, { db, outboxItems, cached: cachedTags });
   const notice = failureNotice(record, photos);
+  const conflict = record.state === 'conflict';
+  const isEdit = record.kind === 'edit';
   const o = record.observation || {};
   const place = placeOf(record);
 
@@ -130,6 +156,16 @@ export function PhoneRecordDetail({ nav, params = {} }) {
     pick_tag: () => nav.go('scan', { pickFor: record.id }),
     remove_photo: () => act(() => removeRecordPhoto(record.id, notice.photoId)),
     retry: () => act(() => retryRecord(record.id)),
+  };
+
+  // The botanist's choice for a record two devices edited (CTIP-67). The store
+  // shows the toast, for success and for failure, so there is no alert here.
+  const choose = async (choice) => {
+    if (busy) return;
+    setBusy(true);
+    const res = await resolveConflict(record.id, choice);
+    setBusy(false);
+    if (res?.ok && choice === 'theirs') nav.back(); // the phone's copy is gone
   };
 
   const askDelete = () => {
@@ -162,11 +198,25 @@ export function PhoneRecordDetail({ nav, params = {} }) {
         <View style={{ flex: 1, gap: 3 }}>
           <Txt v="title2" style={{ fontSize: 24, lineHeight: 30 }}>{view.name}</Txt>
           <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 600) }}>
-            {view.revisit ? 'Revisit' : 'New plant'} · saved on this phone
+            {isEdit ? 'Changes to a record' : view.revisit ? 'Revisit' : 'New plant'} · saved on this phone
           </Txt>
         </View>
         <DotLabel status={view.status} />
       </View>
+
+      {conflict ? (
+        <View style={{ gap: 12 }}>
+          <Notice
+            tone="warning"
+            icon="info"
+            body="This record was changed on another device before this phone sent its changes. Choose which version to keep."
+          />
+          {record.error?.message ? <Txt v="small" color={c.ink2}>{record.error.message}</Txt> : null}
+          {conflictRows(record).length ? <ConflictTable rows={conflictRows(record)} /> : null}
+          <Button label="Keep this phone's version" onPress={() => choose('mine')} disabled={busy} />
+          <Button label="Keep the other version" kind="secondary" onPress={() => choose('theirs')} disabled={busy} />
+        </View>
+      ) : null}
 
       {notice ? (
         <View style={{ gap: 12 }}>
@@ -177,7 +227,7 @@ export function PhoneRecordDetail({ nav, params = {} }) {
         </View>
       ) : null}
 
-      <Section title="Photos" right={<Txt v="caption" color={c.ink3}>{photos.length} of 6</Txt>} gap={12}>
+      {isEdit ? null : <Section title="Photos" right={<Txt v="caption" color={c.ink3}>{photos.length} of 6</Txt>} gap={12}>
         {photos.length ? (
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
             {photos.map((p, i) => <Thumb key={p.id || i} uri={photoUri(p)} size={76} />)}
@@ -185,9 +235,17 @@ export function PhoneRecordDetail({ nav, params = {} }) {
         ) : (
           <Txt v="small" color={c.ink2}>No photos.</Txt>
         )}
-      </Section>
+      </Section>}
 
-      <Section title="Record" gap={0}>
+      <Section title={isEdit ? 'Changed on this phone' : 'Record'} gap={0}>
+        {isEdit ? (
+          <KV rows={[
+            ['Tag', view.qr_id ? <Mono key="t" size={14}>{view.qr_id}</Mono> : '-'],
+            ...[['height_cm', 'Height'], ['morphology', 'Appearance'], ['notes', 'Notes']]
+              .filter(([field]) => field in o)
+              .map(([field, label]) => [label, field === 'height_cm' ? (o.height_cm != null ? `${o.height_cm} cm` : '-') : o[field] || '-']),
+          ]} />
+        ) : (
         <KV rows={[
           ['Tag', view.qr_id ? <Mono key="t" size={14}>{view.qr_id}</Mono> : '-'],
           ['Seen', dateTime(o.observed_at)],
@@ -201,6 +259,7 @@ export function PhoneRecordDetail({ nav, params = {} }) {
             </Text>
           )],
         ]} />
+        )}
       </Section>
 
       <Button label="Delete from this phone" kind="dangerText" height={48} size={15} onPress={askDelete} disabled={busy} />

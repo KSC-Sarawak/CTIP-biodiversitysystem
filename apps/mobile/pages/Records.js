@@ -203,12 +203,14 @@ const lastReview = (db, obsId) => db.reviews.filter((r) => r.observation_id === 
 
 export function RecordDetail({ nav, params = {} }) {
   usePolling(5000);
-  const { db, me, resubmit, syncObservation } = useStore();
+  const { db, me, resubmit, syncObservation, editUnsent } = useStore();
   const { c } = useTheme();
   const [message, setMessage] = useState('');
   const o = db.observations.find((x) => x.id === params.id);
   // Editable copy while the record is returned; saved only when it is sent again.
   const [fix, setFix] = useState(() => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' }));
+  // Editable copy of a draft or queued record (CTIP-67); saved only with "Save changes".
+  const [edit, setEdit] = useState(() => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' }));
   const [sending, setSending] = useState(false);
   const plant = o ? plantView(db, db.plants.find((p) => p.id === o.specimen_id)) : null;
   if (!o || !plant) {
@@ -227,6 +229,15 @@ export function RecordDetail({ nav, params = {} }) {
     if (r.ok) nav.back(); // on failure the edits stay on screen
   };
   const unsent = o.status === 'draft' || o.status === 'queued';
+  // Only the record's own botanist edits it, and only while it is not sent for review.
+  const canEdit = unsent && o.recorded_by === me?.id;
+  const saveChanges = async () => {
+    if (sending) return;
+    setSending(true);
+    const r = await editUnsent(o, edit); // shows its own success or error message
+    setSending(false);
+    if (r.ok && r.queued) nav.back(); // saved on the phone: it continues under "On this phone"
+  };
   const sendDraft = async () => {
     if (sending) return;
     setSending(true);
@@ -291,6 +302,15 @@ export function RecordDetail({ nav, params = {} }) {
           <Area label="Appearance" value={fix.morphology} onChangeText={(t) => setFix({ ...fix, morphology: t })} />
           <Field label="Height (cm)" value={fix.height_cm} onChangeText={(t) => setFix({ ...fix, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
           <Area label="Field notes" optional value={fix.notes} onChangeText={(t) => setFix({ ...fix, notes: t })} rows={2} />
+        </Section>
+      ) : null}
+
+      {canEdit ? (
+        <Section title="Edit record" gap={12}>
+          <Field label="Height (cm)" optional value={edit.height_cm} onChangeText={(t) => setEdit({ ...edit, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
+          <Area label="Appearance" optional value={edit.morphology} onChangeText={(t) => setEdit({ ...edit, morphology: t })} />
+          <Area label="Notes" optional value={edit.notes} onChangeText={(t) => setEdit({ ...edit, notes: t })} rows={2} />
+          <Button label="Save changes" kind="secondary" onPress={saveChanges} disabled={sending} />
         </Section>
       ) : null}
 

@@ -18,6 +18,7 @@ import {
   unsentTitle,
   outboxRowView,
   recordsToDelete,
+  conflictRows,
 } from "../offline/syncStatus.js";
 
 const rec = (overrides = {}) => ({
@@ -157,4 +158,28 @@ test("a row on this phone has the plant's name, tag, status and a screen-reader 
   assert.equal(outboxRowView(revisitOfPhonePlant, { db, outboxItems: items }).status, "sync_failed");
   assert.equal(outboxRowView(revisitOfServerPlant, { db, outboxItems: items }).name, "Rajah pitcher");
   assert.equal(outboxRowView(rec({ kind: "revisit", specimen_id: "x", qr_id: "NIAH-0100" }), { db, outboxItems: [], cached: [{ qr_id: "NIAH-0100", name: "Cached name" }] }).name, "Cached name");
+});
+
+test("conflictRows lists only fields that differ", () => {
+  const record = rec({
+    kind: "edit",
+    state: "conflict",
+    observation: { height_cm: 40, notes: "wet" },
+    server: { version: 3, height_cm: 30, morphology: "green", notes: "wet" },
+  });
+  assert.deepEqual(conflictRows(record), [
+    { field: "height_cm", label: "Height", mine: "40 cm", theirs: "30 cm" },
+  ]);
+
+  const all = rec({
+    observation: { height_cm: null, morphology: "red", notes: "dry" },
+    server: { height_cm: 30, morphology: "green", notes: null },
+  });
+  assert.deepEqual(conflictRows(all).map((r) => [r.field, r.label, r.mine, r.theirs]), [
+    ["height_cm", "Height", "-", "30 cm"],
+    ["morphology", "Appearance", "red", "green"],
+    ["notes", "Notes", "dry", "-"],
+  ]);
+  assert.deepEqual(conflictRows(rec({ observation: {}, server: { height_cm: 30 } })), [], "a field the phone did not change is not listed");
+  assert.deepEqual(conflictRows(rec({ observation: { height_cm: 1 }, server: null })), []);
 });

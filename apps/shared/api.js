@@ -560,6 +560,9 @@ export const createSpecimenApi = (specimen, { token } = {}) => send("POST", "/sp
 export const updateSpecimenApi = (id, changes, { token } = {}) => send("PATCH", `/specimens/${enc(id)}`, changes, token);
 export const createObservationApi = (obs, { token } = {}) => send("POST", "/observations", obs, token);
 export const fetchObservationApi = (id, { token } = {}) => apiFetch(`/observations/${enc(id)}`, { token });
+// Edit a draft or queued record: { height_cm?, morphology?, notes?, version }. `changes` must hold
+// the version the caller last saw; a record that changed since answers 409 VERSION_CONFLICT.
+export const updateObservationApi = (id, changes, { token } = {}) => send("PATCH", `/observations/${enc(id)}`, changes, token);
 // Records saved on the phone (CTIP-16): { device_id, observations: [...] }, up to 20 at a time.
 export const syncApi = (body, { token } = {}) => send("POST", "/sync", body, token);
 // Draft/queued: sent as it is. Returned: with fixes (height_cm, morphology, notes) and an optional comment.

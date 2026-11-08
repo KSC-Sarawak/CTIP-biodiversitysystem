@@ -17,6 +17,7 @@
 //   submit       POST /observations/:id/submit (edits stop after photos)
 //
 // No React Native imports: this runs under plain Node in the tests.
+import { MINE_COMMENT } from "./conflicts.js";
 
 const MAX_ITEMS = 20; // POST /sync takes at most 20 observations
 const MAX_CHARS = 80000; // well under express.json()'s 100 kB limit
@@ -307,6 +308,17 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     return null;
   }
 
+  // The botanist chose "Keep this phone's version" for this edit and the server
+  // has now accepted it: say so on the record. Written only now, so a choice
+  // made with no connection never leaves a comment for an edit that was not
+  // sent. A failed comment is only logged: the edit has landed, and the record
+  // must leave the outbox, or the edit would be sent again.
+  async function noteKeptMine(record) {
+    if (record.resolution !== "mine") return;
+    const res = await call("addComment", record.id, MINE_COMMENT);
+    if (!res.ok) console.warn("sync: the comment for a kept edit could not be added:", res.message || res.code);
+  }
+
   // After a submit we could not confirm: has it landed? Answers { done: true },
   // { submit: true } (the server still holds it unsent), or { failed: res }
   // when the server copy could not be read.
@@ -336,7 +348,10 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
         await outbox.markPhotoUploaded(photo.id);
       }
       // An edit changes a record the server already holds; it does not send it for review.
-      if (record.kind === "edit") return { done: true };
+      if (record.kind === "edit") {
+        await noteKeptMine(record);
+        return { done: true };
+      }
       record = await save(record, { step: "submit" });
       if (!record) return { gone: true }; // deleted from the phone meanwhile
     }

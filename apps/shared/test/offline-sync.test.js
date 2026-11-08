@@ -8,6 +8,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createMemoryOutbox } from "../offline/memoryOutbox.js";
 import { createSyncEngine, classify, actionFor, packBatches } from "../offline/syncEngine.js";
+import { editRecord } from "../offline/records.js";
+import { resolveConflict, MINE_COMMENT, THEIRS_COMMENT } from "../offline/conflicts.js";
 import { createFakeServer } from "./helpers/fakeServer.js";
 
 const U = "user-1";
@@ -631,6 +633,140 @@ test("an edit that is accepted leaves the outbox without a submit", async () => 
   assert.equal(server.state.observations[0].height_cm, 40);
   assert.equal(server.state.observations[0].status, "draft");
   assert.equal(callsTo(server, "submit").length, 0);
+});
+
+// ---- Choosing a version when two phones edited one record (CTIP-67) ----
+
+// A draft the server holds at version 3, edited on this phone from version 2:
+// the engine runs once and the record lands in `conflict`.
+async function conflictedEdit() {
+  const ctx = setup();
+  const { outbox, server, engine } = ctx;
+  const obsId = randomUUID();
+  const specimenId = randomUUID();
+  server.state.specimens.push({ id: specimenId, qr_id: "DS-9" });
+  server.state.observations.push({
+    id: obsId, specimen_id: specimenId, status: "draft", recorded_by: U, version: 3, height_cm: 30, morphology: "green", is_deleted: false,
+  });
+  await outbox.add(editRecord({
+    userId: U,
+    obs: { id: obsId, specimen_id: specimenId, version: 2, height_cm: 30, morphology: "green", notes: null },
+    changes: { height_cm: "40", morphology: "green", notes: "" },
+  }), []);
+  await engine.run(U);
+  assert.equal((await outbox.get(obsId)).state, "conflict");
+  return { ...ctx, obsId };
+}
+
+test("editRecord carries base_version and only the changed editable fields", () => {
+  const obs = { id: "obs-1", specimen_id: "sp-1", version: 4, height_cm: 30, morphology: "green", notes: "wet" };
+  const rec = editRecord({ userId: U, obs, changes: { height_cm: "40", morphology: "green", notes: " wet " } });
+  assert.equal(rec.id, "obs-1");
+  assert.equal(rec.kind, "edit");
+  assert.equal(rec.step, "observation");
+  assert.equal(rec.specimen_id, "sp-1");
+  assert.equal(rec.base_version, 4);
+  assert.equal(rec.state, "pending");
+  assert.equal(rec.user_id, U);
+  assert.deepEqual(rec.observation, { height_cm: 40 }, "morphology and notes did not change");
+
+  const cleared = editRecord({ userId: U, obs, changes: { height_cm: "", notes: "" } });
+  assert.deepEqual(cleared.observation, { height_cm: null, notes: null }, "a cleared field is sent as null");
+});
+
+test("keep mine resends with the server version and adds a comment", async () => {
+  const { outbox, server, engine, obsId } = await conflictedEdit();
+
+  const res = await resolveConflict({ outbox, addComment: server.api.addComment, id: obsId, choice: "mine" });
+  assert.equal(res.ok, true);
+  const waiting = await outbox.get(obsId);
+  assert.equal(waiting.state, "pending");
+  assert.equal(waiting.base_version, 3);
+  assert.equal(waiting.resolution, "mine");
+  assert.equal(waiting.server, null);
+  assert.equal(server.state.comments.length, 0, "the comment waits for the edit to land");
+
+  const summary = await engine.run(U);
+  assert.equal(summary.sent, 1);
+  assert.equal(server.state.observations[0].height_cm, 40);
+  assert.deepEqual(server.state.comments.map((c) => c.body), [MINE_COMMENT]);
+  assert.equal(server.state.comments[0].observation_id, obsId);
+  assert.equal(await outbox.get(obsId), null);
+});
+
+test("keep mine while offline keeps the choice and sends the comment after the edit lands", async () => {
+  const { outbox, server, engine, obsId } = await conflictedEdit();
+  await resolveConflict({ outbox, addComment: server.api.addComment, id: obsId, choice: "mine" });
+
+  server.dropNext(1); // the edit's own call is cut off
+  const first = await engine.run(U);
+  assert.equal(first.stoppedBy, "offline");
+  const waiting = await outbox.get(obsId);
+  assert.equal(waiting.state, "pending");
+  assert.equal(waiting.resolution, "mine");
+  assert.equal(server.state.comments.length, 0);
+
+  const second = await engine.run(U);
+  assert.equal(second.sent, 1);
+  assert.equal(server.state.observations[0].height_cm, 40);
+  assert.deepEqual(server.state.comments.map((c) => c.body), [MINE_COMMENT]);
+  const names = server.state.calls.map((c) => c.name);
+  assert.ok(names.lastIndexOf("addComment") > names.lastIndexOf("sync"), "the comment follows the edit");
+});
+
+test("keep mine still counts the edit done when its comment cannot be sent", async () => {
+  const { outbox, server, engine, obsId } = await conflictedEdit();
+  await resolveConflict({ outbox, addComment: server.api.addComment, id: obsId, choice: "mine" });
+  server.api.addComment = async () => ({ ok: false, offline: true, status: 0, code: "NETWORK_ERROR", message: "Network request failed" });
+
+  const summary = await engine.run(U);
+  assert.equal(summary.sent, 1);
+  assert.equal(server.state.observations[0].height_cm, 40);
+  assert.equal(await outbox.get(obsId), null, "the edit landed, so the record is gone");
+});
+
+test("keep theirs removes the phone's edit and adds a comment", async () => {
+  const { outbox, server, engine, obsId } = await conflictedEdit();
+
+  const res = await resolveConflict({ outbox, addComment: server.api.addComment, id: obsId, choice: "theirs" });
+  assert.equal(res.ok, true);
+  assert.equal(await outbox.get(obsId), null);
+  assert.deepEqual(server.state.comments.map((c) => c.body), [THEIRS_COMMENT]);
+  assert.equal(server.state.observations[0].height_cm, 30, "the server copy is untouched");
+  const calls = server.state.calls.length;
+  await engine.run(U);
+  assert.equal(server.state.calls.length, calls, "nothing is sent");
+});
+
+test("keep theirs keeps the conflict when the comment can't be sent", async () => {
+  const { outbox, server, obsId } = await conflictedEdit();
+  const addComment = async () => ({ ok: false, offline: true, status: 0, code: "NETWORK_ERROR", message: "Can't reach the server." });
+
+  const res = await resolveConflict({ outbox, addComment, id: obsId, choice: "theirs" });
+  assert.equal(res.ok, false);
+  assert.equal(res.message, "Can't reach the server.");
+  assert.equal((await outbox.get(obsId)).state, "conflict");
+  assert.equal(server.state.comments.length, 0);
+});
+
+test("a conflict is never resolved without the botanist's choice", async () => {
+  const { outbox, server, engine, obsId } = await conflictedEdit();
+  const calls = server.state.calls.length;
+  await engine.run(U);
+  await engine.run(U);
+  assert.equal(server.state.calls.length, calls);
+  assert.equal((await outbox.get(obsId)).state, "conflict");
+  assert.equal(server.state.comments.length, 0);
+});
+
+test("resolveConflict refuses a record that is not in conflict", async () => {
+  const { outbox, server } = setup();
+  const rec = plantRecord({ kind: "edit", base_version: 1, step: "observation" });
+  await outbox.add(rec, []);
+  const res = await resolveConflict({ outbox, addComment: server.api.addComment, id: rec.id, choice: "mine" });
+  assert.equal(res.ok, false);
+  assert.equal((await outbox.get(rec.id)).state, "pending");
+  assert.equal((await resolveConflict({ outbox, addComment: server.api.addComment, id: "gone", choice: "theirs" })).ok, false);
 });
 
 test("classify and actionFor follow the error rules", () => {

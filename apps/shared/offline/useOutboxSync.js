@@ -23,6 +23,7 @@ import { nowIso } from "../utils.js";
 import { createSyncEngine, saveFirst, waitAtMost } from "./syncEngine.js";
 import { outboxPhotos } from "./records.js";
 import { recordsToDelete, resetsOnManualSync, tagChangeFor } from "./syncStatus.js";
+import { resolveConflict as applyChoice } from "./conflicts.js";
 
 // How long a save on the phone waits for its first send before it shows
 // "Saved on this phone" (docs/architecture/offline-sync.md, section 2).
@@ -52,7 +53,8 @@ const engineApi = (callRef) => {
  *   userId         the signed-in person (state), so their list loads when it changes
  *   currentUserId  () => whose records may be sent now, or null (see StoreProvider)
  * Answers { outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
- *           retryRecord, discardRecord, changeRecordTag, removeRecordPhoto }.
+ *           retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
+ *           resolveConflict }.
  */
 export function useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify }) {
   const [outboxItems, setOutboxItems] = useState([]); // the signed-in person's unsent records
@@ -254,8 +256,30 @@ export function useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi
     return { ok: true };
   }), [change, outbox, syncSoon]);
 
+  // Two devices edited this record: the botanist's choice (conflicts.js).
+  // 'mine' sends the edit again, based on the server's version; the engine adds
+  // the comment once the server accepts it. 'theirs' adds the comment and drops
+  // the phone's copy, but only if the comment was saved. Answers { ok, message? }
+  // and shows its own toast.
+  const resolveConflict = useCallback((id, choice) => change("resolve conflict", async () => {
+    const addComment = (observationId, body) => callApiRef.current(addCommentApi, observationId, body);
+    const res = await applyChoice({ outbox, addComment, id, choice });
+    if (!res.ok) {
+      notify(choice === "theirs" ? `Couldn't keep the other version: ${res.message}` : res.message);
+      return res;
+    }
+    if (choice === "mine") {
+      notify("Kept this phone's version");
+      syncSoon();
+    } else {
+      notify("Kept the other device's version");
+      loadFromApi(true); // the server's copy and the new comment come back into My records
+    }
+    return res;
+  }), [change, outbox, notify, syncSoon, loadFromApi]);
+
   return {
     outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
-    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
+    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, resolveConflict,
   };
 }

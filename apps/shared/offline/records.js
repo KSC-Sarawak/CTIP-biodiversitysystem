@@ -100,6 +100,31 @@ export function revisitRecord({ userId, qr_id, specimen_id = null, specimen_ref 
 }
 
 /**
+ * An edit of an observation the server already holds as a draft or queued
+ * record (CTIP-67). Its id is the observation's id. `base_version` is the
+ * version the phone last saw: the server refuses the edit if it moved on, and
+ * the botanist then chooses (conflicts.js). Only the fields that really changed
+ * are kept, because the server answers a conflict only for what we try to change.
+ * `qr_id` is optional and only for showing the tag in the list.
+ */
+export function editRecord({ userId, obs, changes, qr_id = null }) {
+  const at = nowIso();
+  const cleaners = { height_cm: cleanHeight, morphology: cleanText, notes: cleanText };
+  const observation = {};
+  for (const [field, clean] of Object.entries(cleaners)) {
+    if (!(field in changes)) continue;
+    // Both sides go through the same cleaning, so "" and null count as the same.
+    const value = clean(changes[field]);
+    if (value !== clean(obs[field])) observation[field] = value;
+  }
+  return {
+    ...base({ userId, qr_id, kind: "edit", step: "observation", specimen_id: obs.specimen_id, specimen_ref: null, specimen: null, observation, at }),
+    id: obs.id,
+    base_version: obs.version,
+  };
+}
+
+/**
  * Photos as the outbox stores them. A photo keeps the id the camera screen gave
  * it (so a draft restored and saved again keeps the same ids); one without an
  * id gets one now. Only the bytes and the botanist's notes are kept, not the
