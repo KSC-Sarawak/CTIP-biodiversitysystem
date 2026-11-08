@@ -212,7 +212,8 @@ export function RecordDetail({ nav, params = {} }) {
   const [message, setMessage] = useState('');
   const o = db.observations.find((x) => x.id === params.id);
   // Editable copy while the record is returned; saved only when it is sent again.
-  const [fix, setFix] = useState(() => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' }));
+  // `null` until the record has loaded: "Resubmit for review" waits for it (below).
+  const [fix, setFix] = useState(() => (o ? editForm(o) : null));
   // Editable copy of a draft or queued record (CTIP-67); saved only with "Save changes".
   // `opened` is the record as the form opened on it, kept even when the 5 s poll
   // brings in a newer version: only fields changed against it are saved, with its
@@ -222,13 +223,17 @@ export function RecordDetail({ nav, params = {} }) {
   // The screen can open before the record has loaded (`o` missing at first). The
   // form and its snapshot are then filled together the first time `o` exists,
   // never one without the other: an empty form compared with a loaded record
-  // would send its empty fields and clear the record's values.
+  // would send its empty fields and clear the record's values. The returned-record
+  // form (`fix`) is seeded the same way, once, and never again on the 5 s poll.
   useEffect(() => {
     if (o && !opened) {
       setOpened(editSnapshot(o));
       setEdit(editForm(o));
     }
   }, [o, opened]);
+  useEffect(() => {
+    if (o && !fix) setFix(editForm(o));
+  }, [o, fix]);
   const [sending, setSending] = useState(false);
   const plant = o ? plantView(db, db.plants.find((p) => p.id === o.specimen_id)) : null;
   if (!o || !plant) {
@@ -238,9 +243,12 @@ export function RecordDetail({ nav, params = {} }) {
   const comments = db.comments.filter((x) => x.observation_id === o.id && x.body !== review?.comment).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const photos = plant.photos.filter((p) => p.observation_id === o.id);
   const returned = o.status === 'returned';
+  // What the form shows. `fix` is filled by the effect above right after the record
+  // first loads; this covers that one render so the form never flashes empty.
+  const fixForm = fix || editForm(o);
 
   const send = async () => {
-    if (sending) return;
+    if (sending || !fix) return; // no form yet: its empty fields would clear the record's values
     setSending(true);
     const r = await resubmit(o.id, message.trim(), fix); // shows its own success or error message
     setSending(false);
@@ -278,7 +286,7 @@ export function RecordDetail({ nav, params = {} }) {
       gap={20}
       top={20}
       footer={returned
-        ? <View style={{ flex: 1 }}><Button label={sending ? 'Sending…' : 'Resubmit for review'} onPress={send} disabled={sending} /></View>
+        ? <View style={{ flex: 1 }}><Button label={sending ? 'Sending…' : 'Resubmit for review'} onPress={send} disabled={sending || !fix} /></View>
         : unsent ? <View style={{ flex: 1 }}><Button label={sending ? 'Sending…' : 'Send for review'} onPress={sendDraft} disabled={sending} /></View> : null}
     >
       <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
@@ -325,9 +333,9 @@ export function RecordDetail({ nav, params = {} }) {
 
       {returned ? (
         <Section title="Fix the record" gap={12}>
-          <Area label="Appearance" value={fix.morphology} onChangeText={(t) => setFix({ ...fix, morphology: t })} />
-          <Field label="Height (cm)" value={fix.height_cm} onChangeText={(t) => setFix({ ...fix, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
-          <Area label="Field notes" optional value={fix.notes} onChangeText={(t) => setFix({ ...fix, notes: t })} rows={2} />
+          <Area label="Appearance" value={fixForm.morphology} onChangeText={(t) => setFix({ ...fixForm, morphology: t })} />
+          <Field label="Height (cm)" value={fixForm.height_cm} onChangeText={(t) => setFix({ ...fixForm, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
+          <Area label="Field notes" optional value={fixForm.notes} onChangeText={(t) => setFix({ ...fixForm, notes: t })} rows={2} />
         </Section>
       ) : null}
 
