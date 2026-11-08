@@ -38,18 +38,19 @@ test("migrate runs each migration once and sets user_version", () => {
   const db = makeDb();
 
   assert.equal(migrate(db), LATEST);
-  assert.equal(LATEST, 3);
-  assert.equal(userVersion(db), 3);
+  assert.equal(LATEST, 4);
+  assert.equal(userVersion(db), 4);
   assert.deepEqual(tables(db), [
     "drafts",
     "meta",
     "outbox_photos",
     "outbox_records",
+    "reserved_tags",
     "species_cache",
     "tag_cache",
   ]);
 
-  // A second call finds user_version 3 and runs nothing.
+  // A second call finds user_version 4 and runs nothing.
   db.seen.length = 0;
   assert.equal(migrate(db), LATEST);
   assert.equal(db.seen.length, 0);
@@ -97,4 +98,17 @@ test("outbox_records is indexed by user and created_at", () => {
     .all(index.name)
     .map((r) => r.name);
   assert.deepEqual(cols, ["user_id", "created_at"]);
+});
+
+test("reserved_tags holds one row per kept tag, with its owner", () => {
+  const db = makeDb();
+  migrate(db);
+  const cols = db.raw
+    .prepare("SELECT name, type, pk, \"notnull\" FROM pragma_table_info('reserved_tags') ORDER BY cid;")
+    .all()
+    .map((c) => ({ name: c.name, type: c.type, pk: c.pk, notnull: c.notnull }));
+  assert.deepEqual(cols, [
+    { name: "qr_id", type: "TEXT", pk: 1, notnull: 0 },
+    { name: "user_id", type: "TEXT", pk: 0, notnull: 1 },
+  ]);
 });

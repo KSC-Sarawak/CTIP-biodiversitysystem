@@ -69,6 +69,7 @@ import {
 import { newPlantRecord, revisitRecord } from "./offline/records.js";
 import { tagCacheRows } from "./offline/tags.js";
 import { useOutboxSync } from "./offline/useOutboxSync.js";
+import { useReservedTags } from "./offline/useReservedTags.js";
 
 // Shown wherever a page needs the Express API and cannot reach it.
 export const API_DOWN = "Cannot reach the API server (Render). Please check your network connection.";
@@ -97,9 +98,10 @@ const savedUserId = () => getSession()?.user?.id || tokenClaims(getAuthToken())?
 //
 // The phone also passes `outbox` (unsent records, in the encrypted SQLite file)
 // and `tagCache` (the tag list for use without signal): new records are then
-// saved on the phone first and sent by the sync engine (CTIP-16, CTIP-83). The
-// web passes neither and sends records straight to the API, as before.
-export default function StoreProvider({ children, deviceId = "mobile", outbox = null, tagCache = null }) {
+// saved on the phone first and sent by the sync engine (CTIP-16, CTIP-83).
+// `reservedTags` holds the 3 tags kept for the botanist (CTIP-116). The web
+// passes none of them and sends records straight to the API, as before.
+export default function StoreProvider({ children, deviceId = "mobile", outbox = null, tagCache = null, reservedTags = null }) {
   // The sample plants are for visitors. Staff are recognised straight away, so
   // they would see them (no species, far from real data) until their own load.
   const [db, setDb] = useState(() => (savedUserId() ? staffStart : seed));
@@ -624,6 +626,11 @@ function collectionMatches(a = [], b = []) {
     outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
     retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
   } = useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify });
+
+  // The 3 tags kept for a botanist, so a new tag can be made with no signal (CTIP-116).
+  const { keptTags, topUpReservedTags, releaseTag, takeReservedTag } = useReservedTags({
+    reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi,
+  });
 
   // The tag list saved at the last load, read once per person.
   const loadCachedTags = useCallback(async () => {
@@ -1506,6 +1513,7 @@ function collectionMatches(a = [], b = []) {
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,
+    keptTags, topUpReservedTags, releaseTag, takeReservedTag,
     recordPhotos, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
     loadFromApi,
     pollFromBackend: () => loadFromApi(true),

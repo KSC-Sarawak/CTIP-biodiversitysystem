@@ -64,6 +64,18 @@ export const MIGRATIONS = [
       );
     `,
   },
+  {
+    // The tags kept for each botanist, so "Generate new QR tag" works with no
+    // signal (CTIP-116). No "used" column: the outbox already says which of them a
+    // record on this phone has taken.
+    version: 4,
+    sql: `
+      CREATE TABLE IF NOT EXISTS reserved_tags (
+        qr_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 /**

@@ -22,6 +22,41 @@ const TAG_ID = /^NIAH-\d{4}$/;
 const norm = (id) => String(id || "").trim().toUpperCase();
 const unconfirmed = (proposed) => `${proposed || "Unnamed plant"} (unconfirmed)`;
 
+// Tags a botanist keeps on the phone, made for them ahead of time so a new tag
+// can be made with no signal (CTIP-116). The API marks them batch_label "reserved".
+export const RESERVED_LABEL = "reserved";
+export const RESERVED_KEEP = 3;
+
+/** True for a tag kept for a different botanist: nobody else may pick it. */
+export function isReservedForOther(tag, meId) {
+  return tag?.batch_label === RESERVED_LABEL && tag.created_by !== meId;
+}
+
+/** The tags kept for this person that nothing has used yet (store tags, status "unused"). */
+export function myKeptTags(tags = [], meId) {
+  if (!meId) return [];
+  return tags
+    .filter((t) => t?.status === "unused" && t.batch_label === RESERVED_LABEL && t.created_by === meId)
+    .map((t) => norm(t.qr_id));
+}
+
+/**
+ * How many more tags to make so the person has `keep` free ones. A kept tag a
+ * record on this phone has taken (`usedOnPhone`) is still "unused" on the server
+ * until that record is sent, but it is no longer free.
+ */
+export function reservedToCreate(tags, meId, { usedOnPhone = [], keep = RESERVED_KEEP } = {}) {
+  const used = new Set(usedOnPhone.map(norm));
+  const free = myKeptTags(tags, meId).filter((id) => !used.has(id));
+  return Math.max(0, keep - free.length);
+}
+
+/** The first kept tag no record on this phone has taken, or null. */
+export function nextReservedTag(keptIds = [], usedOnPhone = []) {
+  const used = new Set(usedOnPhone.map(norm));
+  return keptIds.map(norm).find((id) => !used.has(id)) ?? null;
+}
+
 /** Keep only the five fields a tag_cache row may hold. */
 export function cleanTagRow(row) {
   return {
@@ -55,6 +90,8 @@ export function tagCacheRows(db, userId) {
   for (const t of db.tags || []) {
     const id = norm(t.qr_id);
     if (!id || seen.has(id)) continue;
+    // A tag kept for another botanist is not for this person to use or see.
+    if (t.status === "unused" && isReservedForOther(t, userId)) continue;
     seen.add(id);
     rows.push(row(id, t.status, plants.get(id)));
   }

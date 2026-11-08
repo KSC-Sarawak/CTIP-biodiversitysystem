@@ -22,7 +22,7 @@ import { TagQrView } from './TagQr.js';
 import { prefillFromSpecies } from '../../shared/speciesSearch.js';
 import { uid } from '../../shared/utils.js';
 import { extractTag, plantView } from '../../shared/selectors.js';
-import { revisitTarget, outboxTagsFrom } from '../../shared/offline/tags.js';
+import { revisitTarget, outboxTagsFrom, isReservedForOther } from '../../shared/offline/tags.js';
 import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 
 const MAX_PHOTOS = 6;
@@ -313,14 +313,24 @@ function SetByHand({ typed, gps, qr, protect, onChange }) {
   );
 }
 
+const NO_KEPT_TAGS = 'No offline tags left. Connect to the internet to get more, or scan a pre-printed tag.';
+
 export function AddPlant({ nav, params = {} }) {
-  const { db, me, addPlant, generateTags, outboxItems = [], apiStatus } = useStore();
+  const { db, me, addPlant, generateTags, outboxItems = [], apiStatus, keptTags = [], releaseTag, takeReservedTag } = useStore();
   const { c } = useTheme();
   const [qr, setQr] = useState(params.qr || '');
   // A tag a record on this phone already uses is taken, though the server does not know yet.
   // The same set Scan uses (outboxTagsFrom), so a tag is taken the same way everywhere.
   const onPhone = new Set(outboxTagsFrom(outboxItems).map((t) => t.qr_id));
-  const unusedTags = (db.tags || []).filter((t) => t.status === 'unused' && !onPhone.has(t.qr_id));
+  // Tags kept for this botanist are listed in their own section, and those kept for
+  // someone else are not offered at all (CTIP-116).
+  const kept = new Set(keptTags);
+  const unusedTags = (db.tags || []).filter(
+    (t) => t.status === 'unused' && !onPhone.has(t.qr_id) && !kept.has(t.qr_id) && !isReservedForOther(t, me?.id),
+  );
+  const online = apiStatus === 'connected';
+  // With no signal a new tag comes from the kept ones (nothing to make on the server).
+  const noKeptLeft = !online && !takeReservedTag?.();
   const [photos, setPhotos] = useState([]);
   const [sp, setSp] = useState('');
   const [picked, setPicked] = useState(null); // species chosen from search (CTIP-63)
@@ -342,18 +352,27 @@ export function AddPlant({ nav, params = {} }) {
     }
   }, [params.qr]);
 
+  const showNewTag = (id) => {
+    setQr(id);
+    // Next step: print the code and fix it to the plant (CTIP-27).
+    Alert.alert('New tag ready', `${id} is now this plant's tag. Show its QR code to print or share it.`, [
+      { text: 'Later', style: 'cancel' },
+      { text: 'Show QR', onPress: () => setShowQr(true) },
+    ]);
+  };
+
   const generateNewTag = async () => {
+    if (!online) {
+      // The tag now on this screen (when changing a tag) stays kept, so skip it.
+      const id = takeReservedTag?.(qr ? [qr] : []);
+      if (id) showNewTag(id);
+      else Alert.alert('No offline tags left', NO_KEPT_TAGS);
+      return;
+    }
     setGenerating(true);
     try {
       const ids = await generateTags(1, 'field');
-      if (ids && ids.length > 0) {
-        setQr(ids[0]);
-        // Next step: print the code and fix it to the plant (CTIP-27).
-        Alert.alert('New tag ready', `${ids[0]} is now this plant's tag. Show its QR code to print or share it.`, [
-          { text: 'Later', style: 'cancel' },
-          { text: 'Show QR', onPress: () => setShowQr(true) },
-        ]);
-      }
+      if (ids && ids.length > 0) showNewTag(ids[0]);
     } catch (err) {
       Alert.alert('Tag Generation Failed', err?.message || 'Could not generate QR tag.');
     } finally {
@@ -477,9 +496,10 @@ export function AddPlant({ nav, params = {} }) {
             label={generating ? "Generating QR tag..." : "Generate new QR tag"}
             icon="qr"
             kind={params.make ? 'primary' : 'secondary'}
-            disabled={generating}
+            disabled={generating || noKeptLeft}
             onPress={generateNewTag}
           />
+          {noKeptLeft ? <Txt v="caption" color={c.ink2}>{NO_KEPT_TAGS}</Txt> : null}
           {params.make ? <Button label="Scan tag with camera" icon="camera" kind="secondary" onPress={() => nav.replace('scan')} /> : null}
           <Button label="Choose QR from gallery" icon="plus" kind="secondary" onPress={pickQrFromGallery} />
         </View>
@@ -506,6 +526,19 @@ export function AddPlant({ nav, params = {} }) {
                 </Pressable>
               ))}
             </View>
+          </Section>
+        )}
+
+        {/* Tags made ahead of time for this botanist, so a new tag works with no signal (CTIP-116). */}
+        {keptTags.length > 0 && (
+          <Section title="Kept for offline use" gap={10}>
+            <Txt v="body" color={c.ink2}>These tags are kept for you, so you can make a new tag with no connection.</Txt>
+            {keptTags.map((id) => (
+              <View key={id} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Mono size={15} color={c.ink}>{id}</Mono>
+                {online ? <TextLink label="Release" size={14} onPress={() => releaseTag(id)} /> : null}
+              </View>
+            ))}
           </Section>
         )}
       </Screen>

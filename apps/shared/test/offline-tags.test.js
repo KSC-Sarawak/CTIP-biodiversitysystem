@@ -3,7 +3,11 @@
 // it last loaded, the tag list it saved (tag_cache), and its own unsent records.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { lookupTagOffline, tagCacheRows, cleanTagRow, outboxTagsFrom, revisitTarget } from "../offline/tags.js";
+import {
+  lookupTagOffline, tagCacheRows, cleanTagRow, outboxTagsFrom, revisitTarget,
+  isReservedForOther, myKeptTags, reservedToCreate, nextReservedTag, RESERVED_LABEL, RESERVED_KEEP,
+} from "../offline/tags.js";
+import { createTopUp } from "../offline/reservedTopUp.js";
 
 const ME = "user-1";
 // What the store holds before any workspace has loaded (staffStart in StoreProvider).
@@ -115,4 +119,76 @@ test("a revisit of a plant made on this phone points at its outbox record", () =
   });
   assert.equal(cachedOnly.specimen_id, "spec-9");
   assert.equal(revisitTarget(emptyDb, "NIAH-0999", { cached: [], outboxItems: [] }), null);
+});
+
+// Tags kept for offline use (CTIP-116).
+const kept = (qr_id, created_by, extra = {}) => ({ qr_id, status: "unused", batch_label: RESERVED_LABEL, created_by, ...extra });
+
+test("reservedToCreate tops up to 3, not counting tags used on this phone", () => {
+  assert.equal(RESERVED_KEEP, 3);
+  // One kept tag is still free, one is used by a record on this phone: 2 more.
+  const tags = [kept("NIAH-0101", ME), kept("NIAH-0102", ME)];
+  assert.equal(reservedToCreate(tags, ME, { usedOnPhone: ["NIAH-0102"] }), 2);
+  // Three free kept tags: nothing to make.
+  assert.equal(reservedToCreate([kept("NIAH-0101", ME), kept("NIAH-0102", ME), kept("NIAH-0103", ME)], ME), 0);
+  // Another botanist's kept tags count for nothing.
+  assert.equal(reservedToCreate([kept("NIAH-0101", "user-2"), kept("NIAH-0102", "user-2")], ME), 3);
+  // Tags that are no longer unused, or not kept, do not count either.
+  const others = [kept("NIAH-0101", ME, { status: "assigned" }), { qr_id: "NIAH-0102", status: "unused", batch_label: "B", created_by: ME }];
+  assert.equal(reservedToCreate(others, ME), 3);
+  assert.deepEqual(myKeptTags([...tags, ...others], ME), ["NIAH-0101", "NIAH-0102"]);
+  assert.equal(reservedToCreate(tags, ME, { keep: 1 }), 0);
+});
+
+test("nextReservedTag skips tags used by a record on this phone", () => {
+  assert.equal(nextReservedTag(["NIAH-0101", "NIAH-0102"], ["NIAH-0101"]), "NIAH-0102");
+  assert.equal(nextReservedTag(["NIAH-0101", "NIAH-0102"], []), "NIAH-0101");
+  assert.equal(nextReservedTag(["NIAH-0101"], ["niah-0101"]), null);
+  assert.equal(nextReservedTag([], []), null);
+});
+
+test("isReservedForOther hides another botanist's reserved tags", () => {
+  assert.equal(isReservedForOther(kept("NIAH-0101", ME), ME), false);
+  assert.equal(isReservedForOther(kept("NIAH-0101", "user-2"), ME), true);
+  // A printed batch tag is for everyone.
+  assert.equal(isReservedForOther({ qr_id: "NIAH-0001", status: "unused", batch_label: "Batch 1", created_by: "user-2" }, ME), false);
+});
+
+test("tagCacheRows leaves out tags kept for another botanist", () => {
+  const db = {
+    species: [],
+    plants: [],
+    tags: [kept("NIAH-0201", ME), kept("NIAH-0202", "user-2"), { qr_id: "NIAH-0203", status: "unused", batch_label: "Batch 1", created_by: "user-2" }],
+  };
+  assert.deepEqual(tagCacheRows(db, ME).map((r) => r.qr_id), ["NIAH-0201", "NIAH-0203"]);
+});
+
+test("two top-ups at once make one run", async () => {
+  let runs = 0;
+  let finish;
+  const topUp = createTopUp(() => {
+    runs += 1;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  const a = topUp();
+  const b = topUp();
+  assert.equal(runs, 1);
+  finish("done");
+  assert.deepEqual(await Promise.all([a, b]), ["done", "done"]);
+  // Once it has finished, the next call runs again.
+  const c = topUp();
+  assert.equal(runs, 2);
+  finish("again");
+  assert.equal(await c, "again");
+});
+
+test("a failed top-up lets the next one run", async () => {
+  let runs = 0;
+  const topUp = createTopUp(async () => {
+    runs += 1;
+    if (runs === 1) throw new Error("boom");
+    return "ok";
+  });
+  await assert.rejects(topUp(), /boom/);
+  assert.equal(await topUp(), "ok");
 });
