@@ -213,6 +213,10 @@ Every record on the phone can also be deleted with "Delete from this phone". It 
 - The phone then keeps both copies and asks the botanist:
   - "Keep this phone's version" resends the edit with the server's version.
   - "Keep the other version" drops the phone's copy.
+- If the other device already sent the record for review (`WRONG_STATUS`), the phone's
+  edit can never land, so only "Keep the other version" is offered. The notice says
+  "This record was already sent for review from another device, so the changes on this
+  phone can't be sent. Keep the other version to clear it."
 - Either choice adds a comment to the record saying what was kept, and a toast says it
   too.
 - **Nothing is resolved automatically.**

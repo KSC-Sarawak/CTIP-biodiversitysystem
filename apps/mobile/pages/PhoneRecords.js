@@ -11,6 +11,7 @@ import { useStore } from '../../shared/store.js';
 import { STATUS_TEXT } from '../../shared/tokens.js';
 import { outboxRowView, failureNotice, conflictRows } from '../../shared/offline/syncStatus.js';
 import { LIMITS, HEIGHT_PROBLEM, heightOk } from '../../shared/offline/records.js';
+import { sentForReviewElsewhere } from '../../shared/offline/conflicts.js';
 import { useTheme, font } from '../components/Theme.js';
 import SyncBar from '../components/SyncBar.js';
 import {
@@ -195,6 +196,9 @@ export function PhoneRecordDetail({ nav, params = {} }) {
   const view = outboxRowView(record, { db, outboxItems, cached: cachedTags });
   const notice = failureNotice(record, photos);
   const conflict = record.state === 'conflict';
+  // The other device already sent it for review: this phone's edit can never
+  // land, so only "Keep the other version" is offered (CTIP-67).
+  const sentElsewhere = conflict && sentForReviewElsewhere(record);
   const isEdit = record.kind === 'edit';
   const o = record.observation || {};
   const place = placeOf(record);
@@ -266,12 +270,14 @@ export function PhoneRecordDetail({ nav, params = {} }) {
           <Notice
             tone="warning"
             icon="info"
-            body="This record was changed on another device before this phone sent its changes. Choose which version to keep."
+            body={sentElsewhere
+              ? "This record was already sent for review from another device, so the changes on this phone can't be sent. Keep the other version to clear it."
+              : 'This record was changed on another device before this phone sent its changes. Choose which version to keep.'}
           />
-          {record.error?.message ? <Txt v="small" color={c.ink2}>{record.error.message}</Txt> : null}
+          {record.error?.message && !sentElsewhere ? <Txt v="small" color={c.ink2}>{record.error.message}</Txt> : null}
           {conflictRows(record).length ? <ConflictTable rows={conflictRows(record)} /> : null}
-          <Button label="Keep this phone's version" onPress={() => choose('mine')} disabled={busy} />
-          <Button label="Keep the other version" kind="secondary" onPress={() => choose('theirs')} disabled={busy} />
+          {sentElsewhere ? null : <Button label="Keep this phone's version" onPress={() => choose('mine')} disabled={busy} />}
+          <Button label="Keep the other version" kind={sentElsewhere ? 'primary' : 'secondary'} onPress={() => choose('theirs')} disabled={busy} />
         </View>
       ) : null}
 

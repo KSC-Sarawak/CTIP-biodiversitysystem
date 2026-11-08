@@ -833,6 +833,38 @@ test("a conflict is never resolved without the botanist's choice", async () => {
   assert.equal(server.state.comments.length, 0);
 });
 
+test("keep mine is refused when the record was already sent for review", async () => {
+  // The other device sent the record for review (status synced): the server
+  // answers WRONG_STATUS, and resending this phone's edit could only clash again.
+  const { outbox, server, engine } = setup();
+  const obsId = randomUUID();
+  const specimenId = randomUUID();
+  server.state.specimens.push({ id: specimenId, qr_id: "DS-10" });
+  server.state.observations.push({
+    id: obsId, specimen_id: specimenId, status: "synced", recorded_by: U, version: 3, height_cm: 30, is_deleted: false,
+  });
+  await outbox.add(editRecord({
+    userId: U,
+    obs: { id: obsId, specimen_id: specimenId, version: 2, height_cm: 30, morphology: null, notes: null },
+    changes: { height_cm: "40" },
+  }), []);
+  await engine.run(U);
+  const conflicted = await outbox.get(obsId);
+  assert.equal(conflicted.state, "conflict");
+  assert.equal(conflicted.error.code, "WRONG_STATUS");
+
+  const res = await resolveConflict({ outbox, addComment: server.api.addComment, id: obsId, choice: "mine" });
+  assert.deepEqual(res, { ok: false, message: "This record was already sent for review from another device." });
+  const kept = await outbox.get(obsId);
+  assert.equal(kept.state, "conflict", "nothing changed: the botanist can still keep the other version");
+  assert.equal(kept.resolution, undefined);
+  assert.equal(server.state.comments.length, 0);
+
+  // "Keep the other version" still clears it.
+  assert.equal((await resolveConflict({ outbox, addComment: server.api.addComment, id: obsId, choice: "theirs" })).ok, true);
+  assert.equal(await outbox.get(obsId), null);
+});
+
 test("resolveConflict refuses a record that is not in conflict", async () => {
   const { outbox, server } = setup();
   const rec = plantRecord({ kind: "edit", base_version: 1, step: "observation" });

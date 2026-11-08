@@ -14,6 +14,14 @@ export const MINE_COMMENT = "Edited on two devices before syncing. Kept the vers
 export const THEIRS_COMMENT = "Edited on two devices before syncing. Kept the version from the other device.";
 
 const COULD_NOT = "This record could not be changed on this phone. Try again.";
+export const ALREADY_SENT = "This record was already sent for review from another device.";
+
+/**
+ * True when the other device already sent the record for review (WRONG_STATUS).
+ * The server no longer takes edits to it, so resending this phone's version
+ * would only clash again: only "Keep the other version" can clear it.
+ */
+export const sentForReviewElsewhere = (record) => record?.error?.code === "WRONG_STATUS";
 
 /**
  * Apply the botanist's choice for the conflicting record `id`. Answers { ok, message? }.
@@ -22,6 +30,8 @@ const COULD_NOT = "This record could not be changed on this phone. Try again.";
  *             version (resolution: 'mine'). The sync engine adds MINE_COMMENT
  *             once the server has accepted the edit, so this works with no
  *             connection: the choice is kept and the comment follows the edit.
+ *             Refused when the other device already sent the record for
+ *             review (sentForReviewElsewhere): the edit could never land.
  *   'theirs'  The comment is posted first. Only if the server confirmed it is the
  *             phone's copy removed. If the comment fails the record stays in
  *             conflict, so the botanist can try again; we never drop the phone's
@@ -34,6 +44,7 @@ export async function resolveConflict({ outbox, addComment, id, choice }) {
   }
 
   if (choice === "mine") {
+    if (sentForReviewElsewhere(record)) return { ok: false, message: ALREADY_SENT };
     const version = record.server?.version;
     if (!Number.isInteger(version)) return { ok: false, message: COULD_NOT };
     const saved = await outbox.update(id, {
