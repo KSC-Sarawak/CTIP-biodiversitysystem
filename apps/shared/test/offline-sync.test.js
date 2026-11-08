@@ -876,8 +876,11 @@ test("classify and actionFor follow the error rules", () => {
   assert.equal(actionFor("UNSUPPORTED_FILE_TYPE", 415), "remove_photo");
   assert.equal(actionFor("HTTP_413", 413), "remove_photo");
   assert.equal(actionFor("PAYLOAD_TOO_LARGE", 413), "retry", "a JSON body too large is not a photo");
-  assert.equal(actionFor("VALIDATION_ERROR", 422), "retry");
-  assert.equal(actionFor("ID_TAKEN"), "retry");
+  assert.equal(actionFor("VALIDATION_ERROR", 422), "fix_record", "the botanist must change the record");
+  assert.equal(actionFor("VALIDATION_ERROR", 400), "fix_record");
+  assert.equal(actionFor("VALIDATION_ERROR"), "fix_record");
+  assert.equal(actionFor("ID_TAKEN"), "fix_record");
+  assert.equal(actionFor("INTERNAL_ERROR", 400), "retry");
 });
 
 // "Delete from this phone" (CTIP-68) can remove a record while a run is sending

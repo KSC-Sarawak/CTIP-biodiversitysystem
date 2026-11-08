@@ -24,6 +24,7 @@ import { uid } from '../../shared/utils.js';
 import { extractTag, plantView } from '../../shared/selectors.js';
 import { revisitTarget, outboxTagsFrom, isReservedForOther } from '../../shared/offline/tags.js';
 import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
+import { LIMITS, HEIGHT_PROBLEM, heightOk } from '../../shared/offline/records.js';
 
 const MAX_PHOTOS = 6;
 
@@ -561,12 +562,15 @@ export function AddPlant({ nav, params = {} }) {
     });
   };
 
+  // The API's limits are checked here too (LIMITS), so a record it would
+  // refuse for its content never reaches the outbox (CTIP-68).
   const problems = {
     photos: photos.length === 0,
     looks: !looks.trim(),
     species: !sp.trim(),
+    height: !heightOk(height),
   };
-  const ok = !problems.photos && !problems.looks && !problems.species;
+  const ok = !problems.photos && !problems.looks && !problems.species && !problems.height;
 
   const submit = async () => {
     if (submittingRef.current) return;
@@ -578,6 +582,8 @@ export function AddPlant({ nav, params = {} }) {
         Alert.alert('Photo required', 'Please add at least one photo of the plant.');
       } else if (problems.looks) {
         Alert.alert('Appearance required', 'Please describe what the plant looks like.');
+      } else if (problems.height) {
+        Alert.alert('Height not valid', HEIGHT_PROBLEM);
       }
       return;
     }
@@ -681,13 +687,14 @@ export function AddPlant({ nav, params = {} }) {
           onPick={pick}
           picked={picked}
           error={tried && problems.species ? 'Species is required before submitting for review' : undefined}
+          maxLength={LIMITS.speciesName}
         />
-        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} keyboardType="decimal-pad" width={140} />
+        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} keyboardType="decimal-pad" width={140} error={tried && problems.height ? HEIGHT_PROBLEM : undefined} />
         <View style={{ gap: 6 }}>
-          <Area label="Appearance" value={looks} onChangeText={setLooks} placeholder="Leaves, stem, pitchers, flowers, roots" />
+          <Area label="Appearance" value={looks} onChangeText={setLooks} placeholder="Leaves, stem, pitchers, flowers, roots" maxLength={LIMITS.text} />
           {tried && problems.looks ? <Txt v="caption" color={c.danger}>Describe what the plant looks like.</Txt> : null}
         </View>
-        <Area label="Field notes" optional value={notes} onChangeText={setNotes} placeholder="Habitat, nearby trail, anything unusual" rows={2} />
+        <Area label="Field notes" optional value={notes} onChangeText={setNotes} placeholder="Habitat, nearby trail, anything unusual" rows={2} maxLength={LIMITS.text} />
       </Section>
 
       <GpsRow gps={gps} loading={gpsLoading} error={gpsError} onRefresh={refresh} />
@@ -789,6 +796,7 @@ export function Revisit({ nav, params = {} }) {
     ? db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => b.observed_at.localeCompare(a.observed_at))[0]
     : null;
   const ok = photos.length > 0 || changes.trim() || height;
+  const problems = { height: !heightOk(height) }; // the API's limit (LIMITS), as on the new plant form
 
   const addPhotoItems = (items) => {
     if (!items || !items.length) return;
@@ -800,6 +808,10 @@ export function Revisit({ nav, params = {} }) {
 
   const submit = async () => {
     if (submittingRef.current) return;
+    if (problems.height) {
+      Alert.alert('Height not valid', HEIGHT_PROBLEM);
+      return;
+    }
     submittingRef.current = true;
     setSubmitting(true);
     try {
@@ -865,8 +877,8 @@ export function Revisit({ nav, params = {} }) {
         />
       </Section>
       <Section title="What has changed" gap={16}>
-        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} placeholder={last?.height_cm ? String(last.height_cm) : ''} keyboardType="decimal-pad" width={140} hint="Leave empty if it has not changed" />
-        <Area label="Changes" value={changes} onChangeText={setChanges} placeholder="New pitchers, flowering, damage…" />
+        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} placeholder={last?.height_cm ? String(last.height_cm) : ''} keyboardType="decimal-pad" width={140} hint="Leave empty if it has not changed" error={problems.height ? HEIGHT_PROBLEM : undefined} />
+        <Area label="Changes" value={changes} onChangeText={setChanges} placeholder="New pitchers, flowering, damage…" maxLength={LIMITS.text} />
       </Section>
       <GpsRow gps={gps} loading={gpsLoading} error={gpsError} title={typed ? 'Set by hand' : 'Same place as before'} onRefresh={refresh} />
       <TextLink label={typed ? 'Close map' : 'Set it by hand'} onPress={toggleHand} />

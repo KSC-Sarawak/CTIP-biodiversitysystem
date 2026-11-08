@@ -10,10 +10,11 @@ import { View, Text, Alert } from 'react-native';
 import { useStore } from '../../shared/store.js';
 import { STATUS_TEXT } from '../../shared/tokens.js';
 import { outboxRowView, failureNotice, conflictRows } from '../../shared/offline/syncStatus.js';
+import { LIMITS, HEIGHT_PROBLEM, heightOk } from '../../shared/offline/records.js';
 import { useTheme, font } from '../components/Theme.js';
 import SyncBar from '../components/SyncBar.js';
 import {
-  Screen, Bar, Section, Row, Thumb, Mono, Txt, DotLabel, Notice, KV, Button, Empty,
+  Screen, Bar, Section, Row, Thumb, Mono, Txt, DotLabel, Notice, KV, Button, Empty, Field, Area,
 } from '../components/Bits.js';
 import { shortDate, dateTime, coords, accuracy } from '../components/format.js';
 
@@ -104,6 +105,60 @@ function ConflictTable({ rows }) {
   );
 }
 
+// "Fix this record" (fix_record): the API refused this record's content, so the
+// botanist changes its text here and sends it again. The form is filled from
+// the record once, when it opens, with the same limits as the capture form. An
+// edit shows only the fields it changes (the only ones it sends); a new plant
+// also shows its species name. Only the text changes (fixRecordChanges): the
+// record keeps its ids, photos, tag, time and place.
+function FixRecordForm({ record, button, busy, onSave }) {
+  const o = record.observation || {};
+  const isEdit = record.kind === 'edit';
+  const shows = (field) => !isEdit || field in o;
+  const [form, setForm] = useState(() => ({
+    height_cm: o.height_cm != null ? String(o.height_cm) : '',
+    morphology: o.morphology || '',
+    notes: o.notes || '',
+    proposed_species_name: record.specimen?.proposed_species_name || '',
+  }));
+  const set = (field) => (text) => setForm((f) => ({ ...f, [field]: text }));
+  const heightValid = heightOk(form.height_cm);
+
+  // Only the fields shown on this form are sent to fixRecord.
+  const save = () => {
+    if (!heightValid) {
+      Alert.alert('Height not valid', HEIGHT_PROBLEM);
+      return;
+    }
+    const changes = {};
+    for (const field of ['height_cm', 'morphology', 'notes']) if (shows(field)) changes[field] = form[field];
+    if (record.kind === 'new_plant') changes.proposed_species_name = form.proposed_species_name;
+    onSave(changes);
+  };
+
+  return (
+    <Section title="Fix this record" gap={12}>
+      {record.kind === 'new_plant' ? (
+        <Field label="Species" value={form.proposed_species_name} onChangeText={set('proposed_species_name')} italic maxLength={LIMITS.speciesName} />
+      ) : null}
+      {shows('height_cm') ? (
+        <Field
+          label="Height (cm)"
+          optional
+          value={form.height_cm}
+          onChangeText={(t) => set('height_cm')(t.replace(/[^\d.]/g, ''))}
+          keyboardType="decimal-pad"
+          width={140}
+          error={heightValid ? undefined : HEIGHT_PROBLEM}
+        />
+      ) : null}
+      {shows('morphology') ? <Area label="Appearance" value={form.morphology} onChangeText={set('morphology')} maxLength={LIMITS.text} /> : null}
+      {shows('notes') ? <Area label="Field notes" optional value={form.notes} onChangeText={set('notes')} rows={2} maxLength={LIMITS.text} /> : null}
+      <Button label={button} onPress={save} disabled={busy} />
+    </Section>
+  );
+}
+
 // Where the plant was seen: the visit's own fix, else the new plant's.
 function placeOf(record) {
   const o = record.observation || {};
@@ -113,7 +168,7 @@ function placeOf(record) {
 
 /** One record on this phone (route "phoneRecord", params { id }). */
 export function PhoneRecordDetail({ nav, params = {} }) {
-  const { db, outboxItems = [], cachedTags = [], recordPhotos, retryRecord, discardRecord, removeRecordPhoto, resolveConflict } = useStore();
+  const { db, outboxItems = [], cachedTags = [], recordPhotos, retryRecord, discardRecord, removeRecordPhoto, fixRecord, resolveConflict } = useStore();
   const { c } = useTheme();
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -221,7 +276,15 @@ export function PhoneRecordDetail({ nav, params = {} }) {
       {notice ? (
         <View style={{ gap: 12 }}>
           <Notice tone="warning" icon="info" body={notice.body} />
-          {notice.button ? (
+          {notice.action === 'fix_record' ? (
+            <FixRecordForm
+              key={record.id}
+              record={record}
+              button={notice.button}
+              busy={busy}
+              onSave={(changes) => act(() => fixRecord(record.id, changes))}
+            />
+          ) : notice.button ? (
             <Button label={notice.button} onPress={fix[notice.action]} disabled={busy} />
           ) : null}
         </View>

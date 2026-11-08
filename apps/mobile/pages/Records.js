@@ -3,7 +3,7 @@
 // (with the officer's note and "Resubmit" when it was returned). Records saved on
 // this phone and not sent yet come first, under "On this phone" (PhoneRecords.js, CTIP-68).
 import React, { useState, useEffect } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Alert } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { plantView, nameOf, unfinishedPlants, recordMatches, draftMatches } from '../../shared/selectors.js';
@@ -18,7 +18,7 @@ import { usePolling } from '../hooks/usePolling.js';
 import { listDraftsFor } from '../draftStore.js';
 import { withoutOutboxTwins, OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 import { OnThisPhone } from './PhoneRecords.js';
-import { editSnapshot } from '../../shared/offline/records.js';
+import { editSnapshot, LIMITS, HEIGHT_PROBLEM, heightOk } from '../../shared/offline/records.js';
 
 const GROUPS = [
   { key: 'fix', title: 'Needs you', statuses: ['returned', 'draft'] },
@@ -238,6 +238,11 @@ export function RecordDetail({ nav, params = {} }) {
   const canEdit = unsent && o.recorded_by === me?.id;
   const saveChanges = async () => {
     if (sending) return;
+    // The API's limit, checked before the edit can reach the outbox (CTIP-68).
+    if (!heightOk(edit.height_cm)) {
+      Alert.alert('Height not valid', HEIGHT_PROBLEM);
+      return;
+    }
     setSending(true);
     const r = await editUnsent(opened || editSnapshot(o), edit); // shows its own success or error message
     setSending(false);
@@ -314,9 +319,9 @@ export function RecordDetail({ nav, params = {} }) {
 
       {canEdit ? (
         <Section title="Edit record" gap={12}>
-          <Field label="Height (cm)" optional value={edit.height_cm} onChangeText={(t) => setEdit({ ...edit, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
-          <Area label="Appearance" optional value={edit.morphology} onChangeText={(t) => setEdit({ ...edit, morphology: t })} />
-          <Area label="Notes" optional value={edit.notes} onChangeText={(t) => setEdit({ ...edit, notes: t })} rows={2} />
+          <Field label="Height (cm)" optional value={edit.height_cm} onChangeText={(t) => setEdit({ ...edit, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} error={heightOk(edit.height_cm) ? undefined : HEIGHT_PROBLEM} />
+          <Area label="Appearance" optional value={edit.morphology} onChangeText={(t) => setEdit({ ...edit, morphology: t })} maxLength={LIMITS.text} />
+          <Area label="Notes" optional value={edit.notes} onChangeText={(t) => setEdit({ ...edit, notes: t })} rows={2} maxLength={LIMITS.text} />
           <Button label="Save changes" kind="secondary" onPress={saveChanges} disabled={sending} />
         </Section>
       ) : null}

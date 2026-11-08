@@ -7,7 +7,8 @@
 // under plain Node in the tests. No React Native imports.
 import { STATUS_TEXT } from "../tokens.js";
 import { plantView } from "../selectors.js";
-import { outboxStatus } from "./syncEngine.js";
+import { outboxStatus, actionFor } from "./syncEngine.js";
+import { LIMITS, HEIGHT_PROBLEM, heightOk, cleanHeight, cleanText } from "./records.js";
 
 /* ---------- when to try again ---------- */
 
@@ -170,7 +171,53 @@ export function failureNotice(record, photos = []) {
     }
     // The photo is gone already, so there is nothing to remove: just send again.
   }
+  // The API refused the content. A record refused before this action existed
+  // was saved with "retry", so its code decides too.
+  if (error.action === "fix_record" || actionFor(error.code) === "fix_record") {
+    const message = String(error.message || "").trim();
+    const reason = message ? `: ${/[.!?]$/.test(message) ? message : `${message}.`}` : ".";
+    return {
+      action: "fix_record",
+      body: `The server can't accept this record as it is${reason} Change the details below and send it again.`,
+      button: "Save and send", // under the "Fix this record" form (PhoneRecords.js)
+    };
+  }
   return { action: "retry", body: error.message || "This record couldn't be sent.", button: "Try again" };
+}
+
+/**
+ * The changes "Save and send" makes to a record the API refused for its
+ * content (fix_record). `form` holds the botanist's text: height_cm,
+ * morphology, notes and, for a new plant, proposed_species_name. Anything else
+ * in `form` is ignored, so the record keeps every id, its tag, its time and
+ * its place. An edit changes only the fields it already holds: it sends just
+ * those. Answers { ok: true, changes } (for outbox.update) or { ok: false, message }
+ * when a field breaks the same limits as the capture form.
+ */
+export function fixRecordChanges(record, form = {}) {
+  const has = (field) => form[field] !== undefined;
+  if (has("height_cm") && !heightOk(form.height_cm)) return { ok: false, message: HEIGHT_PROBLEM };
+  for (const [field, label] of [["morphology", "Appearance"], ["notes", "Field notes"]]) {
+    if (has(field) && String(form[field] ?? "").trim().length > LIMITS.text) {
+      return { ok: false, message: `${label} can be at most ${LIMITS.text} characters.` };
+    }
+  }
+  if (has("proposed_species_name") && String(form.proposed_species_name ?? "").trim().length > LIMITS.speciesName) {
+    return { ok: false, message: `The species name can be at most ${LIMITS.speciesName} characters.` };
+  }
+
+  const isEdit = record.kind === "edit";
+  const cleaners = { height_cm: cleanHeight, morphology: cleanText, notes: cleanText };
+  const observation = { ...(record.observation || {}) };
+  for (const [field, clean] of Object.entries(cleaners)) {
+    if (!has(field) || (isEdit && !(field in observation))) continue;
+    observation[field] = clean(form[field]);
+  }
+  const changes = { observation, state: "pending", error: null, attempts: 0 };
+  if (record.kind === "new_plant" && has("proposed_species_name")) {
+    changes.specimen = { ...(record.specimen || {}), proposed_species_name: cleanText(form.proposed_species_name) };
+  }
+  return { ok: true, changes };
 }
 
 /**

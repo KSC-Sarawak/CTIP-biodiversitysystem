@@ -134,7 +134,12 @@ The action on a failed record:
 | `pick_tag` | `TAG_IN_USE`, `TAG_NOT_FOUND` or `TAG_RESERVED` |
 | `wait_review` | `REVIEW_IN_PROGRESS` |
 | `remove_photo` | 413 or 415 on a photo |
+| `fix_record` | `VALIDATION_ERROR` (any status) or `ID_TAKEN`: the API refused the record's content |
 | `retry` | Anything else, shown with the API's message |
+
+The capture forms check the API's limits first (height 0 to 100000 cm, Appearance and
+Field notes up to 5000 characters, species name up to 200), so a record the API would
+refuse for its content should not reach the outbox.
 
 ---
 
@@ -169,6 +174,7 @@ returned ones.
 | `pick_tag` | "Tag {qr} is already on another plant. Choose another tag for this record." | "Choose another tag" |
 | `wait_review` | "This plant has a record waiting for an officer. It will be sent once they decide." | none; the record goes back to `pending` on every manual sync |
 | `remove_photo` | "Photo {n} can't be sent: it is too large, or not a JPEG, PNG or WebP. Remove it to send the rest." | "Remove photo" |
+| `fix_record` | "The server can't accept this record as it is: {API message} Change the details below and send it again." Under it, a "Fix this record" form (Height, Appearance, Field notes, and the species name for a new plant). Only the text changes; the record keeps every ID. | "Save and send" |
 | `retry` | The API's message | "Try again" |
 
 Every record on the phone can also be deleted with "Delete from this phone". It asks

@@ -30,7 +30,8 @@ const SPECIMEN_FIELDS = ["proposed_species_name", "lat", "lng", "gps_accuracy_m"
 const OBSERVATION_FIELDS = ["observed_at", "height_cm", "morphology", "notes", "lat", "lng", "gps_accuracy_m"];
 
 const PICK_TAG = ["TAG_IN_USE", "TAG_NOT_FOUND", "TAG_RESERVED", "TAG_RETIRED"];
-const PHOTO_CODES = ["FILE_TOO_LARGE", "UNSUPPORTED_FILE_TYPE", "UNREADABLE_PHOTO"];// Officers only decide records that were sent for review, so a server copy in
+const PHOTO_CODES = ["FILE_TOO_LARGE", "UNSUPPORTED_FILE_TYPE", "UNREADABLE_PHOTO"];
+const FIX_CODES = ["VALIDATION_ERROR", "ID_TAKEN"];// Officers only decide records that were sent for review, so a server copy in
 // one of these states proves our submit landed.
 const SUBMITTED = ["synced", "returned", "approved", "rejected"];
 
@@ -78,6 +79,10 @@ export function actionFor(code, status) {
   if (PHOTO_CODES.includes(code)) return "remove_photo";
   // PAYLOAD_TOO_LARGE is a JSON body over the limit, not a photo.
   if ((status === 413 || status === 415) && code !== "PAYLOAD_TOO_LARGE") return "remove_photo";
+  // The API refused the record's content (say a height over its limit, or a
+  // revisit of a plant deleted meanwhile). Sending it again as it is can only
+  // fail again, so the botanist changes it on the phone first.
+  if (FIX_CODES.includes(code)) return "fix_record";
   return "retry";
 }
 

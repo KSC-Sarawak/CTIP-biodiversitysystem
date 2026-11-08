@@ -22,7 +22,7 @@ import {
 import { nowIso } from "../utils.js";
 import { createSyncEngine, saveFirst, waitAtMost } from "./syncEngine.js";
 import { outboxPhotos } from "./records.js";
-import { recordsToDelete, resetsOnManualSync, tagChangeFor } from "./syncStatus.js";
+import { recordsToDelete, resetsOnManualSync, tagChangeFor, fixRecordChanges } from "./syncStatus.js";
 import { resolveConflict as applyChoice } from "./conflicts.js";
 
 // How long a save on the phone waits for its first send before it shows
@@ -54,7 +54,7 @@ const engineApi = (callRef) => {
  *   currentUserId  () => whose records may be sent now, or null (see StoreProvider)
  * Answers { outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
  *           retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
- *           resolveConflict }.
+ *           fixRecord, resolveConflict }.
  */
 export function useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify }) {
   const [outboxItems, setOutboxItems] = useState([]); // the signed-in person's unsent records
@@ -256,6 +256,21 @@ export function useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi
     return { ok: true };
   }), [change, outbox, syncSoon]);
 
+  // "Save and send" (fix_record): the API refused the record's content, so the
+  // botanist changed its text on the phone. Only the text fields change
+  // (fixRecordChanges): the record keeps every id, so a resend still stores
+  // nothing twice. Then it is sent again. Answers { ok, message? }.
+  const fixRecord = useCallback((id, form) => change("fix record", async () => {
+    const record = await outbox.get(id);
+    if (!record) return { ok: false, message: "This record is no longer on this phone." };
+    const fixed = fixRecordChanges(record, form);
+    if (!fixed.ok) return fixed;
+    const saved = await outbox.update(id, fixed.changes);
+    if (!saved) return { ok: false, message: "This record is no longer on this phone." };
+    syncSoon();
+    return { ok: true };
+  }), [change, outbox, syncSoon]);
+
   // Two devices edited this record: the botanist's choice (conflicts.js).
   // 'mine' sends the edit again, based on the server's version; the engine adds
   // the comment once the server accepts it. 'theirs' adds the comment and drops
@@ -280,6 +295,6 @@ export function useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi
 
   return {
     outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
-    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, resolveConflict,
+    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
   };
 }

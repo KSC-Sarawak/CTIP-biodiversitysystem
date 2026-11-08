@@ -13,6 +13,12 @@
 // No React Native imports: this runs under plain Node in the tests.
 import { uid, nowIso } from "../utils.js";
 
+// The limits POST /specimens and POST /sync check (services/api/src/field.js).
+// The phone checks them at capture, so a record the API would refuse for its
+// content never reaches the outbox (CTIP-68).
+export const LIMITS = Object.freeze({ text: 5000, speciesName: 200, heightMax: 100000 });
+export const HEIGHT_PROBLEM = "Height must be a number from 0 to 100000 cm.";
+
 // The form gives text; the API wants a number or null.
 export function cleanHeight(height_cm) {
   if (height_cm === "" || height_cm == null) return null;
@@ -20,7 +26,14 @@ export function cleanHeight(height_cm) {
   return Number.isNaN(n) ? null : n;
 }
 
-const cleanText = (value) => (typeof value === "string" ? value.trim() : value) || null;
+/** Is the height field empty, or a number from 0 to 100000? ("1.2.3" is not.) */
+export function heightOk(height_cm) {
+  if (height_cm === "" || height_cm == null) return true;
+  const n = Number(height_cm);
+  return Number.isFinite(n) && n >= 0 && n <= LIMITS.heightMax;
+}
+
+export const cleanText = (value) => (typeof value === "string" ? value.trim() : value) || null;
 
 // The observation part of a record, in the fields POST /sync accepts.
 function observationOf({ height_cm, morphology, notes, lat, lng, gps_accuracy_m }, observedAt) {

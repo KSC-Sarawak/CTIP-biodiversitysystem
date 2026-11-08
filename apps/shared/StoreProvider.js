@@ -625,7 +625,7 @@ function collectionMatches(a = [], b = []) {
 
   const {
     outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
-    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, resolveConflict,
+    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
   } = useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify });
 
   // The 3 tags kept for a botanist, so a new tag can be made with no signal (CTIP-116).
@@ -1567,7 +1567,7 @@ function collectionMatches(a = [], b = []) {
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,
     keptTags, topUpReservedTags, releaseTag, takeReservedTag,
-    recordPhotos, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, resolveConflict,
+    recordPhotos, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
     editUnsent,
     loadFromApi,
     pollFromBackend: () => loadFromApi(true),

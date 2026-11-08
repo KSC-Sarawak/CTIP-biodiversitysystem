@@ -34,7 +34,7 @@ function Result({ s, onPress }) {
   );
 }
 
-export default function SpeciesPicker({ value, onChange, onPick, picked, error }) {
+export default function SpeciesPicker({ value, onChange, onPick, picked, error, maxLength }) {
   const { c } = useTheme();
   // Once a species is picked (and the name not edited since), stop searching and
   // show where the name came from instead (CTIP-63).
@@ -57,7 +57,7 @@ export default function SpeciesPicker({ value, onChange, onPick, picked, error }
 
   return (
     <View style={{ gap: 6 }}>
-      <Field label="Species (required)" value={value} onChangeText={onChange} placeholder="Start typing a name" italic error={error} hint={hint} />
+      <Field label="Species (required)" value={value} onChangeText={onChange} placeholder="Start typing a name" italic error={error} hint={hint} maxLength={maxLength} />
       {fromList ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: c.accentSoft }}>
           <Txt v="caption" color={c.ink} style={{ flex: 1 }}>

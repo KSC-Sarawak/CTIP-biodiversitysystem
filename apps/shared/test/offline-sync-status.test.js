@@ -14,6 +14,7 @@ import {
   STILL_OFFLINE,
   failureNotice,
   tagChangeFor,
+  fixRecordChanges,
   resetsOnManualSync,
   unsentTitle,
   outboxRowView,
@@ -114,6 +115,64 @@ test("a failed record's notice follows its action, in the design's words", () =>
   // The photo is already gone: nothing to remove, so offer to try again.
   assert.equal(failureNotice(rec({ state: "failed", error: { action: "remove_photo", photo_id: "gone" } }), photos).button, "Try again");
   assert.equal(failureNotice(rec({ state: "pending" }), photos), null);
+});
+
+test("a VALIDATION_ERROR record gets the fix_record notice", () => {
+  const failed = (error) => rec({ state: "failed", error });
+  const notice = failureNotice(failed({ code: "VALIDATION_ERROR", action: "fix_record", message: "Height must be at most 100000." }));
+  assert.deepEqual(notice, {
+    action: "fix_record",
+    body: "The server can't accept this record as it is: Height must be at most 100000. Change the details below and send it again.",
+    button: "Save and send",
+  });
+  // A message without a full stop still reads as a sentence.
+  assert.equal(
+    failureNotice(failed({ code: "VALIDATION_ERROR", action: "fix_record", message: "That plant does not exist" })).body,
+    "The server can't accept this record as it is: That plant does not exist. Change the details below and send it again.",
+  );
+  // No message: that part is dropped.
+  assert.equal(
+    failureNotice(failed({ code: "ID_TAKEN", action: "fix_record", message: "" })).body,
+    "The server can't accept this record as it is. Change the details below and send it again.",
+  );
+  // A record refused before this notice existed (saved with action "retry") gets it too.
+  assert.equal(failureNotice(failed({ code: "VALIDATION_ERROR", action: "retry", message: "Bad" })).action, "fix_record");
+});
+
+test("fixRecord changes only the text fields and keeps the record's ids", () => {
+  const observation = { observed_at: "2026-11-02T08:00:00.000Z", height_cm: 900000, morphology: "x", notes: "", lat: 6.1, lng: 116.5, gps_accuracy_m: 8 };
+  const specimen = { proposed_species_name: "Nepenthes rajah", lat: 6.1, lng: 116.5, gps_accuracy_m: 8 };
+  const failed = rec({
+    state: "failed", step: "observation", attempts: 3, observation, specimen,
+    error: { code: "VALIDATION_ERROR", action: "fix_record", message: "Too high" },
+  });
+
+  const out = fixRecordChanges(failed, {
+    height_cm: "90", morphology: " Pitchers ", notes: "", proposed_species_name: " Nepenthes ampullaria ",
+    id: "other-id", specimen_id: "other-plant", qr_id: "NIAH-9999", observed_at: "2026-11-09T08:00:00.000Z", lat: 1,
+  });
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.changes, {
+    observation: { ...observation, height_cm: 90, morphology: "Pitchers", notes: null },
+    specimen: { ...specimen, proposed_species_name: "Nepenthes ampullaria" },
+    state: "pending",
+    error: null,
+    attempts: 0,
+  });
+  const fixed = { ...failed, ...out.changes };
+  for (const key of ["id", "specimen_id", "qr_id", "step", "user_id", "kind"]) assert.equal(fixed[key], failed[key], key);
+
+  // The same limits as the capture form.
+  assert.deepEqual(fixRecordChanges(failed, { height_cm: "100001" }), { ok: false, message: "Height must be a number from 0 to 100000 cm." });
+  assert.deepEqual(fixRecordChanges(failed, { height_cm: "1.2.3" }), { ok: false, message: "Height must be a number from 0 to 100000 cm." });
+  assert.equal(fixRecordChanges(failed, { notes: "n".repeat(5001) }).ok, false);
+  assert.equal(fixRecordChanges(failed, { proposed_species_name: "s".repeat(201) }).ok, false);
+
+  // A revisit has no species name; an edit changes only the fields it already holds.
+  const revisit = rec({ kind: "revisit", specimen: null, state: "failed", observation });
+  assert.equal("specimen" in fixRecordChanges(revisit, { proposed_species_name: "Nepenthes" }).changes, false);
+  const edit = rec({ kind: "edit", specimen: null, state: "failed", observation: { height_cm: 900000 } });
+  assert.deepEqual(fixRecordChanges(edit, { height_cm: "40", notes: "new" }).changes.observation, { height_cm: 40 });
 });
 
 test("a new tag keeps the record's ids and only goes back to the specimen step if the plant was never made", () => {
