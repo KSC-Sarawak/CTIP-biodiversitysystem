@@ -12,6 +12,8 @@
 //
 // tag_cache rows hold only { qr_id, status, specimen_id, mine, name }: never a
 // location, because the phone may be lost and the cache is not needed for maps.
+// A tag kept for another botanist (CTIP-116) is saved with status "kept" and
+// nothing else, so the scanner can say so even after a cold start with no signal.
 //
 // No React Native imports: this runs under plain Node in the tests.
 import { lookupTag, plantView } from "../selectors.js";
@@ -90,9 +92,13 @@ export function tagCacheRows(db, userId) {
   for (const t of db.tags || []) {
     const id = norm(t.qr_id);
     if (!id || seen.has(id)) continue;
-    // A tag kept for another botanist is not for this person to use or see.
-    if (t.status === "unused" && isReservedForOther(t, userId)) continue;
     seen.add(id);
+    // A tag kept for another botanist is not for this person to use: saved as
+    // "kept" with no plant data, so a scan with no signal says whose it is not.
+    if (t.status === "unused" && isReservedForOther(t, userId)) {
+      rows.push(cleanTagRow({ qr_id: id, status: "kept" }));
+      continue;
+    }
     rows.push(row(id, t.status, plants.get(id)));
   }
   // A plant whose tag is missing from the tag list is still on that tag.
@@ -153,6 +159,7 @@ export function lookupTagOffline(db, id, { cached = [], outboxTags = [], offline
   const row = cached.find((r) => norm(r.qr_id) === cleanId);
   if (row) {
     const tag = { qr_id: cleanId, status: row.status, batch_label: null };
+    if (row.status === "kept") return { kind: "kept", id: cleanId };
     if (row.status === "unused") return { kind: "unused", id: cleanId, tag, cached: true };
     if (row.status === "retired") return { kind: "retired", id: cleanId, tag, cached: true };
     if (row.specimen_id) {

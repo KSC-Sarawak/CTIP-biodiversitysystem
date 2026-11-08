@@ -376,6 +376,24 @@ test('botanist cannot release a printed tag', async () => {
   assert.equal(db.qr_tags.length, 1);
 });
 
+test('an officer cannot make a batch labelled reserved', async () => {
+  // "reserved" marks a tag kept on one botanist's phone: an officer's batch with
+  // that label would be refused to every botanist.
+  for (const role of ['officer', 'admin']) {
+    for (const count of [1, 5]) {
+      const res = await request(app).post('/v1/qr-tags/batch').set(as(role)).send({ count, batch_label: 'reserved' });
+      assert.equal(res.status, 403, `${role} ${count}`);
+      assert.equal(res.body.code, 'FORBIDDEN');
+      assert.equal(res.body.message, "Only a botanist's phone can make kept tags.");
+    }
+  }
+  assert.equal(db.qr_tags.length, 0);
+  // A botanist's phone keeps one tag at a time.
+  const one = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 1, batch_label: 'reserved' });
+  assert.equal(one.status, 201);
+  assert.equal(one.body[0].batch_label, 'reserved');
+});
+
 test("POST /specimens on another botanist's reserved tag answers 409 TAG_RESERVED", async () => {
   keptTag('NIAH-0001', { created_by: users.officer });
   const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });

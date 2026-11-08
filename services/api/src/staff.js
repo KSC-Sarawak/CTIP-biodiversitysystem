@@ -498,6 +498,12 @@ export const staffHandlers = {
     if (req.user.role === 'botanist' && body.count !== 1) {
       return fail(res, 403, 'FORBIDDEN', 'Botanists can create one tag at a time. Ask an officer to print a batch.');
     }
+    // "reserved" marks a tag kept on one botanist's phone for making a tag with
+    // no signal (CTIP-116); the API refuses it to everyone else (TAG_RESERVED).
+    // A batch with that label from anyone else would lock it away from every botanist.
+    if (body.batch_label === 'reserved' && !(req.user.role === 'botanist' && body.count === 1)) {
+      return fail(res, 403, 'FORBIDDEN', "Only a botanist's phone can make kept tags.");
+    }
     const db = supabaseAs(req.user);
     for (let attempt = 0; attempt < 3; attempt++) {
       const existing = await db.from('qr_tags').select('qr_id');

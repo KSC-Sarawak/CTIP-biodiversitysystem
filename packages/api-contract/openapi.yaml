@@ -729,6 +729,12 @@ paths:
       tags: [QR Tags]
       operationId: createQrTagBatch
       summary: Generate a print batch of new QR tags (officer/admin)
+      description: |
+        Officers and admins make print batches. A botanist may make one tag at a
+        time (`count: 1`). The `batch_label` `reserved` marks a tag kept on a
+        botanist's phone for making a tag offline (CTIP-116): it is allowed only
+        for a botanist with `count: 1`. Anyone else gets `403 FORBIDDEN`
+        "Only a botanist's phone can make kept tags."
       requestBody:
         required: true
         content:

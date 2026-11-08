@@ -194,6 +194,11 @@ Every record on the phone can also be deleted with "Delete from this phone". It 
   botanist (`batch_label: 'reserved'`). The API refuses them to anyone else
   (`409 TAG_RESERVED`). Only their owner may release (delete) them, and a botanist may
   release their own unused ones.
+- Only a botanist's phone may make a `reserved` tag, one at a time (`count: 1`); anyone
+  else gets `403 FORBIDDEN`. The web QR tags page leaves unused kept tags out of
+  printing, labels them "Kept for a botanist", and asks before Delete or Retire.
+- Another botanist's kept tag is saved in `tag_cache` as a row with status `kept` and
+  nothing else, so a scan with no signal says it is kept (pick mode refuses it).
 
 ---
 

@@ -154,13 +154,22 @@ test("isReservedForOther hides another botanist's reserved tags", () => {
   assert.equal(isReservedForOther({ qr_id: "NIAH-0001", status: "unused", batch_label: "Batch 1", created_by: "user-2" }, ME), false);
 });
 
-test("tagCacheRows leaves out tags kept for another botanist", () => {
+test("tagCacheRows saves another botanist's kept tag as kept", () => {
   const db = {
     species: [],
     plants: [],
     tags: [kept("NIAH-0201", ME), kept("NIAH-0202", "user-2"), { qr_id: "NIAH-0203", status: "unused", batch_label: "Batch 1", created_by: "user-2" }],
   };
-  assert.deepEqual(tagCacheRows(db, ME).map((r) => r.qr_id), ["NIAH-0201", "NIAH-0203"]);
+  const rows = tagCacheRows(db, ME);
+  assert.deepEqual(rows.map((r) => [r.qr_id, r.status]), [["NIAH-0201", "unused"], ["NIAH-0202", "kept"], ["NIAH-0203", "unused"]]);
+  // The kept row says only which tag it is and that it is kept: nothing about anyone's plant.
+  assert.deepEqual(rows[1], { qr_id: "NIAH-0202", status: "kept", specimen_id: null, mine: false, name: null });
+});
+
+test("a cached kept tag scans as kept with no signal", () => {
+  const cached = tagCacheRows({ species: [], plants: [], tags: [kept("NIAH-0202", "user-2")] }, ME);
+  // A cold start without signal: nothing has loaded, only the saved list is there.
+  assert.deepEqual(lookupTagOffline(emptyDb, "NIAH-0202", { cached, offline: true, meId: ME }), { kind: "kept", id: "NIAH-0202" });
 });
 
 test("two top-ups at once make one run", async () => {
