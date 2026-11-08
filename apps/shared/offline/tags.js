@@ -115,13 +115,15 @@ export function outboxTagsFrom(outboxItems = []) {
 }
 
 /**
- * lookupTagOffline(db, id, { cached, outboxTags, offline })
- *   → { kind: 'unused'|'used'|'retired'|'unknown'|'unchecked', id, tag?, plant? }
- * Same answers as lookupTag, plus 'unchecked' (unknown while offline). A plant
+ * lookupTagOffline(db, id, { cached, outboxTags, offline, meId })
+ *   → { kind: 'unused'|'used'|'retired'|'unknown'|'unchecked'|'kept', id, tag?, plant? }
+ * Same answers as lookupTag, plus 'unchecked' (unknown while offline) and 'kept'
+ * (an unused tag kept for another botanist's offline use, CTIP-116; `meId` is
+ * the signed-in person, so their own kept tags still answer 'unused'). A plant
  * that exists only on this phone comes back with `plant.on_phone: true` and
  * `plant.outbox_id`; one known only from the cache has no photos or status.
  */
-export function lookupTagOffline(db, id, { cached = [], outboxTags = [], offline = false } = {}) {
+export function lookupTagOffline(db, id, { cached = [], outboxTags = [], offline = false, meId = null } = {}) {
   const cleanId = norm(id);
   if (!cleanId) return { kind: "unknown", id: cleanId };
 
@@ -145,6 +147,7 @@ export function lookupTagOffline(db, id, { cached = [], outboxTags = [], offline
   }
 
   const live = lookupTag(db, cleanId);
+  if (live.kind === "unused" && isReservedForOther(live.tag, meId)) return { kind: "kept", id: cleanId };
   if (live.kind !== "unknown") return live;
 
   const row = cached.find((r) => norm(r.qr_id) === cleanId);

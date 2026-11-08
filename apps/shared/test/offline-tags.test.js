@@ -192,3 +192,18 @@ test("a failed top-up lets the next one run", async () => {
   await assert.rejects(topUp(), /boom/);
   assert.equal(await topUp(), "ok");
 });
+
+test("another botanist's kept tag is not offered as unused, online or offline", () => {
+  const db = {
+    ...emptyDb,
+    tags: [
+      { qr_id: "NIAH-0201", status: "unused", batch_label: "reserved", created_by: "other-id" },
+      { qr_id: "NIAH-0202", status: "unused", batch_label: "reserved", created_by: "me-id" },
+    ],
+  };
+  for (const offline of [false, true]) {
+    assert.deepEqual(lookupTagOffline(db, "NIAH-0201", { meId: "me-id", offline }), { kind: "kept", id: "NIAH-0201" });
+    // My own kept tag is still mine to use.
+    assert.equal(lookupTagOffline(db, "NIAH-0202", { meId: "me-id", offline }).kind, "unused");
+  }
+});

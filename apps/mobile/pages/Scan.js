@@ -4,6 +4,7 @@
 //   unused tag + botanist   -> "Start a new plant record?"  -> Add plant
 //   tag already on a plant  -> botanist: "Record a revisit" / everyone else: plant page
 //   retired or unknown      -> explain, scan again
+//   kept for another botanist -> explain, scan again (CTIP-116)
 //   not known, offline      -> botanist: "Start record" anyway; checked when back online
 // A botanist with no tag to hand can make one instead (CTIP-27): "No tag? Make a new
 // one" opens Add plant with no tag, which offers "Generate new QR tag".
@@ -30,7 +31,7 @@ const CAMERA_TEXT = '#eef4e4';
 const CAMERA_MUTED = '#b4c9ab';
 
 export default function Scan({ nav, params = {} }) {
-  const { db, role, apiStatus, outboxItems = [], cachedTags = [], changeRecordTag } = useStore();
+  const { db, me, role, apiStatus, outboxItems = [], cachedTags = [], changeRecordTag } = useStore();
   const pickFor = params.pickFor || null;
   const picking = useRef(false); // one tag change per scan, however many times the camera reads it
   const insets = useSafeAreaInsets();
@@ -41,6 +42,7 @@ export default function Scan({ nav, params = {} }) {
     cached: cachedTags,
     outboxTags: outboxTagsFrom(outboxItems),
     offline: apiStatus !== 'connected',
+    meId: me?.id,
   });
   const [result, setResult] = useState(params.code ? lookup(params.code) : null);
   const [typing, setTyping] = useState(false);
@@ -224,7 +226,8 @@ function Result({ result, role, nav, onAgain }) {
   if (result.picking) {
     const why = result.kind === 'used' || result.kind === 'unfinished'
       ? 'It is already on a plant.'
-      : result.kind === 'retired' ? 'It was taken out of use.' : 'It is not a Daun Sense tag for Niah National Park.';
+      : result.kind === 'retired' ? 'It was taken out of use.'
+      : result.kind === 'kept' ? 'It is kept for another botanist.' : 'It is not a Daun Sense tag for Niah National Park.';
     return (
       <Sheet>
         <Mono size={15} color={c.ink2}>{result.id || 'No tag ID'}</Mono>
@@ -350,6 +353,20 @@ function Result({ result, role, nav, onAgain }) {
           {canOpen ? <Button label="Open plant page" kind="text" height={48} size={15} onPress={() => nav.replace('tag', { qr: result.id })} /> : null}
         </View>
         <Txt v="caption" color={c.ink2} style={{ textAlign: 'center', fontFamily: font('text', 600) }}>Each tag holds one plant. To tag a different plant, use an unused tag.</Txt>
+      </Sheet>
+    );
+  }
+
+  // A tag saved for another botanist's offline use (CTIP-116): not free for this plant.
+  if (result.kind === 'kept') {
+    return (
+      <Sheet>
+        <View style={{ gap: 6 }}>
+          <Mono size={15} color={c.ink2}>{result.id}</Mono>
+          <Txt v="title2" accessibilityRole="header" style={{ fontSize: 26, lineHeight: 32 }}>This tag is kept for another botanist</Txt>
+          <Txt v="body" color={c.ink2}>It's saved for their offline use. Use an unused tag for this plant.</Txt>
+        </View>
+        <Button label="Scan again" onPress={onAgain} />
       </Sheet>
     );
   }
