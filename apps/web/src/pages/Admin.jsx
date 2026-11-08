@@ -238,16 +238,6 @@ export function Users() {
   );
 }
 
-// A discussion message that was edited, deleted or put back, in words.
-function postChange(a) {
-  const before = a.old_value || {};
-  const after = a.new_value || {};
-  const quote = (t) => `"${t}"`;
-  if (!before.deleted_at && after.deleted_at) return `Deleted message: ${quote(before.body)}`;
-  if (before.deleted_at && !after.deleted_at) return `Undid delete, message back: ${quote(after.body)}`;
-  return `Edited message: ${quote(before.body)} → ${quote(after.body)}`;
-}
-
 // Every change recorded by the actions (audit_logs table), newest first.
 export function Audit() {
   const { db } = useStore();
@@ -266,7 +256,7 @@ export function Audit() {
                 <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || "System"}</td>
                 <td>{a.table_name}</td>
                 <td><Chip value={a.action} /></td>
-                <td className="code">{a.table_name === "discussion_posts" ? postChange(a) : <>{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</>}</td>
+                <td className="code">{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</td>
               </tr>
             ))}
           </tbody>
