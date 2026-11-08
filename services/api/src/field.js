@@ -232,6 +232,13 @@ export const fieldHandlers = {
     const body = parseBody(SpecimenCreate, req, res);
     if (!body) return;
     const db = supabaseAs(req.user);
+    // A tag kept for one botanist's phone (batch_label 'reserved', CTIP-116) is not
+    // for anyone else. A missing tag falls through to TAG_NOT_FOUND below.
+    const kept = await db.from('qr_tags').select('batch_label, created_by').eq('qr_id', body.qr_id).maybeSingle();
+    if (kept.error) return dbError(res, kept.error);
+    if (kept.data?.batch_label === 'reserved' && kept.data.created_by !== req.user.id) {
+      return fail(res, 409, 'TAG_RESERVED', `Tag ${body.qr_id} is kept for another botanist. Pick or scan an unused tag.`);
+    }
     const { data, error } = await db
       .from('specimens')
       .insert({ ...body, species_id: null, registered_by: req.user.id, endangered_override: false, is_deleted: false })

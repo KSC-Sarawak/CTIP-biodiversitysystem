@@ -766,8 +766,11 @@ paths:
     delete:
       tags: [QR Tags]
       operationId: deleteQrTag
-      summary: Delete an unused tag (officer/admin)
-      description: Only a tag that is `unassigned` and not on any plant. A tag on a plant is retired instead.
+      summary: Delete an unused tag (staff)
+      description: >
+        Only a tag that is `unassigned` and not on any plant. A tag on a plant is retired instead.
+        Officers and admins may delete any such tag. A botanist may delete only a tag kept for them
+        (`batch_label` `reserved`, `created_by` themselves); any other tag answers 403.
       parameters:
         - $ref: '#/components/parameters/QrId'
       responses:
@@ -1090,7 +1093,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Specimen' }
         '409':
-          description: QR tag already assigned to another specimen
+          description: >
+            `TAG_IN_USE` (the tag is already on another plant), `TAG_RESERVED` (the tag is kept
+            for another botanist) or `TAG_RETIRED` (the tag was retired or marked damaged)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

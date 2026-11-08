@@ -347,6 +347,50 @@ test('a tag on a plant cannot be deleted (409); an unused one can (204)', async 
   assert.deepEqual(db.qr_tags.map((t) => t.qr_id), ['NIAH-0001']);
 });
 
+/* ---------- kept tags (CTIP-116) ---------- */
+
+// A "kept" tag is one a botanist reserved on their phone for use with no signal.
+const keptTag = (qr_id, fields = {}) => {
+  db.qr_tags.push({ qr_id, status: 'unassigned', batch_label: 'reserved', created_by: users.botanist, ...fields });
+};
+
+test('botanist releases own reserved unused tag', async () => {
+  keptTag('NIAH-0001');
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 204);
+  assert.equal(db.qr_tags.length, 0);
+});
+
+test("botanist cannot release another botanist's tag", async () => {
+  keptTag('NIAH-0001', { created_by: users.officer });
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'FORBIDDEN');
+  assert.equal(db.qr_tags.length, 1);
+});
+
+test('botanist cannot release a printed tag', async () => {
+  keptTag('NIAH-0001', { batch_label: 'Print 3' });
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(db.qr_tags.length, 1);
+});
+
+test("POST /specimens on another botanist's reserved tag answers 409 TAG_RESERVED", async () => {
+  keptTag('NIAH-0001', { created_by: users.officer });
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'TAG_RESERVED');
+  assert.equal(db.specimens.length, 0);
+});
+
+test('POST /specimens on my own reserved tag works', async () => {
+  keptTag('NIAH-0001');
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
+  assert.equal(res.status, 201);
+  assert.equal(db.specimens.length, 1);
+});
+
 /* ---------- start-up load ---------- */
 
 test('workspace: every list, with signed links on field photos', async () => {
