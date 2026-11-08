@@ -24,7 +24,7 @@ import { uid } from '../../shared/utils.js';
 import { extractTag, plantView } from '../../shared/selectors.js';
 import { revisitTarget, outboxTagsFrom, isReservedForOther } from '../../shared/offline/tags.js';
 import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
-import { LIMITS, HEIGHT_PROBLEM, heightOk } from '../../shared/offline/records.js';
+import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation } from '../../shared/offline/records.js';
 
 const MAX_PHOTOS = 6;
 
@@ -823,9 +823,8 @@ export function Revisit({ nav, params = {} }) {
         morphology: changes.trim() || last?.morphology,
         notes: '',
         photos,
-        lat: hasFix(gps) ? gps.lat : target.lat,
-        lng: hasFix(gps) ? gps.lng : target.lng,
-        gps_accuracy_m: hasFix(gps) ? gps.acc : null,
+        // No fix and no spot set by hand: no location, never the plant's stored one.
+        ...revisitLocation(gps, { hasFix: hasFix(gps) }),
       });
       if (!res?.ok) {
         if (res?.message) notify(res.message); // keep what was entered

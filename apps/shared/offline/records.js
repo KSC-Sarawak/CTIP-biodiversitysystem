@@ -113,6 +113,18 @@ export function revisitRecord({ userId, qr_id, specimen_id = null, specimen_ref 
 }
 
 /**
+ * The location a revisit saves. With a fix (or a spot set by hand, which the form
+ * treats as a fix) all three values come from it. With none they are all null:
+ * the revisit never borrows the plant's stored location, which for an endangered
+ * plant is the reduced one. The plant's own location is not touched either way.
+ * `gps` is { lat, lng, acc }; `hasFix` says whether it holds a real position.
+ */
+export function revisitLocation(gps, { hasFix }) {
+  if (!hasFix) return { lat: null, lng: null, gps_accuracy_m: null };
+  return { lat: gps.lat, lng: gps.lng, gps_accuracy_m: gps.acc ?? null };
+}
+
+/**
  * What the edit form opened on: the record's values and version at that moment,
  * frozen. The screen keeps polling and `o` moves on when another device edits
  * the record, but the form's untouched fields still hold the old values. Those

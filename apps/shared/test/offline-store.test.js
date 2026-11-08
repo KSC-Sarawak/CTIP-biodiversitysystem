@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryOutbox } from "../offline/memoryOutbox.js";
 import { saveFirst, waitAtMost } from "../offline/syncEngine.js";
-import { newPlantRecord, revisitRecord, outboxPhotos } from "../offline/records.js";
+import { newPlantRecord, revisitRecord, outboxPhotos, revisitLocation } from "../offline/records.js";
 
 const ME = "user-1";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -123,4 +123,14 @@ test("outbox photos keep the camera's id and only the fields the outbox stores",
   assert.deepEqual(Object.keys(rows[0]).sort(), ["base64", "caption", "id", "name", "position", "traits", "type"]);
   assert.equal(rows[1].position, 1);
   assert.equal(rows[1].type, "image/jpeg");
+});
+
+// Project rule: a plant with no GPS fix is saved with no location, never with a
+// made-up position. A revisit used to fall back to the plant's stored location,
+// which is the reduced one for an endangered plant.
+test("a revisit with no GPS fix saves no location", () => {
+  assert.deepEqual(revisitLocation({ lat: null, lng: null, acc: null }, { hasFix: false }), { lat: null, lng: null, gps_accuracy_m: null });
+  // A fix, or a spot set by hand (which has no accuracy): all three come from it.
+  assert.deepEqual(revisitLocation({ lat: 4.1, lng: 113.8, acc: 6 }, { hasFix: true }), { lat: 4.1, lng: 113.8, gps_accuracy_m: 6 });
+  assert.deepEqual(revisitLocation({ lat: 4.1, lng: 113.8, acc: null }, { hasFix: true }), { lat: 4.1, lng: 113.8, gps_accuracy_m: null });
 });
