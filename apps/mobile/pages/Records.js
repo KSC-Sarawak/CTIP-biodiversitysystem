@@ -18,6 +18,7 @@ import { usePolling } from '../hooks/usePolling.js';
 import { listDraftsFor } from '../draftStore.js';
 import { withoutOutboxTwins, OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 import { OnThisPhone } from './PhoneRecords.js';
+import { editSnapshot } from '../../shared/offline/records.js';
 
 const GROUPS = [
   { key: 'fix', title: 'Needs you', statuses: ['returned', 'draft'] },
@@ -210,6 +211,10 @@ export function RecordDetail({ nav, params = {} }) {
   // Editable copy while the record is returned; saved only when it is sent again.
   const [fix, setFix] = useState(() => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' }));
   // Editable copy of a draft or queued record (CTIP-67); saved only with "Save changes".
+  // `opened` is the record as the form opened on it, kept even when the 5 s poll
+  // brings in a newer version: only fields changed against it are saved, with its
+  // version, so another device's edit is never silently overwritten (editSnapshot).
+  const [opened, setOpened] = useState(() => (o ? editSnapshot(o) : null));
   const [edit, setEdit] = useState(() => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' }));
   const [sending, setSending] = useState(false);
   const plant = o ? plantView(db, db.plants.find((p) => p.id === o.specimen_id)) : null;
@@ -234,8 +239,10 @@ export function RecordDetail({ nav, params = {} }) {
   const saveChanges = async () => {
     if (sending) return;
     setSending(true);
-    const r = await editUnsent(o, edit); // shows its own success or error message
+    const r = await editUnsent(opened || editSnapshot(o), edit); // shows its own success or error message
     setSending(false);
+    // Saved on the server: the record is now at its new version, so the next save builds on that.
+    if (r.ok && !r.queued && r.observation) setOpened(editSnapshot(r.observation));
     if (r.ok && r.queued) nav.back(); // saved on the phone: it continues under "On this phone"
   };
   const sendDraft = async () => {

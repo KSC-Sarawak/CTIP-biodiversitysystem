@@ -1036,7 +1036,10 @@ function collectionMatches(a = [], b = []) {
 
   // Change a draft or queued record of the botanist's own: "Save changes" in My
   // records. `changes` may hold height_cm, morphology and notes. Answers
-  // { ok, queued?, message? }.
+  // { ok, queued?, observation?, message? }. `obs` is the snapshot the form opened on
+  // (editSnapshot), NOT the live record: only fields changed against the snapshot are
+  // sent, and its version is the one checked, so a record that moved on since the form
+  // opened is refused (409 VERSION_CONFLICT) or becomes a conflict, never overwritten.
   //   online         PATCH /observations/:id with the version the screen shows. If the
   //                  record changed meanwhile (409 VERSION_CONFLICT) the message says so
   //                  and nothing is saved.
@@ -1074,7 +1077,7 @@ function collectionMatches(a = [], b = []) {
     if (res.ok) {
       notify("Changes saved");
       await loadFromApi(true);
-      return { ok: true, queued: false };
+      return { ok: true, queued: false, observation: res.data }; // the form's next snapshot
     }
     if (res.offline && outbox) return saveOnThePhone();
     await loadFromApi(true); // a record that changed meanwhile shows its newest version

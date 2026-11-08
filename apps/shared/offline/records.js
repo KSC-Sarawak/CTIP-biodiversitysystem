@@ -100,6 +100,20 @@ export function revisitRecord({ userId, qr_id, specimen_id = null, specimen_ref 
 }
 
 /**
+ * What the edit form opened on: the record's values and version at that moment,
+ * frozen. The screen keeps polling and `o` moves on when another device edits
+ * the record, but the form's untouched fields still hold the old values. Those
+ * values are compared with this snapshot (editRecord), and its version is the
+ * one sent (PATCH `version` or outbox `base_version`). Comparing with the live
+ * record instead would send an old value back as if the botanist had changed it,
+ * and silently overwrite the other device's edit.
+ */
+export function editSnapshot(obs) {
+  const { id, specimen_id, version, height_cm = null, morphology = null, notes = null } = obs;
+  return Object.freeze({ id, specimen_id, version, height_cm, morphology, notes });
+}
+
+/**
  * An edit of an observation the server already holds as a draft or queued
  * record (CTIP-67). Its id is the observation's id. `base_version` is the
  * version the phone last saw: the server refuses the edit if it moved on, and

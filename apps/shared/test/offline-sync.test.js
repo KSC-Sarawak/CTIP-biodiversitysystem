@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createMemoryOutbox } from "../offline/memoryOutbox.js";
 import { createSyncEngine, classify, actionFor, packBatches } from "../offline/syncEngine.js";
-import { editRecord } from "../offline/records.js";
+import { editRecord, editSnapshot } from "../offline/records.js";
 import { resolveConflict, MINE_COMMENT, THEIRS_COMMENT } from "../offline/conflicts.js";
 import { createFakeServer } from "./helpers/fakeServer.js";
 
@@ -767,6 +767,21 @@ test("resolveConflict refuses a record that is not in conflict", async () => {
   assert.equal(res.ok, false);
   assert.equal((await outbox.get(rec.id)).state, "pending");
   assert.equal((await resolveConflict({ outbox, addComment: server.api.addComment, id: "gone", choice: "theirs" })).ok, false);
+});
+
+test("an edit only sends the fields the botanist changed, against the version the form opened with", () => {
+  // The form opened on version 3 (height 30, notes "a")...
+  const opened = editSnapshot({ id: "obs-1", specimen_id: "sp-1", version: 3, height_cm: 30, morphology: null, notes: "a", status: "draft" });
+  // ...then the other device set the height to 50 (version 4) and a poll brought it in.
+  const live = { id: "obs-1", specimen_id: "sp-1", version: 4, height_cm: 50, morphology: null, notes: "a", status: "draft" };
+  // The botanist changed only the notes. The form still holds the old height.
+  const form = { height_cm: "30", morphology: "", notes: "b" };
+
+  const rec = editRecord({ userId: U, obs: opened, changes: form });
+  assert.deepEqual(rec.observation, { notes: "b" }, "the untouched height is not sent back");
+  assert.equal(rec.base_version, 3, "the version the form opened with, so the server answers a conflict");
+  assert.notEqual(rec.base_version, live.version);
+  assert.equal(Object.isFrozen(opened), true, "the snapshot cannot change under the form");
 });
 
 test("classify and actionFor follow the error rules", () => {
