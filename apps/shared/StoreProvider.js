@@ -49,6 +49,9 @@ import {
   updateDiscussionApi,
   deleteDiscussionApi,
   addDiscussionPostApi,
+  editDiscussionPostApi,
+  deleteDiscussionPostApi,
+  restoreDiscussionPostApi,
   uploadObservationPhotoApi,
   filePart,
   publishSpeciesApi,
@@ -99,6 +102,10 @@ export default function StoreProvider({ children, deviceId = "mobile" }) {
   const [apiStatus, setApiStatus] = useState("checking");
   const [apiError, setApiError] = useState(null);
   const [authToken, setAuthTokenState] = useState(getAuthToken());
+  // Why the last session ended, when an admin turned the account off. The
+  // sign-in page shows it until the person types again.
+  const [endedReason, setEndedReason] = useState("");
+  const clearEndedReason = useCallback(() => setEndedReason(""), []);
   const [isSyncing, setIsSyncing] = useState(false);
   const [backendSpeciesCount, setBackendSpeciesCount] = useState(0);
   const timer = useRef(null);
@@ -487,14 +494,25 @@ function collectionMatches(a = [], b = []) {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     }
 
-    const off = onSessionEnded(() => {
+    const off = onSessionEnded((info) => {
       if (!mounted) return;
       setUserId(null);
       setAuthTokenState(null);
       lastWorkspace.current = null;
       sessionEpoch.current += 1;
       setDb(seed); // F-13: drop the staff data when the session ends
-      notify("Your session has ended. Please sign in again.");
+      if (info?.reason === "disabled") {
+        // An admin turned the account off. The website opens the sign-in page,
+        // which shows why; the phone app shows it as a message.
+        setEndedReason(info.message);
+        if (typeof document !== "undefined") {
+          if (window.location.hash !== "#/login") window.location.hash = "/login";
+        } else {
+          notify(info.message);
+        }
+      } else {
+        notify("Your session has ended. Please sign in again.");
+      }
       loadFromApi(true);
     });
 
@@ -1039,6 +1057,33 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
+  // One message changed by the API (edit, delete or undo): put the new copy in place.
+  const putPost = (post) => setDb((prev) => ({
+    ...prev,
+    discussionPosts: (prev.discussionPosts || []).map((p) => (p.id === post.id ? post : p)),
+  }));
+
+  const editDiscussionPost = async (id, postId, body, mentions = []) => {
+    const res = await callApi(editDiscussionPostApi, id, postId, { body, mentions });
+    if (!res.ok) { notify(`Could not save: ${res.message}`); return false; }
+    putPost(res.data);
+    return true;
+  };
+
+  const deleteDiscussionPost = async (id, postId) => {
+    const res = await callApi(deleteDiscussionPostApi, id, postId);
+    if (!res.ok) { notify(`Could not delete: ${res.message}`); return false; }
+    putPost(res.data);
+    return true;
+  };
+
+  const restoreDiscussionPost = async (id, postId) => {
+    const res = await callApi(restoreDiscussionPostApi, id, postId);
+    if (!res.ok) { notify(`Could not undo: ${res.message}`); return false; }
+    putPost(res.data);
+    return true;
+  };
+
   // Owner only: { title?, visibility?, share_users?, share_roles? }
   const updateDiscussion = async (id, changes) => {
     const res = await callApi(updateDiscussionApi, id, changes);
@@ -1361,9 +1406,11 @@ function collectionMatches(a = [], b = []) {
     db, me, role, toast, notify,
     logout, login, signIn, changePassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel,
+    endedReason, clearEndedReason,
     setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
     syncObservation, resubmit, reviewObservation, addComment,
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
+    editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
     ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds,

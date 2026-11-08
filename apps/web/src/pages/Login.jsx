@@ -18,7 +18,7 @@ import { PARK } from "../../../shared/site.js";
 // a QR code to set the app up ("mfa-setup").
 // Shown at #/login and on the Staff area page (#/staff) for anyone signed out.
 export default function Login() {
-  const { login, signIn, changePassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel } = useStore();
+  const { login, signIn, changePassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel, endedReason, clearEndedReason } = useStore();
   const { query } = useRoute();
   const staff = getStaffPageContent(PARK);
   const [mode, setMode] = useState(query.reset ? "reset" : query.expired ? "change" : "signin"); // signin | change | reset | first | mfa | mfa-setup
@@ -29,9 +29,14 @@ export default function Login() {
   const [code, setCode] = useState(""); // the 6-digit code (VA-70)
   const [setup, setSetup] = useState(null); // { qr, secret, uri } while setting up the app
   const [busy, setBusy] = useState(false); // a sign-in or code check is on its way: no second click
+  const [error, setError] = useState(""); // why the last sign-in failed, shown on the form
+  // Also shown: the account was turned off while signed in (set by the store).
+  const shownError = error || endedReason;
+  const clearError = () => { setError(""); clearEndedReason(); };
 
   const switchTo = (next) => {
     setMode(next);
+    clearError();
     setPw("");
     setNewPw("");
   };
@@ -40,9 +45,12 @@ export default function Login() {
     e.preventDefault();
     if (busy) return;
     setBusy(true);
+    clearError();
     const res = await login(email, pw);
     setBusy(false);
-    if (!res.ok) return notify(res.message);
+    // One message for an unknown email and a wrong password, so the form
+    // cannot be used to find out who has an account.
+    if (!res.ok) return setError(res.message);
     if (res.mfa === "verify") {
       setCode("");
       return setMode("mfa");
@@ -143,8 +151,9 @@ export default function Login() {
                 <p><Icon name="wifiOff" size={16} /> The server is not answering right now. It can take up to a minute to wake up, so try again shortly.</p>
               </div>
             )}
-            <label>Email or username<input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@sfc.my" autoComplete="username" required /></label>
-            <label>Password<PasswordInput value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" required /></label>
+            <label>Email or username<input value={email} onChange={(e) => { setEmail(e.target.value); clearError(); }} placeholder="name@sfc.my" autoComplete="username" required /></label>
+            <label>Password<PasswordInput value={pw} onChange={(e) => { setPw(e.target.value); clearError(); }} autoComplete="current-password" required /></label>
+            {shownError && <p className="loginerr" role="alert"><Icon name="alert" size={16} /> {shownError}</p>}
             <p className="login-forgot">
               <button type="button" className="textlink" onClick={() => switchTo("change")}>Forgot password?</button>
             </p>

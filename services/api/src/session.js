@@ -4,6 +4,7 @@ import { parseBody, fail } from './validate.js';
 import { tooMany as overLimit, resetRateLimits } from './rateLimit.js';
 import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } from './emailLimit.js';
 import { mfaStep } from './mfa.js';
+import { accountBlock } from './accountStatus.js';
 
 // Sign-in, session refresh and passwords (CTIP-114). The web and mobile apps
 // never talk to Supabase directly: they send these requests to the API, and
@@ -43,9 +44,11 @@ function roleIn(token) {
   }
 }
 
-// Every sign-in now reaches Supabase from the API's address, so Supabase's own
-// per-address limit no longer tells callers apart. This limit does, per caller
-// address (see rateLimit.js).
+// Per caller address limits (see rateLimit.js), used for password reset and,
+// in mfa.js, for the 6-digit codes. Sign-in has no limit here since 8 Nov 2026
+// (team decision): it used to allow 10 tries per address every 5 minutes. To
+// bring it back, put the tooMany(req, 'sign-in') line back at the top of
+// 'post /auth/sign-in' and the 429 test back in test/session.test.js.
 export const ATTEMPT_LIMIT = 10;
 export const ATTEMPT_WINDOW_MS = 5 * 60 * 1000;
 export const resetAttemptLimits = resetRateLimits;
@@ -65,11 +68,21 @@ async function authRequest(path, { method = 'POST', token, body } = {}) {
   });
 }
 
+// A new session for an account an admin has turned off: end it and say why.
+// Its token has no role (the access token hook leaves it out), so only then is
+// the profile read. Returns the message, or null to carry on.
+async function refuseIfDisabled(session) {
+  const token = session?.access_token;
+  if (!token || roleIn(token)) return null;
+  const blocked = await accountBlock({ id: session.user?.id, token });
+  if (blocked) await authRequest('/logout?scope=local', { token }).catch(() => {});
+  return blocked;
+}
+
 const bearer = (req) => /^Bearer (.+)$/i.exec(req.headers.authorization ?? '')?.[1];
 
 export const sessionHandlers = {
   'post /auth/sign-in': async (req, res) => {
-    if (tooMany(req, 'sign-in')) return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many sign-in attempts. Wait a few minutes and try again.');
     const body = parseBody(SignIn, req, res);
     if (!body) return;
     const { data, error } = await supabaseFresh().auth.signInWithPassword(body);
@@ -79,6 +92,8 @@ export const sessionHandlers = {
       if (error.status === 429) return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many sign-in attempts. Wait a few minutes and try again.');
       return fail(res, 502, 'AUTH_ERROR', 'Signing in is not working right now. Please try again.');
     }
+    const blocked = await refuseIfDisabled(data.session);
+    if (blocked) return fail(res, 403, 'ACCOUNT_DISABLED', blocked);
     // mfa: what comes next. "verify": type the 6-digit code (POST /auth/mfa/verify).
     // "setup": officers and admins must set up an authenticator app first
     // (POST /auth/mfa/enroll). "none": signed in. Until then the session only
@@ -91,6 +106,8 @@ export const sessionHandlers = {
     if (!body) return;
     const { data, error } = await supabaseFresh().auth.refreshSession({ refresh_token: body.refresh_token });
     if (error || !data?.session) return fail(res, 401, 'SESSION_ENDED', 'Your session has ended. Please sign in again.');
+    const blocked = await refuseIfDisabled(data.session);
+    if (blocked) return fail(res, 403, 'ACCOUNT_DISABLED', blocked);
     res.json(toSession(data.session));
   },
 

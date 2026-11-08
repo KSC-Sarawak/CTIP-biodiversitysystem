@@ -38,7 +38,10 @@ export default function Shell({ seg, children, plain }) {
         {links.length > 0 && (
           <nav className="quick" aria-label="Staff tools">
             {links.map((l) => (
-              <a key={l.to} href={"#" + l.to} className={"pill " + (isOn(l.to) ? "on" : "")}>{l.label}</a>
+              <a key={l.to} href={"#" + l.to} className={"pill " + (isOn(l.to) ? "on" : "")}>
+                {l.label}
+                {l.badge && counts[l.badge] > 0 && <b className={"count count-" + l.badge}>{counts[l.badge]}</b>}
+              </a>
             ))}
           </nav>
         )}

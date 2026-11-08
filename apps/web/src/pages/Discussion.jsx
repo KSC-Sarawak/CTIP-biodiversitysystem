@@ -164,7 +164,7 @@ export default function Discussion({ arg }) {
                   {isNew && <span className="chip chip-synced">New</span>}
                 </span>
                 <span className="block mute small">To: {audienceText(t.audience, people) || "Everyone (public)"}</span>
-                {last && <span className="block clamp2">{people.name(last.author_id)}: {last.body}</span>}
+                {last && <span className="block clamp2">{people.name(last.author_id)}: {last.deleted_at ? "Message deleted" : last.body}</span>}
                 <span className="meta">
                   <span>Started by {t.owner_id === me?.id ? "you" : people.name(t.owner_id)}</span>
                   <span>{t.posts.length} {t.posts.length === 1 ? "message" : "messages"}</span>
@@ -340,12 +340,18 @@ function AudiencePicker({ people, users, roles, onUsers, onRoles, visibility }) 
   }, [open]);
 
   const needle = find.trim().toLowerCase();
+  const membersOf = (r) => people.all.filter((p) => p.role === r && p.id !== me?.id);
+  // People in a chosen group already get it, so they are not offered again under People.
   const matches = people.all
-    .filter((p) => p.id !== me?.id && !users.includes(p.id))
+    .filter((p) => p.id !== me?.id && !users.includes(p.id) && !roles.includes(p.role))
     .filter((p) => !needle || `${p.full_name} ${p.username || ""} ${ROLE_LABEL[p.role] || ""}`.toLowerCase().includes(needle))
     .slice(0, 8);
-  const sizeOf = (r) => people.all.filter((p) => p.role === r && p.id !== me?.id).length;
-  const toggleRole = (r) => onRoles(roles.includes(r) ? roles.filter((x) => x !== r) : [...roles, r]);
+  const toggleRole = (r) => {
+    if (roles.includes(r)) return onRoles(roles.filter((x) => x !== r));
+    onRoles([...roles, r]);
+    // Anyone picked one by one who is in this group is now covered by it.
+    onUsers(users.filter((id) => people.byId.get(id)?.role !== r));
+  };
   // Back to the search box after a pick, so the next person can be typed straight away.
   const add = (id) => { onUsers([...users, id]); setFind(""); inputRef.current?.focus(); };
 
@@ -357,10 +363,22 @@ function AudiencePicker({ people, users, roles, onUsers, onRoles, visibility }) 
       <div className="pills" role="group" aria-label="Send to groups">
         {GROUPS.map((g) => (
           <button key={g.role} type="button" className={"pill" + (roles.includes(g.role) ? " on" : "")} aria-pressed={roles.includes(g.role)} onClick={() => toggleRole(g.role)}>
-            {roles.includes(g.role) && <Icon name="check" size={14} />} {g.label}<b>{sizeOf(g.role)}</b>
+            {roles.includes(g.role) && <Icon name="check" size={14} />} {g.label}<b>{membersOf(g.role).length}</b>
           </button>
         ))}
       </div>
+      {/* Who each chosen group reaches, side by side. */}
+      {GROUPS.filter((g) => roles.includes(g.role)).map((g) => {
+        const members = membersOf(g.role);
+        return (
+          <div key={g.role} className="groupmembers">
+            <p className="mute small">{g.label} ({members.length}):</p>
+            {members.length
+              ? <ul className="plain tokens" aria-label={`People in ${g.label}`}>{members.map((p) => <li key={p.id} className="token member">{p.full_name}</li>)}</ul>
+              : <p className="mute small">Nobody else is in this group yet.</p>}
+          </div>
+        );
+      })}
 
       <p className="overline gap-top">People</p>
       {users.length > 0 && (
@@ -405,6 +423,14 @@ function AudiencePicker({ people, users, roles, onUsers, onRoles, visibility }) 
   );
 }
 
+// Ctrl + Enter (Cmd + Enter on a Mac) sends the form the text box is in.
+function sendOnCtrlEnter(e) {
+  if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return false;
+  e.preventDefault();
+  e.currentTarget.form?.requestSubmit();
+  return true;
+}
+
 // A textarea that suggests people after "@". Picking one writes "@Full Name"
 // and remembers their id, so the API can notify them.
 function MentionBox({ label, value, onChange, mentions, onMentions, candidates, placeholder, rows = 4 }) {
@@ -436,6 +462,7 @@ function MentionBox({ label, value, onChange, mentions, onMentions, candidates, 
   };
 
   const onKeyDown = (e) => {
+    if (sendOnCtrlEnter(e)) return;
     if (!options.length) return;
     if (e.key === "ArrowDown") { e.preventDefault(); setPick((pick + 1) % options.length); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setPick((pick - 1 + options.length) % options.length); }
@@ -471,6 +498,7 @@ function MentionBox({ label, value, onChange, mentions, onMentions, candidates, 
         </ul>
       )}
       {query !== null && !options.length && <p className="mute small">Nobody to tag by that name{candidates.length ? "" : ": only people who can read this thread can be tagged"}.</p>}
+      <p className="mute small">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send.</p>
     </div>
   );
 }
@@ -573,19 +601,7 @@ function Thread({ thread, people }) {
       )}
 
       <ul className="posts">
-        {thread.posts.map((p) => {
-          const author = people.byId.get(p.author_id);
-          return (
-            <li key={p.id} className={"post" + (p.author_id === me?.id ? " mine" : "")}>
-              <header>
-                <b>{author?.full_name || "Former member"}</b>
-                {author && <Chip value={author.role}>{ROLE_LABEL[author.role]}</Chip>}
-                <small className="mute">{fmtDateTime(p.created_at)}</small>
-              </header>
-              <Body text={p.body} mentions={p.mentions} people={people} />
-            </li>
-          );
-        })}
+        {thread.posts.map((p) => <Post key={p.id} post={p} threadId={thread.id} people={people} readers={readers} ask={ask} />)}
       </ul>
 
       <form onSubmit={send}>
@@ -603,6 +619,103 @@ function Thread({ thread, people }) {
       </form>
       {confirmDialog}
     </>
+  );
+}
+
+// One message. The author can edit or delete it, an admin can delete it
+// (moderation), and whoever deleted it can undo that. Every change is kept
+// in the audit log, which admins can read.
+function Post({ post, threadId, people, readers, ask }) {
+  const { me, role, editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost } = useStore();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(post.body);
+  const [mentions, setMentions] = useState(post.mentions || []);
+  const [busy, setBusy] = useState(false);
+  const author = people.byId.get(post.author_id);
+  const mine = post.author_id === me?.id;
+  const deleted = !!post.deleted_at;
+  const canDelete = !deleted && (mine || role === "admin");
+
+  const startEdit = () => { setText(post.body); setMentions(post.mentions || []); setEditing(true); };
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setBusy(true);
+    const readerIds = new Set(readers.map((p) => p.id));
+    const ok = await editDiscussionPost(threadId, post.id, text.trim(), keptMentions(text, mentions, people).filter((m) => readerIds.has(m)));
+    setBusy(false);
+    if (ok) setEditing(false);
+  };
+
+  const remove = async () => {
+    // Your own message can be undone, so no question. Someone else's (admin): ask first.
+    if (!mine) {
+      const ok = await ask({
+        title: "Delete this message?",
+        body: `The message from ${author?.full_name || "this person"} will show as deleted for everyone. Its text stays in the audit log.`,
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    await deleteDiscussionPost(threadId, post.id);
+    setBusy(false);
+  };
+
+  const undo = async () => {
+    setBusy(true);
+    await restoreDiscussionPost(threadId, post.id);
+    setBusy(false);
+  };
+
+  return (
+    <li className={"post" + (mine ? " mine" : "") + (deleted ? " deleted" : "")}>
+      <header>
+        <b>{author?.full_name || "Former member"}</b>
+        {author && <Chip value={author.role}>{ROLE_LABEL[author.role]}</Chip>}
+        <small className="mute">{fmtDateTime(post.created_at)}</small>
+        {post.edited_at && !deleted && <small className="mute" title={"Edited " + fmtDateTime(post.edited_at)}>(edited)</small>}
+        {!editing && (mine || canDelete) && (
+          <span className="postactions">
+            {mine && !deleted && (
+              <button type="button" className="ic" onClick={startEdit} disabled={busy} aria-label="Edit message" title="Edit"><Icon name="pencil" size={16} /></button>
+            )}
+            {canDelete && (
+              <button type="button" className="ic" onClick={remove} disabled={busy} aria-label="Delete message" title="Delete"><Icon name="trash" size={16} /></button>
+            )}
+          </span>
+        )}
+      </header>
+      {deleted ? (
+        <p className="mute">
+          <i>Message deleted{post.deleted_by && post.deleted_by !== post.author_id ? " by an admin" : ""}.</i>{" "}
+          {post.deleted_by === me?.id && (
+            <button type="button" className="textlink" onClick={undo} disabled={busy}><Icon name="undo" size={14} /> Undo</button>
+          )}
+        </p>
+      ) : editing ? (
+        <form onSubmit={save}>
+          <MentionBox
+            label="Edit message"
+            value={text}
+            onChange={setText}
+            mentions={mentions}
+            onMentions={setMentions}
+            candidates={readers.filter((p) => p.id !== me?.id)}
+            rows={3}
+          />
+          <p className="row wrap">
+            <button className="btn" type="submit" disabled={busy || !text.trim()}><Icon name="check" size={16} /> {busy ? "Saving…" : "Save"}</button>
+            <button className="btn ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
+            <span className="mute small">The earlier text is kept in the audit log.</span>
+          </p>
+        </form>
+      ) : (
+        <Body text={post.body} mentions={post.mentions} people={people} />
+      )}
+    </li>
   );
 }
 
@@ -680,7 +793,8 @@ function RecordTopic({ topic }) {
       </ul>
 
       <form onSubmit={send}>
-        <label>{posts.length ? "Reply" : "Comment"}<textarea rows="3" value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Write a reply" /></label>
+        <label>{posts.length ? "Reply" : "Comment"}<textarea rows="3" value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={sendOnCtrlEnter} placeholder="Write a reply" /></label>
+        <p className="mute small">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send.</p>
         <p><button className="btn" type="submit"><Icon name="send" size={18} /> {posts.length ? "Reply" : "Post"}</button></p>
       </form>
     </>

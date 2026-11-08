@@ -4,6 +4,7 @@ import { parseBody, fail, dbError, UUID } from './validate.js';
 import { withSignedUrls } from './field.js';
 import { protectSpecimen } from './distribution.js';
 import { publicMediaUrl } from './photoLinks.js';
+import { accountBlock } from './accountStatus.js';
 import { dbLoad } from './dbLoad.js';
 import { emailProblem, passwordProblem, nameProblem, weakPasswordMessage } from './accountRules.js';
 import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } from './emailLimit.js';
@@ -207,6 +208,10 @@ export const staffHandlers = {
   // cursor }, or { partial: true, unchanged: true, cursor } when nothing did.
   // poll_after_ms tells the app how long to wait before asking again.
   'get /workspace': async (req, res) => {
+    // The apps load this every few seconds, so an account an admin turns off is
+    // told so within one poll, not only when its token next refreshes (up to an hour).
+    const blocked = await accountBlock(req.user);
+    if (blocked) return fail(res, 403, 'ACCOUNT_DISABLED', blocked);
     const db = supabaseAs(req.user);
     try {
       const now = Date.now();

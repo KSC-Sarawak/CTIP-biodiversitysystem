@@ -481,6 +481,16 @@ test("marking a notification read only touches the caller's own", async () => {
 const versionsAre = (v) => { db.table_versions = Object.entries(v).map(([table_name, version]) => ({ table_name, version })); };
 const poll = (who, cursor) => request(app).get('/v1/workspace').query(cursor ? { cursor } : {}).set(as(who));
 
+test('workspace: an account an admin turned off is told so, and gets no data', async () => {
+  db.profiles.push({ id: users.botanist, role: 'botanist', is_active: false, deleted_at: null });
+  const res = await request(app).get('/v1/workspace').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'ACCOUNT_DISABLED');
+  assert.equal(res.body.species, undefined);
+  db.profiles[0].deleted_at = '2026-11-01T00:00:00Z';
+  assert.match((await request(app).get('/v1/workspace').set(as('botanist'))).body.message, /deleted/);
+});
+
 test('workspace: the first load is full and hands back a cursor and a poll delay', async () => {
   versionsAre({ species: 1, notifications: 3 });
   const res = await poll('officer');
