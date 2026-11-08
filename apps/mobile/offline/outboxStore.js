@@ -113,6 +113,19 @@ export function createSqliteOutbox(getLocalDb) {
       }));
     },
 
+    // Only the first photo (lowest position), or null: for a list's thumbnail,
+    // which must not read every full-size photo of every record (CTIP-68).
+    async firstPhoto(recordId) {
+      const db = await open();
+      const row = db.getFirstSync(
+        'SELECT id, record_id, position, uploaded, data FROM outbox_photos WHERE record_id = ? ORDER BY position ASC LIMIT 1;',
+        [recordId]
+      );
+      return row
+        ? { id: row.id, record_id: row.record_id, position: row.position, uploaded: row.uploaded, ...JSON.parse(row.data) }
+        : null;
+    },
+
     // Once a photo is on the server its bytes are dead weight, so drop them.
     async markPhotoUploaded(photoId) {
       const db = await open();

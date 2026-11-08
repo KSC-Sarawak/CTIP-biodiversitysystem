@@ -23,18 +23,20 @@ import { shortDate, dateTime, coords, accuracy } from '../components/format.js';
 const photoUri = (photo) => (photo?.base64 ? `data:${photo.type || 'image/jpeg'};base64,${photo.base64}` : null);
 
 // The first photo of each record on the phone, read when the list changes.
-function useFirstPhotos(outboxItems, recordPhotos) {
+// Only that one photo is read per record (recordFirstPhoto), never all of them:
+// photos are full size, and a field day's backlog would not fit in memory.
+function useFirstPhotos(outboxItems, recordFirstPhoto) {
   const [uris, setUris] = useState({});
   const ids = outboxItems.map((r) => r.id).join(',');
   useEffect(() => {
     let active = true;
     (async () => {
       const next = {};
-      for (const id of ids ? ids.split(',') : []) next[id] = photoUri((await recordPhotos(id))[0]);
+      for (const id of ids ? ids.split(',') : []) next[id] = photoUri(await recordFirstPhoto(id));
       if (active) setUris(next);
     })();
     return () => { active = false; };
-  }, [ids, recordPhotos]);
+  }, [ids, recordFirstPhoto]);
   return uris;
 }
 
@@ -45,9 +47,9 @@ const matches = (view, q) => {
 
 /** "On this phone" in My records. Nothing when no record waits on the phone. */
 export function OnThisPhone({ nav, q = '', top = false }) {
-  const { db, outboxItems = [], cachedTags = [], recordPhotos } = useStore();
+  const { db, outboxItems = [], cachedTags = [], recordFirstPhoto } = useStore();
   const { c } = useTheme();
-  const thumbs = useFirstPhotos(outboxItems, recordPhotos);
+  const thumbs = useFirstPhotos(outboxItems, recordFirstPhoto);
   if (!outboxItems.length) return null;
   const rows = outboxItems
     .map((r) => outboxRowView(r, { db, outboxItems, cached: cachedTags }))

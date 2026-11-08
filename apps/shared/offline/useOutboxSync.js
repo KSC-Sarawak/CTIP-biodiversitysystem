@@ -52,7 +52,7 @@ const engineApi = (callRef) => {
  * useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify })
  *   userId         the signed-in person (state), so their list loads when it changes
  *   currentUserId  () => whose records may be sent now, or null (see StoreProvider)
- * Answers { outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
+ * Answers { outboxItems, syncState, syncNow, saveOnPhone, recordPhotos, recordFirstPhoto,
  *           retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
  *           fixRecord, resolveConflict }.
  */
@@ -196,6 +196,18 @@ export function useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi
     }
   }, [outbox]);
 
+  // Only a record's first photo, or null: the thumbnail in "On this phone". It
+  // never reads the rest, so a long list of unsent records stays light.
+  const recordFirstPhoto = useCallback(async (id) => {
+    if (!outbox) return null;
+    try {
+      return await outbox.firstPhoto(id);
+    } catch (err) {
+      console.warn("outbox.firstPhoto:", err?.message || err);
+      return null;
+    }
+  }, [outbox]);
+
   // Run a change to the outbox, then read the list again. Answers { ok, message? }.
   const change = useCallback(async (what, task) => {
     if (!outbox) return { ok: false, message: "There are no records on this phone." };
@@ -294,7 +306,7 @@ export function useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi
   }), [change, outbox, notify, syncSoon, loadFromApi]);
 
   return {
-    outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
+    outboxItems, syncState, syncNow, saveOnPhone, recordPhotos, recordFirstPhoto,
     retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
   };
 }

@@ -624,7 +624,7 @@ function collectionMatches(a = [], b = []) {
   }, []);
 
   const {
-    outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
+    outboxItems, syncState, syncNow, saveOnPhone, recordPhotos, recordFirstPhoto,
     retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
   } = useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify });
 
@@ -1567,7 +1567,7 @@ function collectionMatches(a = [], b = []) {
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,
     keptTags, topUpReservedTags, releaseTag, takeReservedTag,
-    recordPhotos, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
+    recordPhotos, recordFirstPhoto, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
     editUnsent,
     loadFromApi,
     pollFromBackend: () => loadFromApi(true),

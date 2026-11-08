@@ -95,6 +95,16 @@ export function createMemoryOutbox() {
         .map(toPhoto);
     },
 
+    // Only the first photo (lowest position), or null: for a list's thumbnail,
+    // which must not read every full-size photo of every record (CTIP-68).
+    async firstPhoto(recordId) {
+      let first = null;
+      for (const row of photoRows.values()) {
+        if (row.record_id === recordId && (!first || row.position < first.position)) first = row;
+      }
+      return first ? toPhoto(first) : null;
+    },
+
     // Once a photo is on the server its bytes are dead weight, so drop them.
     async markPhotoUploaded(photoId) {
       const row = photoRows.get(photoId);

@@ -159,6 +159,25 @@ for (const [name, make] of Object.entries(makers)) {
     assert.equal(p2.base64, "AAAAp2");
   });
 
+  test(`${name} outbox: firstPhoto answers the lowest-position photo or null`, async () => {
+    const outbox = make();
+    // Saved out of order: position decides, not the order they were added.
+    await outbox.add(record("a"), [photo("p2", 2), photo("p0", 0), photo("p1", 1)]);
+    await outbox.add(record("b"), []);
+
+    const first = await outbox.firstPhoto("a");
+    assert.equal(first.id, "p0");
+    assert.equal(first.record_id, "a");
+    assert.equal(first.position, 0);
+    assert.equal(first.base64, "AAAAp0");
+    assert.equal(first.type, "image/jpeg");
+    assert.equal(await outbox.firstPhoto("b"), null, "a record with no photos");
+    assert.equal(await outbox.firstPhoto("missing"), null);
+
+    await outbox.removePhoto("p0");
+    assert.equal((await outbox.firstPhoto("a")).id, "p1");
+  });
+
   test(`${name} outbox: remove deletes the record and its photos`, async () => {
     const outbox = make();
     await outbox.add(record("a"), [photo("p1", 0)]);
@@ -253,6 +272,7 @@ test("sqlite outbox: every method throws OUTBOX_UNAVAILABLE when there is no dat
     () => outbox.get("a"),
     () => outbox.update("a", {}),
     () => outbox.photos("a"),
+    () => outbox.firstPhoto("a"),
     () => outbox.markPhotoUploaded("p1"),
     () => outbox.remove("a"),
     () => outbox.removePhoto("p1"),
