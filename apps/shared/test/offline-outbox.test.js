@@ -172,6 +172,19 @@ for (const [name, make] of Object.entries(makers)) {
     assert.equal((await outbox.photos("b")).length, 1);
   });
 
+  test(`${name} outbox: removePhoto deletes one photo and keeps the others`, async () => {
+    const outbox = make();
+    await outbox.add(record("a"), [photo("p1", 0), photo("p2", 1), photo("p3", 2)]);
+    await outbox.add(record("b"), [photo("q1", 0)]);
+
+    await outbox.removePhoto("p2");
+    await outbox.removePhoto("missing"); // nothing to do, no error
+
+    assert.deepEqual((await outbox.photos("a")).map((p) => p.id), ["p1", "p3"]);
+    assert.equal((await outbox.photos("b")).length, 1);
+    assert.equal((await outbox.get("a")).qr_id, "QR-a"); // the record itself stays
+  });
+
   test(`${name} outbox: resetInterrupted turns sending into pending`, async () => {
     const outbox = make();
     await outbox.add(record("a", { state: "sending" }), []);
@@ -242,6 +255,7 @@ test("sqlite outbox: every method throws OUTBOX_UNAVAILABLE when there is no dat
     () => outbox.photos("a"),
     () => outbox.markPhotoUploaded("p1"),
     () => outbox.remove("a"),
+    () => outbox.removePhoto("p1"),
     () => outbox.resetInterrupted(),
     () => outbox.count("user-1"),
   ];

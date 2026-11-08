@@ -103,6 +103,11 @@ export function createMemoryOutbox() {
       delete row.data.base64;
     },
 
+    // One photo the botanist removed from an unsent record (it could not be sent).
+    async removePhoto(photoId) {
+      photoRows.delete(photoId);
+    },
+
     async remove(id) {
       records.delete(id);
       for (const [photoId, row] of photoRows) {

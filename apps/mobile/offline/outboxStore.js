@@ -128,6 +128,12 @@ export function createSqliteOutbox(getLocalDb) {
       });
     },
 
+    // One photo the botanist removed from an unsent record (it could not be sent).
+    async removePhoto(photoId) {
+      const db = await open();
+      db.runSync('DELETE FROM outbox_photos WHERE id = ?;', [photoId]);
+    },
+
     async remove(id) {
       const db = await open();
       db.withTransactionSync(() => {

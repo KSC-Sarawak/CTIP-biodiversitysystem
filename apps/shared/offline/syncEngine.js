@@ -53,6 +53,15 @@ export function classify(res) {
 // must never block every younger one.
 const stopsRun = (res) => Boolean(res.offline) || res.status === 429;
 
+// An outbox state as the status the app already knows (STATUS_TEXT in tokens.js
+// gives the words): docs/architecture/offline-sync.md, section 6.
+const STATUS_OF_STATE = { pending: "queued", sending: "sending", failed: "sync_failed", conflict: "sync_conflict" };
+
+/** The status to show for a record on this phone: queued, sending, sync_failed or sync_conflict. */
+export function outboxStatus(record) {
+  return STATUS_OF_STATE[record?.state] || "queued"; // a row without a state is still waiting
+}
+
 /** The fix the app offers for a failed record (docs/architecture/offline-sync.md §5). */
 export function actionFor(code, status) {
   if (PICK_TAG.includes(code)) return "pick_tag";
@@ -186,7 +195,10 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     return api[name](...args);
   }
 
-  // Write changes to the record and carry on with the stored copy.
+  // Write changes to the record and carry on with the stored copy. Answers null
+  // when the record is no longer in the outbox: the botanist deleted it from the
+  // phone while this run was sending it ("Delete from this phone"). Every caller
+  // then drops that record and moves on to the next one.
   const save = (record, changes) => outbox.update(record.id, changes);
   const markSending = (record) => (record.state === "sending" ? record : save(record, { state: "sending" }));
 
@@ -237,6 +249,7 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     if (!res.ok) return { stop: await setBack(record, res) };
     // Use the id the API answered with: from now on that is the plant's id.
     const saved = await save(record, { specimen_id: res.data?.id ?? record.specimen_id, step: "observation" });
+    if (!saved) return { gone: true }; // deleted from the phone meanwhile
     await pointRevisitsAt(saved);
     return { record: saved };
   }
@@ -325,6 +338,7 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
       // An edit changes a record the server already holds; it does not send it for review.
       if (record.kind === "edit") return { done: true };
       record = await save(record, { step: "submit" });
+      if (!record) return { gone: true }; // deleted from the phone meanwhile
     }
 
     const res = await call("submit", record.id);
@@ -342,6 +356,7 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
   // The steps for one person's records. `progress.sent` counts finished records;
   // `touched` collects every record set to "sending". Returns the stoppedBy value.
   async function sendAll(userId, progress, touched) {
+    // Answers the record marked "sending", or null if it was deleted meanwhile.
     const sending = async (record) => {
       touched.add(record.id);
       return markSending(record);
@@ -359,7 +374,9 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     // behind its plant can use the plant's id in the same run.
     for (const record of queue) {
       if (stepOf(record) !== "specimen") continue;
-      const out = await sendSpecimen(await sending(record));
+      const marked = await sending(record);
+      if (!marked) continue; // deleted from the phone meanwhile
+      const out = await sendSpecimen(marked);
       if (out.stop) return out.stop;
     }
 
@@ -370,7 +387,8 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
       if (!record || stepOf(record) !== "observation") continue;
       const specimenId = await specimenIdFor(record);
       if (!specimenId) continue; // its plant is not registered yet: it waits, pending
-      toSend.push({ record: await sending(record), specimenId });
+      const marked = await sending(record);
+      if (marked) toSend.push({ record: marked, specimenId });
     }
     if (toSend.length) {
       const stop = await sendObservations(toSend);
@@ -381,7 +399,9 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
     for (const id of ids) {
       const record = await current(id);
       if (!record || !["photos", "submit"].includes(stepOf(record))) continue;
-      const out = await finish(await sending(record));
+      const marked = await sending(record);
+      if (!marked) continue;
+      const out = await finish(marked);
       if (out.stop) return out.stop;
       if (out.done) {
         await outbox.remove(id); // only now, after the API confirmed the last step

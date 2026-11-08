@@ -1,6 +1,7 @@
 // apps/mobile/pages/Records.js
 // A botanist's own records, grouped by what needs doing, and one record in detail
-// (with the officer's note and "Resubmit" when it was returned).
+// (with the officer's note and "Resubmit" when it was returned). Records saved on
+// this phone and not sent yet come first, under "On this phone" (PhoneRecords.js, CTIP-68).
 import React, { useState, useEffect } from 'react';
 import { View, Text } from 'react-native';
 
@@ -15,6 +16,8 @@ import {
 import { shortDate, dateTime, coords, accuracy } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { listDraftsFor } from '../draftStore.js';
+import { withoutOutboxTwins, OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
+import { OnThisPhone } from './PhoneRecords.js';
 
 const GROUPS = [
   { key: 'fix', title: 'Needs you', statuses: ['returned', 'draft'] },
@@ -32,7 +35,7 @@ const SORT_RECORDS = [
 
 export function MyRecords({ nav }) {
   usePolling(5000);
-  const { db, me } = useStore();
+  const { db, me, outboxItems = [], apiStatus } = useStore();
   const { c } = useTheme();
   const [filter, setFilter] = useState('all');
   const [sort, setSort] = useState('newest');
@@ -47,7 +50,13 @@ export function MyRecords({ nav }) {
     return () => { active = false; };
   }, [db, me?.id]);
 
-  const unfinished = unfinishedPlants(db, me?.id);
+  // A record still on the phone may already be on the server too (made, not yet
+  // sent for review): it is listed once, under "On this phone" (withoutOutboxTwins).
+  const twinFree = withoutOutboxTwins(
+    { observations: db.observations, plants: unfinishedPlants(db, me?.id), drafts: localDrafts },
+    outboxItems,
+  );
+  const unfinished = twinFree.plants;
 
   // Exclude tags that already have synced/approved/rejected observations by this user
   const settledTags = new Set(
@@ -59,7 +68,7 @@ export function MyRecords({ nav }) {
 
   // Combine server unfinished plants with local device crash-safe drafts (CTIP-57)
   const combinedUnfinished = [...unfinished];
-  for (const d of localDrafts) {
+  for (const d of twinFree.drafts) {
     if (!d.qr_id || settledTags.has(d.qr_id)) continue;
     const existingIdx = combinedUnfinished.findIndex((p) => p.qr_id === d.qr_id);
     if (existingIdx >= 0) {
@@ -78,7 +87,7 @@ export function MyRecords({ nav }) {
       });
     }
   }
-  const mine = db.observations
+  const mine = twinFree.observations
     .filter((o) => o.recorded_by === me?.id)
     .map((o) => ({ ...o, plant: plantView(db, db.plants.find((p) => p.id === o.specimen_id)) }))
     .filter((o) => o.plant)
@@ -98,11 +107,13 @@ export function MyRecords({ nav }) {
   const count = (g) => obsCount(g) + (g.key === 'fix' ? filteredUnfinished.length : 0);
   const groups = GROUPS.filter((g) => (filter === 'all' || filter === g.key) && obsCount(g) > 0);
   // A plant's later visits are labelled as revisits.
+  const onPhone = outboxItems.length > 0 && filter === 'all';
   const isRevisit = (o) => db.observations.some((x) => x.specimen_id === o.specimen_id && x.observed_at < o.observed_at);
 
   return (
     <Screen gap={18}>
       <TitleBlock title="My records" sub={me?.full_name} />
+      {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
       <SearchField
         value={q}
         onChangeText={setQ}
@@ -111,9 +122,10 @@ export function MyRecords({ nav }) {
       <Pills
         value={filter}
         onChange={setFilter}
-        items={[{ key: 'all', label: `All ${filteredMine.length + filteredUnfinished.length}` }, ...GROUPS.filter((g) => count(g)).map((g) => ({ key: g.key, label: `${g.title === 'Needs you' ? 'To fix' : g.title} ${count(g)}` }))]}
+        items={[{ key: 'all', label: `All ${filteredMine.length + filteredUnfinished.length + outboxItems.length}` }, ...GROUPS.filter((g) => count(g)).map((g) => ({ key: g.key, label: `${g.title === 'Needs you' ? 'To fix' : g.title} ${count(g)}` }))]}
       />
       <SortBar items={SORT_RECORDS} value={sort} onChange={setSort} />
+      {onPhone ? <OnThisPhone nav={nav} q={q} /> : null}
       {filteredUnfinished.length > 0 && (filter === 'all' || filter === 'fix') ? (
         <View style={{ gap: 12, marginBottom: 8 }}>
           <Notice
@@ -155,13 +167,13 @@ export function MyRecords({ nav }) {
           </View>
         </View>
       ) : null}
-      {filteredMine.length === 0 && filteredUnfinished.length === 0 ? (
+      {filteredMine.length === 0 && filteredUnfinished.length === 0 && !onPhone ? (
         <Empty icon="file">{q.trim() ? `No records match "${q.trim()}".` : 'No records yet. Scan an unused tag to add your first plant.'}</Empty>
       ) : null}
       {groups.map((g, gi) => {
         const rows = filteredMine.filter((o) => g.statuses.includes(o.status));
         return (
-          <Section key={g.key} title={g.title} top={gi > 0} gap={0}>
+          <Section key={g.key} title={g.title} top={gi > 0 || onPhone} gap={0}>
             {rows.map((o, i) => (
               <Row
                 key={o.id}

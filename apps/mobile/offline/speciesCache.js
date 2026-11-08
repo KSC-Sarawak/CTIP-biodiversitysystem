@@ -69,8 +69,20 @@ async function inBatches(items, size, task) {
   }
 }
 
+/**
+ * Does a species' picture need downloading? Only when it is new, it changed
+ * (another link), or the last download failed (no file). A forced refresh uses
+ * the same rule: it is about the list being fresh, and a few hundred unchanged
+ * pictures fetched again on every reconnect would waste the botanist's data.
+ */
+export function thumbNeedsDownload(old, thumbSrc) {
+  return !(old?.thumb_path && old.thumb_src === thumbSrc);
+}
+
 export function createSpeciesCache(openDb = getLocalDb) {
   let running = null; // a refresh in progress; callers share it
+  let runningForced = false; // whether that refresh skips the 24-hour check
+  let forcedNext = null; // a forced refresh waiting for a normal one to finish
   let memo = null; // the list as last read, until the next refresh
 
   function readAll(db) {
@@ -105,8 +117,7 @@ export function createSpeciesCache(openDb = getLocalDb) {
     if (dir) {
       const wanted = rows.filter((r) => {
         if (!r.species.primary_image_url) { r.thumb_path = null; return false; }
-        const unchanged = r.old?.thumb_path && r.old.thumb_src === r.data.thumb_src;
-        return force || !unchanged;
+        return thumbNeedsDownload(r.old, r.data.thumb_src);
       });
       await inBatches(wanted, DOWNLOADS_AT_ONCE, async (r) => {
         // A failed download keeps the old picture if there was one, else none.
@@ -139,21 +150,34 @@ export function createSpeciesCache(openDb = getLocalDb) {
     return { ok: true, count: rows.length };
   }
 
-  return {
-    // Fetch the species list and save it. Skipped when it ran less than 24 hours
-    // ago, unless `force` is set. Never throws; resolves to { ok, skipped?, count?, reason? }.
-    // Calls made while one is running share it.
-    refresh({ force = false } = {}) {
-      if (!running) {
-        running = doRefresh({ force })
-          .catch((err) => {
-            console.warn('[SpeciesCache] refresh failed, keeping the old list:', err?.message || err);
-            return { ok: false, reason: 'error' };
-          })
-          .finally(() => { running = null; });
+  // Fetch the species list and save it. Skipped when it ran less than 24 hours
+  // ago, unless `force` is set. Never throws; resolves to { ok, skipped?, count?, reason? }.
+  // Calls made while one is running share it, except a forced call while a
+  // normal one runs: that one may skip itself (the list looked fresh), so the
+  // forced refresh runs once it has finished instead of being dropped.
+  function refresh({ force = false } = {}) {
+    if (running) {
+      if (!force || runningForced) return running;
+      if (!forcedNext) {
+        forcedNext = running.then(() => {
+          forcedNext = null;
+          return refresh({ force: true });
+        });
       }
-      return running;
-    },
+      return forcedNext;
+    }
+    runningForced = force;
+    running = doRefresh({ force })
+      .catch((err) => {
+        console.warn('[SpeciesCache] refresh failed, keeping the old list:', err?.message || err);
+        return { ok: false, reason: 'error' };
+      })
+      .finally(() => { running = null; });
+    return running;
+  }
+
+  return {
+    refresh,
 
     // The saved species ({ id, scientific_name, ..., thumb_path }) and when they
     // were saved (ISO text, or null when never). Empty when SQLite is not available.

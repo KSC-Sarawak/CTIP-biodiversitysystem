@@ -11,7 +11,7 @@ import { useStore } from '../../shared/store.js';
 import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
-  Screen, Header, IconButton, TextLink, Txt, Mono, Section, Field, Area, Button, Thumb, Empty, DotLabel,
+  Screen, Header, IconButton, TextLink, Txt, Mono, Section, Field, Area, Button, Thumb, Empty, DotLabel, Notice,
 } from '../components/Bits.js';
 import LeafletMap from '../components/LeafletMap.js';
 import { PHOTO_TRAITS, PHOTO_CAPTION_MAX, isThreatened } from '../../shared/data.js';
@@ -22,7 +22,8 @@ import { TagQrView } from './TagQr.js';
 import { prefillFromSpecies } from '../../shared/speciesSearch.js';
 import { uid } from '../../shared/utils.js';
 import { extractTag, plantView } from '../../shared/selectors.js';
-import { revisitTarget } from '../../shared/offline/tags.js';
+import { revisitTarget, outboxTagsFrom } from '../../shared/offline/tags.js';
+import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 
 const MAX_PHOTOS = 6;
 
@@ -313,11 +314,12 @@ function SetByHand({ typed, gps, qr, protect, onChange }) {
 }
 
 export function AddPlant({ nav, params = {} }) {
-  const { db, me, addPlant, generateTags, outboxItems = [] } = useStore();
+  const { db, me, addPlant, generateTags, outboxItems = [], apiStatus } = useStore();
   const { c } = useTheme();
   const [qr, setQr] = useState(params.qr || '');
   // A tag a record on this phone already uses is taken, though the server does not know yet.
-  const onPhone = new Set(outboxItems.filter((r) => r.kind === 'new_plant').map((r) => r.qr_id));
+  // The same set Scan uses (outboxTagsFrom), so a tag is taken the same way everywhere.
+  const onPhone = new Set(outboxTagsFrom(outboxItems).map((t) => t.qr_id));
   const unusedTags = (db.tags || []).filter((t) => t.status === 'unused' && !onPhone.has(t.qr_id));
   const [photos, setPhotos] = useState([]);
   const [sp, setSp] = useState('');
@@ -328,6 +330,8 @@ export function AddPlant({ nav, params = {} }) {
   const { gps, setGps, gpsLoading, gpsError, typed, typeSpot, fetchGps, refresh, toggleHand } = useSpot();
   const [restoredDraft, setRestoredDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Set at once, unlike state: a fast double tap must not save two records (as web AddPlant.jsx does).
+  const submittingRef = useRef(false);
   const [generating, setGenerating] = useState(false);
   const [showQr, setShowQr] = useState(false); // the tag's QR, shown over the form (CTIP-27)
   const [tried, setTried] = useState(false);
@@ -397,6 +401,18 @@ export function AddPlant({ nav, params = {} }) {
           );
           return;
         }
+        // A plant saved on this phone and not sent yet already has this tag.
+        if (onPhone.has(tagCandidate)) {
+          Alert.alert(
+            'Tag Already In Use',
+            `Tag ${tagCandidate} is already on a plant saved on this phone and not sent yet. Would you like to record a revisit instead?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Record Revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
+            ]
+          );
+          return;
+        }
         setQr(tagCandidate);
         Alert.alert('QR Tag Bound', `Loaded tag: ${tagCandidate}`);
       } else {
@@ -452,6 +468,7 @@ export function AddPlant({ nav, params = {} }) {
               : 'Every plant record starts from a QR tag. Choose how you want to tag this plant:'}
           </Txt>
         </View>
+        {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
 
         {/* Coming from "No tag? Make a new one" on Scan, making a tag is the main action (CTIP-27). */}
         <View style={{ gap: 12 }}>
@@ -519,6 +536,7 @@ export function AddPlant({ nav, params = {} }) {
   const ok = !problems.photos && !problems.looks && !problems.species;
 
   const submit = async () => {
+    if (submittingRef.current) return;
     setTried(true);
     if (!ok) {
       if (problems.species) {
@@ -530,6 +548,7 @@ export function AddPlant({ nav, params = {} }) {
       }
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const res = await addPlant({
@@ -550,10 +569,12 @@ export function AddPlant({ nav, params = {} }) {
       nav.replace('submitted', {
         qr, name: sp.trim(), photos: photos.length, located: hasFix(gps), acc: gps.acc, cover: photos[0]?.url,
         queued: !!res.queued, // saved on this phone, not sent yet
+        failed: res.state === 'failed', // saved, but the first send was refused
       });
     } catch (err) {
       Alert.alert('Submission Error', err?.message || 'Failed to submit observation. Draft has been saved safely.');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
@@ -607,6 +628,7 @@ export function AddPlant({ nav, params = {} }) {
           </View>
         )}
       </View>
+      {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
 
       <Section title="Photos" right={<Txt v="caption" color={tried && problems.photos ? c.warning : c.ink3}>{tried && problems.photos ? 'Add at least one' : `${photos.length} of ${MAX_PHOTOS}`}</Txt>} gap={12}>
         <PhotoStrip
@@ -647,16 +669,22 @@ export function AddPlant({ nav, params = {} }) {
 export function Submitted({ nav, params = {} }) {
   const { c } = useTheme();
   const queued = !!params.queued;
+  // Saved, but the server refused it within the first few seconds: "No
+  // connection" would be wrong, and the record says why (UI D).
+  const failed = queued && !!params.failed;
+  const tone = failed ? 'warning' : queued ? 'neutral' : 'success';
   return (
     <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.home} />} />} top={0} gap={24}>
       <View style={{ alignItems: 'center', gap: 14, paddingTop: 40 }}>
-        <View style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: queued ? c.neutralSoft : c.successSoft }}>
-          <Icon name="check" size={40} color={queued ? c.neutral : c.success} strokeWidth={2.25} />
+        <View style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: c[tone + 'Soft'] }}>
+          <Icon name="check" size={40} color={c[tone]} strokeWidth={2.25} />
         </View>
         <Txt v="title1" accessibilityRole="header">{queued ? 'Saved on this phone' : 'Sent for review'}</Txt>
-        {queued ? <DotLabel status="queued" /> : null}
+        {queued ? <DotLabel status={failed ? 'sync_failed' : 'queued'} /> : null}
         <Txt v="body" color={c.ink2} style={{ textAlign: 'center', maxWidth: 300 }}>
-          {queued
+          {failed
+            ? "Saved on this phone, but it couldn't be sent. Open it in My records to see why."
+            : queued
             ? "No connection right now. It will be sent for review automatically when you're back online."
             : `An officer will check ${params.qr}. You'll get an alert when it is approved or returned.`}
         </Txt>
@@ -696,6 +724,7 @@ export function Revisit({ nav, params = {} }) {
   const [height, setHeight] = useState('');
   const [changes, setChanges] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false); // a fast double tap must not save two revisits
   const { gps, gpsLoading, gpsError, typed, typeSpot, fetchGps, refresh, toggleHand } = useSpot();
 
   useEffect(() => {
@@ -731,7 +760,8 @@ export function Revisit({ nav, params = {} }) {
   };
 
   const submit = async () => {
-    if (submitting) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const res = await addRevisit({
@@ -752,7 +782,7 @@ export function Revisit({ nav, params = {} }) {
       }
       if (res.queued) {
         nav.replace('submitted', {
-          queued: true, qr: target.qr_id, name: target.name, photos: photos.length,
+          queued: true, failed: res.state === 'failed', qr: target.qr_id, name: target.name, photos: photos.length,
           located: hasFix(gps), acc: gps.acc, cover: photos[0]?.url,
         });
         return;
@@ -760,6 +790,7 @@ export function Revisit({ nav, params = {} }) {
       notify(`Revisit of ${target.qr_id} sent for review`);
       nav.tab('records');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };

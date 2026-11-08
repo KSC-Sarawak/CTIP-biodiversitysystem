@@ -651,3 +651,33 @@ test("classify and actionFor follow the error rules", () => {
   assert.equal(actionFor("VALIDATION_ERROR", 422), "retry");
   assert.equal(actionFor("ID_TAKEN"), "retry");
 });
+
+// "Delete from this phone" (CTIP-68) can remove a record while a run is sending
+// it. The engine must carry on with the next record, not throw on the missing row.
+for (const at of ["createSpecimen", "sync", "uploadPhoto", "submit"]) {
+  test(`a record deleted from the phone during its ${at} call is skipped without an error`, async () => {
+    const { outbox, server, engine } = setup();
+    const doomed = plantRecord();
+    const next = plantRecord();
+    await outbox.add(doomed, photos(1));
+    await outbox.add(next, photos(1));
+    const real = server.api[at];
+    let deleted = false;
+    server.api[at] = async (...args) => {
+      const res = await real(...args);
+      if (!deleted) {
+        deleted = true; // the oldest record's call comes first
+        await outbox.remove(doomed.id);
+      }
+      return res;
+    };
+
+    const summary = await engine.run(U);
+
+    assert.deepEqual(await outbox.list(U), []);
+    const sent = server.state.observations.find((o) => o.id === next.id);
+    assert.equal(sent?.status, "synced", "the next record is still sent");
+    assert.equal(summary.stoppedBy, null);
+    assert.equal(summary.pending, 0);
+  });
+}

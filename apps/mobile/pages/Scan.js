@@ -9,7 +9,10 @@
 // one" opens Add plant with no tag, which offers "Generate new QR tag".
 // Without signal the tag is looked up in this phone's unsent records, the last
 // loaded workspace and the tag list saved on the phone (lookupTagOffline, CTIP-83).
-import React, { useState } from 'react';
+// Pick mode (params.pickFor = a record on this phone, CTIP-68): the record's tag
+// was already on another plant, so the scanned tag replaces it (changeRecordTag)
+// and the scanner goes back to that record.
+import React, { useRef, useState } from 'react';
 import { View, Text, Pressable, TextInput, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, scanFromURLAsync } from 'expo-camera';
@@ -27,7 +30,9 @@ const CAMERA_TEXT = '#eef4e4';
 const CAMERA_MUTED = '#b4c9ab';
 
 export default function Scan({ nav, params = {} }) {
-  const { db, role, apiStatus, outboxItems = [], cachedTags = [] } = useStore();
+  const { db, role, apiStatus, outboxItems = [], cachedTags = [], changeRecordTag } = useStore();
+  const pickFor = params.pickFor || null;
+  const picking = useRef(false); // one tag change per scan, however many times the camera reads it
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [torch, setTorch] = useState(false);
@@ -43,9 +48,26 @@ export default function Scan({ nav, params = {} }) {
 
   const close = () => (nav.canGoBack ? nav.back() : nav.home());
 
+  // Pick mode: an unused tag (or one that can't be checked offline; the API
+  // checks it when the record is sent) goes onto the record. Any other tag
+  // shows why it can't be used.
+  const pick = async (r) => {
+    if (r.kind !== 'unused' && r.kind !== 'unchecked') return setResult({ ...r, picking: true });
+    if (picking.current) return;
+    picking.current = true;
+    const res = await changeRecordTag(pickFor, r.id); // shows "Tag changed to …"
+    if (res?.ok) return nav.back();
+    picking.current = false;
+    Alert.alert('Tag not changed', res?.message || 'Try again.');
+  };
+
   const handle = (raw) => {
     if (result) return; // ignore repeat reads while a result is showing
     const r = lookup(raw);
+    if (pickFor) {
+      setTyping(false);
+      return pick(r);
+    }
     // A visitor who scans a published plant goes straight to its page.
     if (r.kind === 'used' && role !== 'botanist') return nav.replace('tag', { qr: r.id });
     setTyping(false);
@@ -109,7 +131,7 @@ export default function Scan({ nav, params = {} }) {
             <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 28 }}>
               {granted ? <Viewfinder /> : <PermissionAsk onAsk={requestPermission} canAsk={permission?.canAskAgain !== false} />}
               <View style={{ alignItems: 'center', gap: 6, paddingHorizontal: 32 }}>
-                <Text style={{ fontFamily: font('display', 700), fontSize: 22, color: CAMERA_TEXT, textAlign: 'center' }}>Point at the plant's tag</Text>
+                <Text style={{ fontFamily: font('display', 700), fontSize: 22, color: CAMERA_TEXT, textAlign: 'center' }}>{pickFor ? 'Scan the new tag' : "Point at the plant's tag"}</Text>
                 <Text style={{ fontFamily: font('text', 400), fontSize: 15, lineHeight: 22, color: CAMERA_MUTED, textAlign: 'center' }}>
                   Hold steady about a hand's length away. It scans by itself.
                 </Text>
@@ -128,7 +150,7 @@ export default function Scan({ nav, params = {} }) {
                   <Text style={{ fontFamily: font('text', 700), fontSize: 14, color: CAMERA_TEXT }}>Type ID</Text>
                 </Pressable>
               </View>
-              {role === 'botanist' ? (
+              {role === 'botanist' && !pickFor ? (
                 <Pressable accessibilityRole="button" onPress={() => nav.replace('add', { make: true })} hitSlop={8}
                   style={{ height: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 }}>
                   <Icon name="qr" size={18} color={CAMERA_TEXT} />
@@ -197,6 +219,26 @@ function ManualEntry({ value, onChange, onSubmit, onCancel }) {
 function Result({ result, role, nav, onAgain }) {
   const { c } = useTheme();
   const { db } = useStore();
+
+  // Pick mode, and this tag is not free: say why, and scan another.
+  if (result.picking) {
+    const why = result.kind === 'used' || result.kind === 'unfinished'
+      ? 'It is already on a plant.'
+      : result.kind === 'retired' ? 'It was taken out of use.' : 'It is not a Daun Sense tag for Niah National Park.';
+    return (
+      <Sheet>
+        <Mono size={15} color={c.ink2}>{result.id || 'No tag ID'}</Mono>
+        <View style={{ gap: 6 }}>
+          <Txt v="title2" accessibilityRole="header" style={{ fontSize: 26, lineHeight: 32 }}>This tag can't be used</Txt>
+          <Txt v="body" color={c.ink2}>{why} Scan an unused tag for this record.</Txt>
+        </View>
+        <View style={{ gap: 4 }}>
+          <Button label="Scan again" onPress={onAgain} />
+          <Button label="Back to the record" kind="text" height={48} size={15} onPress={nav.back} />
+        </View>
+      </Sheet>
+    );
+  }
 
   if (result.kind === 'unfinished') {
     return (
@@ -272,8 +314,9 @@ function Result({ result, role, nav, onAgain }) {
   if (result.kind === 'used') {
     const p = result.plant;
     const last = db.observations.filter((o) => o.specimen_id === p.id).map((o) => o.observed_at).sort().pop();
-    // A plant saved only on this phone has no plant page yet.
-    const canOpen = !p.on_phone;
+    // A plant saved only on this phone has no plant page yet, and one known only
+    // from the tag list saved on the phone can't be opened without signal.
+    const canOpen = !p.on_phone && !result.cached;
     const summary = (
       <>
         <Thumb uri={p.photos?.[0]?.url} size={64} />

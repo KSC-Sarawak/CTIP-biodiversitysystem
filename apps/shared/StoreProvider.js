@@ -43,8 +43,6 @@ import {
   createSpecimenApi,
   updateSpecimenApi,
   createObservationApi,
-  fetchObservationApi,
-  syncApi,
   submitObservationApi,
   addCommentApi,
   createDiscussionApi,
@@ -68,9 +66,9 @@ import {
   markReadApi,
   markAllReadApi,
 } from "./api.js";
-import { createSyncEngine, saveFirst, waitAtMost } from "./offline/syncEngine.js";
-import { newPlantRecord, revisitRecord, outboxPhotos } from "./offline/records.js";
+import { newPlantRecord, revisitRecord } from "./offline/records.js";
 import { tagCacheRows } from "./offline/tags.js";
+import { useOutboxSync } from "./offline/useOutboxSync.js";
 
 // Shown wherever a page needs the Express API and cannot reach it.
 export const API_DOWN = "Cannot reach the API server (Render). Please check your network connection.";
@@ -81,10 +79,6 @@ const MISSES_FOR_DOWN = 2;
 // How long a pop-up message stays on screen (web and mobile). Was 2.6 s, too short
 // to read the longer messages, such as the email limit's wait time.
 const TOAST_MS = 5600;
-// How long a save on the phone waits for its first send before it shows
-// "Saved on this phone" (docs/architecture/offline-sync.md).
-const SAVE_WAIT_MS = 8000;
-const IDLE_SYNC = { running: false, lastSyncedAt: null, lastSummary: null };
 
 // The token to send: renewed through the API when it is about to expire.
 const sessionToken = () => freshAuthToken();
@@ -93,22 +87,6 @@ const staffStart = { ...seed, plants: [], observations: [] };
 
 // Who the saved session belongs to, known before anything has loaded.
 const savedUserId = () => getSession()?.user?.id || tokenClaims(getAuthToken())?.sub || null;
-
-// The sync engine's view of the API (apps/shared/offline/syncEngine.js). Every
-// call goes through the store's callApi: a fresh token, and one retry when it
-// had expired. `callRef` is a ref because the engine is made once, and must
-// always use the current callApi.
-const engineApi = (callRef) => {
-  const call = (fn, ...args) => callRef.current(fn, ...args);
-  return {
-    createSpecimen: (body) => call(createSpecimenApi, body),
-    sync: (body) => call(syncApi, body),
-    uploadPhoto: (observationId, photo) => call(uploadObservationPhotoApi, observationId, photo),
-    submit: (observationId) => call(submitObservationApi, observationId, {}),
-    getObservation: (id) => call(fetchObservationApi, id),
-    addComment: (observationId, body) => call(addCommentApi, observationId, body),
-  };
-};
 
 // App state, loaded from and saved through the Express API (services/api).
 // The apps never talk to Supabase directly (CTIP-114): signing in, sessions and
@@ -143,19 +121,9 @@ export default function StoreProvider({ children, deviceId = "mobile", outbox = 
   // staff data back after it was cleared.
   const sessionEpoch = useRef(0);
   // Records saved on this phone (mobile only; see the "records saved on the phone" section).
-  const [outboxItems, setOutboxItems] = useState([]); // the signed-in person's unsent records
-  const [syncState, setSyncState] = useState(IDLE_SYNC);
   const [cachedTags, setCachedTags] = useState([]); // tag_cache rows, for scanning without signal
   const userIdRef = useRef(userId);
   userIdRef.current = userId; // read by the sync engine, which is made once
-  const callApiRef = useRef(null);
-  const engineRef = useRef(null);
-  const runsGoing = useRef(0);
-  // How the last sync ended: "never" (none since sign-in), null (got through),
-  // "offline", "signed_out" or "error". See sendAfterLoad.
-  const lastStop = useRef("never");
-  const lastPending = useRef(0);
-  const afterLoad = useRef(null); // set below; loadFromApi calls it after every answer
   const savedTagRows = useRef(""); // the tag list last written to tag_cache, as JSON
 
   // The role always comes from the signed-in user's profile (loaded through the
@@ -282,7 +250,6 @@ function collectionMatches(a = [], b = []) {
       return { ok: false, message: res.offline ? API_DOWN : res.message };
     }
     markReachable();
-    afterLoad.current?.(); // the API answered: send what waits on the phone, if anything
     if (res.data?.poll_after_ms) pollAfter.current = res.data.poll_after_ms;
 
     let w = res.data;
@@ -639,9 +606,11 @@ function collectionMatches(a = [], b = []) {
     code: res.code, status: res.status, retryable: !!res.offline || res.status >= 500 || res.status === 429,
   });
 
-  /* ---------- records saved on the phone (CTIP-16, CTIP-83) ---------- */
+  /* ---------- records saved on the phone (CTIP-16, CTIP-83, CTIP-68) ---------- */
   // Only the phone passes an outbox. Design: docs/architecture/offline-sync.md.
-  callApiRef.current = callApi;
+  // The sync engine, the unsent list and what the botanist can do to a record
+  // that could not be sent live in useOutboxSync (apps/shared/offline/). When
+  // to sync is the phone's business: apps/mobile/offline/useSyncTriggers.js.
 
   // Whose records may be sent now: the signed-in person, and only while the
   // stored session (whose token every call carries) is that same person's.
@@ -651,22 +620,10 @@ function collectionMatches(a = [], b = []) {
     return id && id === savedUserId() ? id : null;
   }, []);
 
-  // One engine for the provider's lifetime, so there is only ever one run at a time.
-  if (outbox && !engineRef.current) {
-    engineRef.current = createSyncEngine({ outbox, api: engineApi(callApiRef), deviceId, currentUserId });
-  }
-
-  // The signed-in person's unsent records, for My records and the scanner.
-  const refreshOutbox = useCallback(async () => {
-    if (!outbox) return;
-    const id = userIdRef.current;
-    try {
-      const items = id ? await outbox.list(id) : [];
-      if (userIdRef.current === id) setOutboxItems(items); // still the same person
-    } catch (err) {
-      console.warn("outbox.list:", err?.message || err);
-    }
-  }, [outbox]);
+  const {
+    outboxItems, syncState, syncNow, saveOnPhone, recordPhotos,
+    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
+  } = useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify });
 
   // The tag list saved at the last load, read once per person.
   const loadCachedTags = useCallback(async () => {
@@ -680,87 +637,11 @@ function collectionMatches(a = [], b = []) {
     }
   }, [tagCache]);
 
-  const finishRun = useCallback((summary) => {
-    runsGoing.current -= 1;
-    lastStop.current = summary ? summary.stoppedBy : "error";
-    lastPending.current = summary ? summary.pending : lastPending.current;
-    setSyncState((s) => ({
-      running: runsGoing.current > 0,
-      // "Last sent": the last run that got through without being stopped.
-      lastSyncedAt: summary && !summary.stoppedBy ? nowIso() : s.lastSyncedAt,
-      lastSummary: summary ?? s.lastSummary,
-    }));
-    refreshOutbox();
-    if (summary?.sent) loadFromApi(true); // show the records just sent as the server holds them
-  }, [refreshOutbox, loadFromApi]);
-
-  // Send this person's unsent records. Answers the SyncSummary, or null when
-  // the run is still going after `waitMs` (it carries on), when there is
-  // nothing to run (no outbox, nobody signed in), or when the run failed.
-  // Never rejects: a failed run is logged and every record stays on the phone.
-  const syncNow = useCallback(({ waitMs } = {}) => {
-    const engine = engineRef.current;
-    const id = currentUserId();
-    if (!engine || !id) return Promise.resolve(null);
-    runsGoing.current += 1;
-    setSyncState((s) => ({ ...s, running: true }));
-    const run = engine.run(id).then(
-      (summary) => {
-        finishRun(summary);
-        return summary;
-      },
-      (err) => {
-        console.warn("sync run failed; the records stay on the phone:", err?.message || err);
-        finishRun(null);
-        return null;
-      },
-    );
-    return waitAtMost(run, waitMs);
-  }, [currentUserId, finishRun]);
-
-  // A simple "the connection is back" trigger (Task 7 adds the full set in
-  // useSyncTriggers): when the API answers a load, run again if the last run
-  // could not get through, or left records waiting, or none has run since
-  // sign-in. A run that got through with nothing left does not start another,
-  // so the reload after a run cannot loop.
-  afterLoad.current = () => {
-    if (!engineRef.current || runsGoing.current > 0) return;
-    if (lastStop.current === null && lastPending.current === 0) return;
-    syncNow();
-  };
-
-  // A new person (or nobody): their own records and tag list, and a fresh sync state.
+  // A new person (or nobody): their own tag list.
   useEffect(() => {
-    lastStop.current = "never";
-    lastPending.current = 0;
-    setSyncState(IDLE_SYNC);
-    setOutboxItems([]);
     setCachedTags([]);
-    refreshOutbox();
     loadCachedTags();
-  }, [userId, refreshOutbox, loadCachedTags]);
-
-  // Save a record on the phone, then try to send it (saveFirst in syncEngine.js).
-  // `photos` come from the camera screen and must carry their bytes (base64).
-  const saveOnPhone = async (record, photos, sentMessage) => {
-    const unreadable = photos.findIndex((p) => !p.base64);
-    if (unreadable >= 0) {
-      return { ok: false, message: `Photo ${unreadable + 1} could not be read. Remove it and add it again.` };
-    }
-    const res = await saveFirst({ outbox, record, photos: outboxPhotos(photos), syncNow, waitMs: SAVE_WAIT_MS });
-    if (!res.ok) {
-      // OUTBOX_UNAVAILABLE: the caller sends it online instead (no SQLite on this device).
-      if (res.code !== "OUTBOX_UNAVAILABLE") {
-        console.warn("outbox.add failed:", res.error?.message || res.code);
-        notify(res.message);
-      }
-      return res;
-    }
-    refreshOutbox();
-    if (!res.queued) notify(sentMessage);
-    else if (res.state === "failed" && res.error?.message) notify(`Saved on this phone, but not sent: ${res.error.message}`);
-    return res;
-  };
+  }, [userId, loadCachedTags]);
 
   /* ---------- session & authentication ---------- */
   const logout = async () => {
@@ -1625,6 +1506,7 @@ function collectionMatches(a = [], b = []) {
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,
+    recordPhotos, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto,
     loadFromApi,
     pollFromBackend: () => loadFromApi(true),
     nextPollDelay,

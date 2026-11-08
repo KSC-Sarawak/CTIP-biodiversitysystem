@@ -15,10 +15,43 @@ import {
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
 import { clearAllDrafts, listDrafts } from '../draftStore.js';
+import { unsentTitle } from '../../shared/offline/syncStatus.js';
 
 export function StaffMore({ nav }) {
-  const { me, role, logout } = useStore();
-  const handleSignOut = async () => {
+  const { me, role, logout, outboxItems = [], syncNow, apiStatus } = useStore();
+
+  // UI G (CTIP-68): records saved on this phone and not sent yet. Signing out
+  // keeps them (encrypted; Product Owner decision), and they send the next time
+  // this person signs in here. Online, "Send now" tries first, then asks again
+  // with what is left; when nothing is left it carries on signing out.
+  const askAboutUnsent = (count) => {
+    const buttons = [{ text: 'Stay signed in', style: 'cancel' }];
+    if (apiStatus === 'connected') {
+      buttons.push({
+        text: 'Send now',
+        onPress: async () => {
+          const summary = await syncNow({ manual: true });
+          const left = summary ? summary.pending + summary.failed + summary.conflicts : count;
+          if (left > 0) askAboutUnsent(left);
+          else signOutWithDrafts();
+        },
+      });
+    }
+    buttons.push({ text: 'Sign out', style: 'destructive', onPress: signOutWithDrafts });
+    Alert.alert(
+      unsentTitle(count),
+      'They stay on this phone, encrypted, and send the next time you sign in here. Sign out anyway?',
+      buttons,
+    );
+  };
+
+  const handleSignOut = () => {
+    if (outboxItems.length > 0) askAboutUnsent(outboxItems.length);
+    else signOutWithDrafts();
+  };
+
+  // Unfinished form drafts (CTIP-57) are not records: they are deleted on sign-out.
+  const signOutWithDrafts = async () => {
     let drafts = [];
     try {
       drafts = await listDrafts();

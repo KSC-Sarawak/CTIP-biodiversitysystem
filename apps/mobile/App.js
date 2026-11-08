@@ -14,6 +14,8 @@ import { getLocalDb } from './offline/localDb.js';
 import { createSqliteOutbox } from './offline/outboxStore.js';
 import { createTagCache } from './offline/tagCache.js';
 import { speciesCache } from './offline/speciesCache.js';
+import { useSyncTriggers } from './offline/useSyncTriggers.js';
+import { waitingCount } from '../shared/offline/syncStatus.js';
 
 // Persist user sessions securely in Keystore/Keychain across mobile app restarts (CTIP-119)
 setStorageAdapter(secureStorage);
@@ -28,16 +30,23 @@ restoreSession().catch(() => {});
 const outbox = createSqliteOutbox(getLocalDb);
 const tagCache = createTagCache(getLocalDb);
 
-// Saves the published species on the phone for searching without signal (CTIP-84).
-// Runs once, after the API first answers (and skips itself if it ran in the last
-// 24 hours). A refresh when the connection returns is Task 7's trigger:
-// speciesCache.refresh({ force: true }).
-function SpeciesCacheRefresher() {
-  const { apiStatus } = useStore();
+// When to send the records saved on the phone (CTIP-68): when the connection
+// comes back, when the app comes back to the front, and on a timer while records
+// wait (useSyncTriggers). The published species are saved on the phone for
+// searching without signal (CTIP-84): once after the API first answers (skipped
+// if it ran in the last 24 hours), and again, forced, when the connection comes
+// back. A forced refresh fetches the list but not unchanged pictures.
+function SyncTriggers() {
+  const { apiStatus, syncNow, syncState, outboxItems } = useStore();
   const connected = apiStatus === 'connected';
   useEffect(() => {
     if (connected) speciesCache.refresh();
   }, [connected]);
+  useSyncTriggers(syncNow, {
+    pending: waitingCount(outboxItems),
+    lastSummary: syncState.lastSummary,
+    onReconnect: () => speciesCache.refresh({ force: true }),
+  });
   return null;
 }
 
@@ -51,7 +60,7 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <StoreProvider outbox={outbox} tagCache={tagCache}>
-          <SpeciesCacheRefresher />
+          <SyncTriggers />
           <AppNavigator />
         </StoreProvider>
       </ThemeProvider>
