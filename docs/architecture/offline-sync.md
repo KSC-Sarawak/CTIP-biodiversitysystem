@@ -111,6 +111,7 @@ sequenceDiagram
 | 2. `observation` | `POST /sync` | New records are created as `queued` ("Waiting to sync"), so an officer never sees a record with photos missing. A batch holds at most 20 items and stays under 80,000 characters of JSON (the API's `express.json()` limit is 100 kB). |
 | 3. `photos` | `POST /observations/:id/photos` | One at a time, each with its own ID. Once the API confirms a photo, its base64 is deleted from the phone. After an interruption only the missing photos are sent (CTIP-66). |
 | 4. `submit` | `POST /observations/:id/submit` | Turns `queued` into `synced` ("Needs review"). A `WRONG_STATUS` answer while the server already holds `synced` counts as done (a resent submit). |
+| 4b. `comment` | `POST /observations/:id/comments` | Only an edit kept with "Keep this phone's version" (§8), instead of step 4. The step is saved before the comment is sent, so a failed comment keeps the record `pending` at this step: the next run posts the comment and never resends the edit. |
 | 5. Done | none | The outbox row and its photos are deleted **only after step 4 is confirmed**. |
 
 **Revisits of plants made offline** point to the plant's outbox record. Before sending,
@@ -124,7 +125,7 @@ while its plant is not yet past step 1.
 | Answer | What happens |
 |---|---|
 | No connection, timeout, 5xx or 429 | The record stays `pending`, the run stops, and it is tried again later. |
-| 401 | The run stops and every record stays `pending`. The botanist signs in again. |
+| 401, or 403 `MFA_REQUIRED` / `ACCOUNT_NOT_ACTIVE` | The run stops and every record stays `pending`, with no attempt counted: the problem is the account, not the record. The botanist signs in again. |
 | Anything else | That record becomes `failed` with an action, and the run moves on to the next record. |
 
 The action on a failed record:
@@ -162,6 +163,9 @@ returned ones.
 
 - After saving offline: title "Saved on this phone", body "No connection right now. It
   will be sent for review automatically when you're back online."
+- Saved but not sent within the first 8 seconds while the API is reachable: same title,
+  body "Still sending in the background. It goes for review by itself, so you can carry
+  on."
 - A neutral notice at the top of My records and Add plant: "You're offline. New records
   are saved on this phone."
 - "Sync now" while offline gives the toast "Still offline. They'll send when you're back
@@ -249,7 +253,8 @@ Drafts (not yet saved as records) are still cleared on sign-out, as today.
 
 ## 11. When the app syncs
 
-*Story CTIP-68.* One run at a time. A run starts when:
+*Story CTIP-68.* One run at a time. A trigger while a run is going books one follow-up
+run for when it ends, so a record saved mid-run goes in the same burst. A run starts when:
 
 - the connection returns (`expo-network` listener),
 - the app comes to the foreground,
