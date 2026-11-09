@@ -4,6 +4,7 @@ import { parseBody, fail, dbError, UUID } from './validate.js';
 import { withSignedUrls } from './field.js';
 import { protectSpecimen } from './distribution.js';
 import { publicMediaUrl } from './photoLinks.js';
+import { accountBlock } from './accountStatus.js';
 import { dbLoad } from './dbLoad.js';
 import { emailProblem, passwordProblem, nameProblem, weakPasswordMessage } from './accountRules.js';
 import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } from './emailLimit.js';
@@ -13,6 +14,9 @@ import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } 
 // notifications. Queries run as the signed-in user, so RLS still applies.
 
 const ROLES = ['botanist', 'officer', 'admin'];
+const TELEMETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const TELEMETRY_LIMIT = 5000;
+const TELEMETRY_MAX_HOURS = 24 * 30;
 
 
 // The start-up load. Each list is what RLS lets this user see, the same rows
@@ -31,6 +35,11 @@ const WORKSPACE = {
   alerts: (db) => db.from('alerts').select('*').order('created_at', { ascending: false }),
   alert_notes: (db) => db.from('alert_notes').select('*').order('created_at'),
   sensor_nodes: (db) => db.from('sensor_nodes').select('*').order('created_at'),
+  // Sensor readings from the last day, newest first and capped, so a busy
+  // node cannot make every poll huge. Officers and admins only (RLS).
+  telemetry: (db) => db.from('telemetry').select('*')
+    .gte('ts', new Date(Date.now() - TELEMETRY_WINDOW_MS).toISOString())
+    .order('ts', { ascending: false }).limit(TELEMETRY_LIMIT),
   notifications: (db) => db.from('notifications').select('*').order('created_at', { ascending: false }),
   audit_logs: (db) => db.from('audit_logs').select('*').order('changed_at', { ascending: false }),
   profiles: (db) => db.from('profiles').select('*'),
@@ -207,6 +216,10 @@ export const staffHandlers = {
   // cursor }, or { partial: true, unchanged: true, cursor } when nothing did.
   // poll_after_ms tells the app how long to wait before asking again.
   'get /workspace': async (req, res) => {
+    // The apps load this every few seconds, so an account an admin turns off is
+    // told so within one poll, not only when its token next refreshes (up to an hour).
+    const blocked = await accountBlock(req.user);
+    if (blocked) return fail(res, 403, 'ACCOUNT_DISABLED', blocked);
     const db = supabaseAs(req.user);
     try {
       const now = Date.now();
@@ -608,6 +621,30 @@ export const staffHandlers = {
     const { data, error } = await supabaseAs(req.user).from('sensor_nodes').select('*').order('created_at');
     if (error) return dbError(res, error);
     res.json(data);
+  },
+
+  'get /sensor-nodes/:id': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    const { data, error } = await supabaseAs(req.user).from('sensor_nodes').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return dbError(res, error);
+    if (!data) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    res.json(data);
+  },
+
+  // One node's readings, oldest first. ?hours= picks how far back (1 to 720, default 24).
+  // At most TELEMETRY_LIMIT readings: the newest ones when there are more.
+  'get /sensor-nodes/:id/telemetry': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    const hours = req.query.hours === undefined ? 24 : Number(req.query.hours);
+    if (!Number.isFinite(hours) || hours < 1 || hours > TELEMETRY_MAX_HOURS) {
+      return fail(res, 400, 'VALIDATION_ERROR', `hours must be a number from 1 to ${TELEMETRY_MAX_HOURS}`);
+    }
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const { data, error } = await supabaseAs(req.user).from('telemetry').select('*')
+      .eq('node_id', req.params.id).gte('ts', since)
+      .order('ts', { ascending: false }).limit(TELEMETRY_LIMIT);
+    if (error) return dbError(res, error);
+    res.json(data.reverse());
   },
 
   'patch /sensor-nodes/:id': async (req, res) => {

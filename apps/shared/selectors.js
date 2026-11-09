@@ -122,6 +122,12 @@ export function staffCounts(db, me) {
     review: db.observations.filter((o) => o.status === "synced").length,
     alerts: db.alerts.filter((a) => a.status === "open").length,
     returned: me ? db.observations.filter((o) => o.recorded_by === me.id && o.status === "returned").length : 0,
+    // Discussions with unread notifications for me (a thread counts once).
+    discussion: me
+      ? new Set((db.notifications || [])
+        .filter((n) => n.user_id === me.id && !n.is_read && n.related_table === "discussions")
+        .map((n) => n.related_id)).size
+      : 0,
   };
 }
 

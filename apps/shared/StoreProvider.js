@@ -7,7 +7,6 @@ import { can } from "./permissions.js";
 import { uid, nowIso, photoProblem, CAPTION_MAX, withExponentialRetry, keepPhotoUrl } from "./utils.js";
 import {
   getAuthToken,
-  setAuthToken,
   getSession,
   freshAuthToken,
   restoreSession,
@@ -51,6 +50,9 @@ import {
   updateDiscussionApi,
   deleteDiscussionApi,
   addDiscussionPostApi,
+  editDiscussionPostApi,
+  deleteDiscussionPostApi,
+  restoreDiscussionPostApi,
   uploadObservationPhotoApi,
   filePart,
   publishSpeciesApi,
@@ -64,6 +66,7 @@ import {
   resolveAlertApi,
   addAlertNoteApi,
   setThresholdsApi,
+  getNodeTelemetryApi,
   markReadApi,
   markAllReadApi,
 } from "./api.js";
@@ -111,6 +114,10 @@ export default function StoreProvider({ children, deviceId = "mobile", outbox = 
   const [apiStatus, setApiStatus] = useState("checking");
   const [apiError, setApiError] = useState(null);
   const [authToken, setAuthTokenState] = useState(getAuthToken());
+  // Why the last session ended, when an admin turned the account off. The
+  // sign-in page shows it until the person types again.
+  const [endedReason, setEndedReason] = useState("");
+  const clearEndedReason = useCallback(() => setEndedReason(""), []);
   const [isSyncing, setIsSyncing] = useState(false);
   const [backendSpeciesCount, setBackendSpeciesCount] = useState(0);
   const timer = useRef(null);
@@ -380,6 +387,12 @@ function collectionMatches(a = [], b = []) {
       last_seen: n.last_seen,
     }));
 
+    // Readings per node, oldest first (the API sends the newest first).
+    const telemetry = {};
+    for (const r of [...(w.telemetry || [])].sort((a, b) => String(a.ts).localeCompare(String(b.ts)))) {
+      (telemetry[r.node_id] ||= []).push(r);
+    }
+
     setDb((prevDb) => {
       let mergedProfiles = prevDb.profiles || [];
       if (w.profiles && w.profiles.length > 0) {
@@ -408,6 +421,7 @@ function collectionMatches(a = [], b = []) {
       const altEqual = collectionMatches(prevDb.alerts, w.alerts);
       const notesEqual = collectionMatches(prevDb.alertNotes, alertNotes);
       const nodesEqual = collectionMatches(prevDb.nodes, nodes);
+      const telemetryEqual = JSON.stringify(prevDb.telemetry || {}) === JSON.stringify(telemetry);
       const notifsEqual = collectionMatches(prevDb.notifications, w.notifications);
       const auditEqual = collectionMatches(prevDb.audit, audit);
       const profEqual = collectionMatches(prevDb.profiles, mergedProfiles);
@@ -424,7 +438,7 @@ function collectionMatches(a = [], b = []) {
       const dirEqual = collectionMatches(prevDb.directory, directory);
 
       const hasChanges = !spEqual || !mediaEqual || !plEqual || !obsEqual || !tagsEqual ||
-        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual ||
+        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !telemetryEqual ||
         !notifsEqual || !auditEqual || !profEqual || !zonesEqual ||
         !discEqual || !audEqual || !postsEqual || !dirEqual;
 
@@ -445,6 +459,7 @@ function collectionMatches(a = [], b = []) {
         alerts: altEqual ? prevDb.alerts : w.alerts,
         alertNotes: notesEqual ? prevDb.alertNotes : alertNotes,
         nodes: nodesEqual ? prevDb.nodes : nodes,
+        telemetry: telemetryEqual ? prevDb.telemetry : telemetry,
         notifications: notifsEqual ? prevDb.notifications : w.notifications,
         audit: auditEqual ? prevDb.audit : audit,
         profiles: profEqual ? prevDb.profiles : mergedProfiles,
@@ -521,14 +536,25 @@ function collectionMatches(a = [], b = []) {
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     }
 
-    const off = onSessionEnded(() => {
+    const off = onSessionEnded((info) => {
       if (!mounted) return;
       setUserId(null);
       setAuthTokenState(null);
       lastWorkspace.current = null;
       sessionEpoch.current += 1;
       setDb(seed); // F-13: drop the staff data when the session ends
-      notify("Your session has ended. Please sign in again.");
+      if (info?.reason === "disabled") {
+        // An admin turned the account off. The website opens the sign-in page,
+        // which shows why; the phone app shows it as a message.
+        setEndedReason(info.message);
+        if (typeof document !== "undefined") {
+          if (window.location.hash !== "#/login") window.location.hash = "/login";
+        } else {
+          notify(info.message);
+        }
+      } else {
+        notify("Your session has ended. Please sign in again.");
+      }
       loadFromApi(true);
     });
 
@@ -663,42 +689,6 @@ function collectionMatches(a = [], b = []) {
     await signOutApi();
     notify("Signed out");
     loadFromApi(true); // load the visitor view again
-  };
-
-  const loginWithToken = async (token) => {
-    if (!token || !token.trim()) return { ok: false, message: "Provide an access token" };
-    const cleanToken = token.trim();
-    setIsSyncing(true);
-    try {
-      const res = await fetchMe(cleanToken);
-      if (!res.ok) {
-        const msg = res.message || "Failed to authenticate with backend API";
-        notify(msg);
-        return { ok: false, message: msg, code: res.code };
-      }
-      const profile = res.data;
-      setAuthToken(cleanToken);
-      setAuthTokenState(cleanToken);
-      setDb((prevDb) => {
-        const exists = prevDb.profiles.some((p) => p.id === profile.id);
-        return {
-          ...prevDb,
-          profiles: exists
-            ? prevDb.profiles.map((p) => (p.id === profile.id ? { ...p, ...profile } : p))
-            : [...prevDb.profiles, profile],
-        };
-      });
-      setUserId(profile.id);
-      setApiStatus("connected");
-      notify(`Signed in as ${profile.full_name || profile.email} (${profile.role})`);
-      return { ok: true, profile };
-    } catch (err) {
-      const msg = err?.message || "Error connecting to backend API";
-      notify(msg);
-      return { ok: false, message: msg };
-    } finally {
-      setIsSyncing(false);
-    }
   };
 
   // useCallback: SpeciesPage lists this in an effect's dependencies. As a plain
@@ -1235,6 +1225,33 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
+  // One message changed by the API (edit, delete or undo): put the new copy in place.
+  const putPost = (post) => setDb((prev) => ({
+    ...prev,
+    discussionPosts: (prev.discussionPosts || []).map((p) => (p.id === post.id ? post : p)),
+  }));
+
+  const editDiscussionPost = async (id, postId, body, mentions = []) => {
+    const res = await callApi(editDiscussionPostApi, id, postId, { body, mentions });
+    if (!res.ok) { notify(`Could not save: ${res.message}`); return false; }
+    putPost(res.data);
+    return true;
+  };
+
+  const deleteDiscussionPost = async (id, postId) => {
+    const res = await callApi(deleteDiscussionPostApi, id, postId);
+    if (!res.ok) { notify(`Could not delete: ${res.message}`); return false; }
+    putPost(res.data);
+    return true;
+  };
+
+  const restoreDiscussionPost = async (id, postId) => {
+    const res = await callApi(restoreDiscussionPostApi, id, postId);
+    if (!res.ok) { notify(`Could not undo: ${res.message}`); return false; }
+    putPost(res.data);
+    return true;
+  };
+
   // Owner only: { title?, visibility?, share_users?, share_roles? }
   const updateDiscussion = async (id, changes) => {
     const res = await callApi(updateDiscussionApi, id, changes);
@@ -1502,6 +1519,13 @@ function collectionMatches(a = [], b = []) {
     notify("Thresholds updated");
   };
 
+  // One node's readings over a longer range than the workspace's last 24 hours.
+  // Returns { ok, rows } (oldest first) and never changes db.
+  const loadNodeTelemetry = async (nodeId, hours = 24) => {
+    const res = await callApi(getNodeTelemetryApi, nodeId, hours);
+    return res.ok ? { ok: true, rows: Array.isArray(res.data) ? res.data : [] } : { ok: false, message: res.message };
+  };
+
   /* ---------- notifications and tags ---------- */
   const markRead = async (id) => {
     const res = await callApi(markReadApi, id);
@@ -1557,12 +1581,14 @@ function collectionMatches(a = [], b = []) {
     db, me, role, toast, notify,
     logout, login, signIn, changePassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel,
+    endedReason, clearEndedReason,
     setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
     syncObservation, resubmit, reviewObservation, addComment,
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
+    editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
-    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds,
+    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, loadNodeTelemetry,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,
@@ -1573,7 +1599,6 @@ function collectionMatches(a = [], b = []) {
     pollFromBackend: () => loadFromApi(true),
     nextPollDelay,
     refreshFromBackend: () => syncWithBackend(false),
-    loginWithToken,
     getBackendSpeciesById,
     getDistributionPoints,
   };
