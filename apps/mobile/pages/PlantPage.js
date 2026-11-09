@@ -20,6 +20,7 @@ import {
 import PhotoNote from '../components/PhotoNote.js';
 import { longDate, coords } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
+import { usePullRefresh } from '../hooks/usePullRefresh.js';
 
 // Where a plant sits on the little map (0..1 inside the park bounds).
 export const mapPoint = ({ lat, lng }) => ({
@@ -65,9 +66,10 @@ function Hero({ photos, height = 260, onBack }) {
 function Page({ hero, children }) {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullRefresh();
   return (
     <View style={{ flex: 1, backgroundColor: c.surface, paddingTop: insets.top }}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 28 }}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 28 }} refreshControl={refreshControl}>
         {hero}
         <View style={{ paddingHorizontal: 20, paddingTop: 20, gap: 22 }}>{children}</View>
       </ScrollView>

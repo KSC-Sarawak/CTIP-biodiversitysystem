@@ -1,12 +1,14 @@
 // apps/mobile/components/SpeciesPicker.js
 // The species field on a new plant record: type a name, and published species
 // that match come from the API (CTIP-26). Picking one fills the record (CTIP-63).
-// The botanist can always submit the name they typed, even with no connection.
+// The botanist can always submit the name they typed, even with no connection;
+// with no connection the search uses the species saved on the phone (CTIP-84).
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
 
 import { summarize, isStillPicked } from '../../shared/speciesSearch.js';
 import { useSpeciesSearch } from '../hooks/useSpeciesSearch.js';
+import { OfflineCaption, speciesPhoto } from './OfflineSpecies.js';
 import { useTheme, font } from './Theme.js';
 import { Field, Sci, Txt, Thumb, DotLabel, SkeletonRow, Notice, Button, TextLink } from './Bits.js';
 
@@ -20,7 +22,7 @@ function Result({ s, onPress }) {
     <Pressable accessibilityRole="button" accessibilityLabel={`Pick ${s.common_name || s.scientific_name}`} onPress={onPress}
       style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10, paddingHorizontal: 12,
         borderRadius: 10, backgroundColor: c.bg, opacity: pressed ? 0.7 : 1 })}>
-      <Thumb uri={s.primary_image_url || undefined} size={48} />
+      <Thumb uri={speciesPhoto(s)} size={48} />
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
         <Text numberOfLines={1} style={{ fontFamily: font('text', 700), fontSize: 15, color: c.ink }}>{s.common_name || s.scientific_name}</Text>
         <Sci size={14}>{s.scientific_name}</Sci>
@@ -32,7 +34,7 @@ function Result({ s, onPress }) {
   );
 }
 
-export default function SpeciesPicker({ value, onChange, onPick, picked, error }) {
+export default function SpeciesPicker({ value, onChange, onPick, picked, error, maxLength }) {
   const { c } = useTheme();
   // Once a species is picked (and the name not edited since), stop searching and
   // show where the name came from instead (CTIP-63).
@@ -49,9 +51,13 @@ export default function SpeciesPicker({ value, onChange, onPick, picked, error }
     ? [exact.common_name, exact.family].filter(Boolean).join(' · ') + '. From the species list.'
     : 'Type at least 2 letters to search the species list, or enter the name yourself.';
 
+  // With no connection the list comes from the phone (caption: OfflineSpecies.js).
+  // With nothing saved, the caption says so, so the "no match" line is left out.
+  const offlineEmpty = searching && search.offline && search.cachedCount === 0;
+
   return (
     <View style={{ gap: 6 }}>
-      <Field label="Species (required)" value={value} onChangeText={onChange} placeholder="Start typing a name" italic error={error} hint={hint} />
+      <Field label="Species (required)" value={value} onChangeText={onChange} placeholder="Start typing a name" italic error={error} hint={hint} maxLength={maxLength} />
       {fromList ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: c.accentSoft }}>
           <Txt v="caption" color={c.ink} style={{ flex: 1 }}>
@@ -60,6 +66,7 @@ export default function SpeciesPicker({ value, onChange, onPick, picked, error }
           <TextLink label="Clear" onPress={() => onChange('')} />
         </View>
       ) : null}
+      {searching ? <OfflineCaption search={search} /> : null}
       {searching && search.loading && results.length === 0 ? <SkeletonRow /> : null}
       {results.map((s) => <Result key={s.id} s={s} onPress={() => onPick(s)} />)}
       {searching && search.error ? (
@@ -68,7 +75,7 @@ export default function SpeciesPicker({ value, onChange, onPick, picked, error }
           <Button label="Try again" kind="secondary" height={44} size={15} onPress={search.retry} />
         </View>
       ) : null}
-      {searching && !search.loading && !search.error && results.length === 0 ? (
+      {searching && !search.loading && !search.error && !offlineEmpty && results.length === 0 ? (
         <Txt v="caption" color={c.ink2}>No published species match. You can submit with the name you typed.</Txt>
       ) : null}
     </View>

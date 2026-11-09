@@ -137,8 +137,10 @@ export function ReviewRecord({ nav, params = {} }) {
     nav.back();
   };
 
+  // No pull to refresh while the decision form is open, so a pull cannot interrupt the typing.
   return (
     <Screen
+      refresh={!open}
       header={<Bar title={plant.name} sub={`${plant.qr_id} · version ${o.version}`} onBack={nav.back} />}
       top={20}
       gap={18}

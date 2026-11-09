@@ -85,7 +85,7 @@ export default function SignIn({ nav }) {
 
   if (step === 'setup' && setup) {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Back to sign in" onPress={back} />} />} top={0} gap={18}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Back to sign in" onPress={back} />} />} top={0} gap={18}>
         <TitleBlock title="Set up two-step sign-in" />
         <Txt v="body" color={c.ink2}>Every staff account needs a 6-digit code as well as its password. Install an authenticator app on this phone (for example Google Authenticator or Microsoft Authenticator), then add Daun Sense to it.</Txt>
         <Button label="Open authenticator app" kind="secondary" onPress={openAuthenticator} />
@@ -103,7 +103,7 @@ export default function SignIn({ nav }) {
 
   if (step === 'code') {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Back to sign in" onPress={back} />} />} top={0} gap={18}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Back to sign in" onPress={back} />} />} top={0} gap={18}>
         <TitleBlock title="Enter your code" />
         <Txt v="body" color={c.ink2}>Open your authenticator app and type the 6-digit code for Daun Sense.</Txt>
         <Field label="6-digit code" value={code} onChangeText={(v) => { setCode(v.replace(/\D/g, '').slice(0, 6)); setError(''); }}
@@ -117,7 +117,7 @@ export default function SignIn({ nav }) {
   }
 
   return (
-    <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />} top={0} gap={18}>
+    <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />} top={0} gap={18}>
       <View style={{ alignItems: 'flex-start', paddingTop: 8 }}>
         <LogoMark size={48} />
       </View>

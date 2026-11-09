@@ -1,8 +1,9 @@
 // apps/mobile/pages/Records.js
 // A botanist's own records, grouped by what needs doing, and one record in detail
-// (with the officer's note and "Resubmit" when it was returned).
+// (with the officer's note and "Resubmit" when it was returned). Records saved on
+// this phone and not sent yet come first, under "On this phone" (PhoneRecords.js, CTIP-68).
 import React, { useState, useEffect } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Alert } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { plantView, nameOf, unfinishedPlants, recordMatches, draftMatches } from '../../shared/selectors.js';
@@ -15,6 +16,9 @@ import {
 import { shortDate, dateTime, coords, accuracy } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { listDraftsFor } from '../draftStore.js';
+import { withoutOutboxTwins, OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
+import { OnThisPhone } from './PhoneRecords.js';
+import { editSnapshot, LIMITS, HEIGHT_PROBLEM, heightOk } from '../../shared/offline/records.js';
 
 const GROUPS = [
   { key: 'fix', title: 'Needs you', statuses: ['returned', 'draft'] },
@@ -32,7 +36,7 @@ const SORT_RECORDS = [
 
 export function MyRecords({ nav }) {
   usePolling(5000);
-  const { db, me } = useStore();
+  const { db, me, outboxItems = [], apiStatus } = useStore();
   const { c } = useTheme();
   const [filter, setFilter] = useState('all');
   const [sort, setSort] = useState('newest');
@@ -47,7 +51,13 @@ export function MyRecords({ nav }) {
     return () => { active = false; };
   }, [db, me?.id]);
 
-  const unfinished = unfinishedPlants(db, me?.id);
+  // A record still on the phone may already be on the server too (made, not yet
+  // sent for review): it is listed once, under "On this phone" (withoutOutboxTwins).
+  const twinFree = withoutOutboxTwins(
+    { observations: db.observations, plants: unfinishedPlants(db, me?.id), drafts: localDrafts },
+    outboxItems,
+  );
+  const unfinished = twinFree.plants;
 
   // Exclude tags that already have synced/approved/rejected observations by this user
   const settledTags = new Set(
@@ -59,7 +69,7 @@ export function MyRecords({ nav }) {
 
   // Combine server unfinished plants with local device crash-safe drafts (CTIP-57)
   const combinedUnfinished = [...unfinished];
-  for (const d of localDrafts) {
+  for (const d of twinFree.drafts) {
     if (!d.qr_id || settledTags.has(d.qr_id)) continue;
     const existingIdx = combinedUnfinished.findIndex((p) => p.qr_id === d.qr_id);
     if (existingIdx >= 0) {
@@ -78,7 +88,7 @@ export function MyRecords({ nav }) {
       });
     }
   }
-  const mine = db.observations
+  const mine = twinFree.observations
     .filter((o) => o.recorded_by === me?.id)
     .map((o) => ({ ...o, plant: plantView(db, db.plants.find((p) => p.id === o.specimen_id)) }))
     .filter((o) => o.plant)
@@ -98,11 +108,13 @@ export function MyRecords({ nav }) {
   const count = (g) => obsCount(g) + (g.key === 'fix' ? filteredUnfinished.length : 0);
   const groups = GROUPS.filter((g) => (filter === 'all' || filter === g.key) && obsCount(g) > 0);
   // A plant's later visits are labelled as revisits.
+  const onPhone = outboxItems.length > 0 && filter === 'all';
   const isRevisit = (o) => db.observations.some((x) => x.specimen_id === o.specimen_id && x.observed_at < o.observed_at);
 
   return (
     <Screen gap={18}>
       <TitleBlock title="My records" sub={me?.full_name} />
+      {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
       <SearchField
         value={q}
         onChangeText={setQ}
@@ -111,9 +123,10 @@ export function MyRecords({ nav }) {
       <Pills
         value={filter}
         onChange={setFilter}
-        items={[{ key: 'all', label: `All ${filteredMine.length + filteredUnfinished.length}` }, ...GROUPS.filter((g) => count(g)).map((g) => ({ key: g.key, label: `${g.title === 'Needs you' ? 'To fix' : g.title} ${count(g)}` }))]}
+        items={[{ key: 'all', label: `All ${filteredMine.length + filteredUnfinished.length + outboxItems.length}` }, ...GROUPS.filter((g) => count(g)).map((g) => ({ key: g.key, label: `${g.title === 'Needs you' ? 'To fix' : g.title} ${count(g)}` }))]}
       />
       <SortBar items={SORT_RECORDS} value={sort} onChange={setSort} />
+      {onPhone ? <OnThisPhone nav={nav} q={q} /> : null}
       {filteredUnfinished.length > 0 && (filter === 'all' || filter === 'fix') ? (
         <View style={{ gap: 12, marginBottom: 8 }}>
           <Notice
@@ -155,13 +168,13 @@ export function MyRecords({ nav }) {
           </View>
         </View>
       ) : null}
-      {filteredMine.length === 0 && filteredUnfinished.length === 0 ? (
+      {filteredMine.length === 0 && filteredUnfinished.length === 0 && !onPhone ? (
         <Empty icon="file">{q.trim() ? `No records match "${q.trim()}".` : 'No records yet. Scan an unused tag to add your first plant.'}</Empty>
       ) : null}
       {groups.map((g, gi) => {
         const rows = filteredMine.filter((o) => g.statuses.includes(o.status));
         return (
-          <Section key={g.key} title={g.title} top={gi > 0} gap={0}>
+          <Section key={g.key} title={g.title} top={gi > 0 || onPhone} gap={0}>
             {rows.map((o, i) => (
               <Row
                 key={o.id}
@@ -187,16 +200,40 @@ export function MyRecords({ nav }) {
   );
 }
 
+// The edit form's fields, filled from the record (or empty when there is none yet).
+const editForm = (o) => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' });
+
 const lastReview = (db, obsId) => db.reviews.filter((r) => r.observation_id === obsId).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
 
 export function RecordDetail({ nav, params = {} }) {
   usePolling(5000);
-  const { db, me, resubmit, syncObservation } = useStore();
+  const { db, me, resubmit, syncObservation, editUnsent } = useStore();
   const { c } = useTheme();
   const [message, setMessage] = useState('');
   const o = db.observations.find((x) => x.id === params.id);
   // Editable copy while the record is returned; saved only when it is sent again.
-  const [fix, setFix] = useState(() => ({ morphology: o?.morphology || '', height_cm: o?.height_cm != null ? String(o.height_cm) : '', notes: o?.notes || '' }));
+  // `null` until the record has loaded: "Resubmit for review" waits for it (below).
+  const [fix, setFix] = useState(() => (o ? editForm(o) : null));
+  // Editable copy of a draft or queued record (CTIP-67); saved only with "Save changes".
+  // `opened` is the record as the form opened on it, kept even when the 5 s poll
+  // brings in a newer version: only fields changed against it are saved, with its
+  // version, so another device's edit is never silently overwritten (editSnapshot).
+  const [opened, setOpened] = useState(() => (o ? editSnapshot(o) : null));
+  const [edit, setEdit] = useState(() => editForm(o));
+  // The screen can open before the record has loaded (`o` missing at first). The
+  // form and its snapshot are then filled together the first time `o` exists,
+  // never one without the other: an empty form compared with a loaded record
+  // would send its empty fields and clear the record's values. The returned-record
+  // form (`fix`) is seeded the same way, once, and never again on the 5 s poll.
+  useEffect(() => {
+    if (o && !opened) {
+      setOpened(editSnapshot(o));
+      setEdit(editForm(o));
+    }
+  }, [o, opened]);
+  useEffect(() => {
+    if (o && !fix) setFix(editForm(o));
+  }, [o, fix]);
   const [sending, setSending] = useState(false);
   const plant = o ? plantView(db, db.plants.find((p) => p.id === o.specimen_id)) : null;
   if (!o || !plant) {
@@ -206,15 +243,35 @@ export function RecordDetail({ nav, params = {} }) {
   const comments = db.comments.filter((x) => x.observation_id === o.id && x.body !== review?.comment).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const photos = plant.photos.filter((p) => p.observation_id === o.id);
   const returned = o.status === 'returned';
+  // What the form shows. `fix` is filled by the effect above right after the record
+  // first loads; this covers that one render so the form never flashes empty.
+  const fixForm = fix || editForm(o);
 
   const send = async () => {
-    if (sending) return;
+    if (sending || !fix) return; // no form yet: its empty fields would clear the record's values
     setSending(true);
     const r = await resubmit(o.id, message.trim(), fix); // shows its own success or error message
     setSending(false);
     if (r.ok) nav.back(); // on failure the edits stay on screen
   };
   const unsent = o.status === 'draft' || o.status === 'queued';
+  // Only the record's own botanist edits it, and only while it is not sent for review.
+  const canEdit = unsent && o.recorded_by === me?.id;
+  const saveChanges = async () => {
+    if (sending || !opened) return; // no snapshot yet: nothing to compare the form with
+    // The API's limit, checked before the edit can reach the outbox (CTIP-68).
+    if (!heightOk(edit.height_cm)) {
+      Alert.alert('Height not valid', HEIGHT_PROBLEM);
+      return;
+    }
+    setSending(true);
+    // Always the snapshot the form opened on, never the live record (see `opened`).
+    const r = await editUnsent(opened, edit); // shows its own success or error message
+    setSending(false);
+    // Saved on the server: the record is now at its new version, so the next save builds on that.
+    if (r.ok && !r.queued && r.observation) setOpened(editSnapshot(r.observation));
+    if (r.ok && r.queued) nav.back(); // saved on the phone: it continues under "On this phone"
+  };
   const sendDraft = async () => {
     if (sending) return;
     setSending(true);
@@ -223,13 +280,15 @@ export function RecordDetail({ nav, params = {} }) {
     if (r.ok) nav.back();
   };
 
+  // No pull to refresh while a form is open, so a pull cannot interrupt the typing.
   return (
     <Screen
+      refresh={!(returned || canEdit)}
       header={<Bar title={plant.qr_id} sub={`${o.status === 'returned' ? 'Returned' : o.status === 'approved' ? 'Published' : 'Recorded'} ${shortDate(returned ? review?.created_at : o.observed_at)}`} onBack={nav.back} />}
       gap={20}
       top={20}
       footer={returned
-        ? <View style={{ flex: 1 }}><Button label={sending ? 'Sending…' : 'Resubmit for review'} onPress={send} disabled={sending} /></View>
+        ? <View style={{ flex: 1 }}><Button label={sending ? 'Sending…' : 'Resubmit for review'} onPress={send} disabled={sending || !fix} /></View>
         : unsent ? <View style={{ flex: 1 }}><Button label={sending ? 'Sending…' : 'Send for review'} onPress={sendDraft} disabled={sending} /></View> : null}
     >
       <View style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
@@ -276,9 +335,18 @@ export function RecordDetail({ nav, params = {} }) {
 
       {returned ? (
         <Section title="Fix the record" gap={12}>
-          <Area label="Appearance" value={fix.morphology} onChangeText={(t) => setFix({ ...fix, morphology: t })} />
-          <Field label="Height (cm)" value={fix.height_cm} onChangeText={(t) => setFix({ ...fix, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
-          <Area label="Field notes" optional value={fix.notes} onChangeText={(t) => setFix({ ...fix, notes: t })} rows={2} />
+          <Area label="Appearance" value={fixForm.morphology} onChangeText={(t) => setFix({ ...fixForm, morphology: t })} />
+          <Field label="Height (cm)" value={fixForm.height_cm} onChangeText={(t) => setFix({ ...fixForm, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
+          <Area label="Field notes" optional value={fixForm.notes} onChangeText={(t) => setFix({ ...fixForm, notes: t })} rows={2} />
+        </Section>
+      ) : null}
+
+      {canEdit ? (
+        <Section title="Edit record" gap={12}>
+          <Field label="Height (cm)" optional value={edit.height_cm} onChangeText={(t) => setEdit({ ...edit, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} error={heightOk(edit.height_cm) ? undefined : HEIGHT_PROBLEM} />
+          <Area label="Appearance" optional value={edit.morphology} onChangeText={(t) => setEdit({ ...edit, morphology: t })} maxLength={LIMITS.text} />
+          <Area label="Notes" optional value={edit.notes} onChangeText={(t) => setEdit({ ...edit, notes: t })} rows={2} maxLength={LIMITS.text} />
+          <Button label="Save changes" kind="secondary" onPress={saveChanges} disabled={sending || !opened} />
         </Section>
       ) : null}
 

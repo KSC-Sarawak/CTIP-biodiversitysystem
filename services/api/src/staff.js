@@ -511,6 +511,12 @@ export const staffHandlers = {
     if (req.user.role === 'botanist' && body.count !== 1) {
       return fail(res, 403, 'FORBIDDEN', 'Botanists can create one tag at a time. Ask an officer to print a batch.');
     }
+    // "reserved" marks a tag kept on one botanist's phone for making a tag with
+    // no signal (CTIP-116); the API refuses it to everyone else (TAG_RESERVED).
+    // A batch with that label from anyone else would lock it away from every botanist.
+    if (body.batch_label === 'reserved' && !(req.user.role === 'botanist' && body.count === 1)) {
+      return fail(res, 403, 'FORBIDDEN', "Only a botanist's phone can make kept tags.");
+    }
     const db = supabaseAs(req.user);
     for (let attempt = 0; attempt < 3; attempt++) {
       const existing = await db.from('qr_tags').select('qr_id');
@@ -525,8 +531,18 @@ export const staffHandlers = {
   },
 
   // Only a tag that was never put on a plant can be deleted; others are retired.
+  // A botanist may delete only a tag kept for them (reserved by them, CTIP-116):
+  // the database policy "qr: botanist release own reserved" says the same, and
+  // this check gives the plain-words answer.
   'delete /qr-tags/:qrId': async (req, res) => {
     const db = supabaseAs(req.user);
+    if (req.user.role === 'botanist') {
+      const tag = await db.from('qr_tags').select('qr_id, status, batch_label, created_by').eq('qr_id', req.params.qrId).maybeSingle();
+      if (tag.error) return dbError(res, tag.error);
+      if (!tag.data) return fail(res, 404, 'NOT_FOUND', 'No unused tag with this id');
+      const mine = tag.data.created_by === req.user.id && tag.data.batch_label === 'reserved' && tag.data.status === 'unassigned';
+      if (!mine) return fail(res, 403, 'FORBIDDEN', 'You can release only tags kept for you.');
+    }
     const onPlant = await db.from('specimens').select('id').eq('qr_id', req.params.qrId).limit(1);
     if (onPlant.error) return dbError(res, onPlant.error);
     if (onPlant.data.length) return fail(res, 409, 'TAG_IN_USE', 'This tag is on a plant. Retire it instead.');

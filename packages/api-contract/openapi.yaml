@@ -745,6 +745,12 @@ paths:
       tags: [QR Tags]
       operationId: createQrTagBatch
       summary: Generate a print batch of new QR tags (officer/admin)
+      description: |
+        Officers and admins make print batches. A botanist may make one tag at a
+        time (`count: 1`). The `batch_label` `reserved` marks a tag kept on a
+        botanist's phone for making a tag offline (CTIP-116): it is allowed only
+        for a botanist with `count: 1`. Anyone else gets `403 FORBIDDEN`
+        "Only a botanist's phone can make kept tags."
       requestBody:
         required: true
         content:
@@ -782,8 +788,11 @@ paths:
     delete:
       tags: [QR Tags]
       operationId: deleteQrTag
-      summary: Delete an unused tag (officer/admin)
-      description: Only a tag that is `unassigned` and not on any plant. A tag on a plant is retired instead.
+      summary: Delete an unused tag (staff)
+      description: >
+        Only a tag that is `unassigned` and not on any plant. A tag on a plant is retired instead.
+        Officers and admins may delete any such tag. A botanist may delete only a tag kept for them
+        (`batch_label` `reserved`, `created_by` themselves); any other tag answers 403.
       parameters:
         - $ref: '#/components/parameters/QrId'
       responses:
@@ -1106,7 +1115,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Specimen' }
         '409':
-          description: QR tag already assigned to another specimen
+          description: >
+            `TAG_IN_USE` (the tag is already on another plant), `TAG_RESERVED` (the tag is kept
+            for another botanist) or `TAG_RETIRED` (the tag was retired or marked damaged)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -1441,6 +1452,25 @@ paths:
       tags: [Sync]
       operationId: syncOfflineObservations
       summary: Upload observations recorded offline in one batch
+      description: |
+        Sends 1 to 20 observations. Each item is answered on its own, in the order sent: a bad
+        item gets `result: error` and the others still save.
+
+        Items with `base_version: null` are new. They are created as `queued` ("waiting to sync"),
+        whatever the phone holds, and sent for review later with `POST /observations/{id}/submit`.
+        The client-made `id` makes a resend safe: sending an `id` the caller already saved answers
+        `created` again and stores nothing twice. An `id` that belongs to someone else answers
+        `error` with `ID_TAKEN`. A botanist cannot add to a plant that has a record waiting for an
+        officer (`REVIEW_IN_PROGRESS`).
+
+        Items with a `base_version` number are edits of the caller's own record. They apply only
+        while the server still holds that version and the record is `draft` or `queued`, and they
+        change `height_cm`, `morphology`, `notes`, `lat`, `lng` and `gps_accuracy_m`. The new
+        version is `base_version + 1`. A resent edit whose fields are already stored answers
+        `updated`, not `conflict`. Otherwise the answer is `conflict` with the current
+        `server_version` and nothing changes (`WRONG_STATUS` in `error` when the record was
+        already sent for review). A record that does not exist, or belongs to someone else,
+        answers `error` with `NOT_FOUND`.
       requestBody:
         required: true
         content:
@@ -1448,10 +1478,17 @@ paths:
             schema: { $ref: '#/components/schemas/SyncRequest' }
       responses:
         '200':
-          description: Per-item results (some may conflict)
+          description: Per-item results (some may conflict or fail)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SyncResponse' }
+        '422':
+          description: |
+            The request as a whole is wrong: no `device_id`, no items, or more than 20.
+            A bad single item is not a 422; it gets `error` with `VALIDATION_ERROR` in `results`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   # ----------------------------------------------------------------- Sensors
   /sensor-nodes:
@@ -2694,16 +2731,26 @@ components:
       type: object
       required: [device_id, observations]
       properties:
-        device_id: { type: string }
+        device_id: { type: string, maxLength: 100 }
         observations:
           type: array
+          minItems: 1
+          maxItems: 20
           items:
             allOf:
               - $ref: '#/components/schemas/ObservationCreate'
               - type: object
+                required: [id, base_version]
+                description: |
+                  `status` is not accepted. New items are always created as `queued`.
                 properties:
+                  id:
+                    type: string
+                    format: uuid
+                    description: The id the phone made. Required, so a resent item is stored once
                   base_version:
                     type: [integer, 'null']
+                    minimum: 1
                     description: Version the device edited from (null if new)
 
     SyncResponse:
@@ -2716,7 +2763,9 @@ components:
             properties:
               id: { type: string, format: uuid }
               result: { type: string, enum: [created, updated, conflict, error] }
-              server_version: { type: integer }
+              server_version:
+                type: integer
+                description: The version the server holds (created, updated and conflict)
               error: { $ref: '#/components/schemas/Error' }
 
     # ---------- sensors

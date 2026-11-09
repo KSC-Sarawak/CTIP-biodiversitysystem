@@ -27,6 +27,7 @@ export default function Account({ nav }) {
       header={<Header left={<IconButton name="chevL" label="Back" onPress={nav.back} />} />}
       top={0}
       gap={20}
+      refresh={false}
     >
       <TitleBlock title="Account settings" sub="Your profile and sign-in details." />
       <ProfileSection me={me} />

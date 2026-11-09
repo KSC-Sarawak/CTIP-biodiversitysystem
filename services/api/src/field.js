@@ -44,7 +44,7 @@ const SpecimenUpdate = z.strictObject({
   endangered_override: z.boolean().optional(),
 }).refine((b) => Object.keys(b).length > 0, 'Send at least one field to change');
 
-const ObservationCreate = z.strictObject({
+export const ObservationCreate = z.strictObject({
   id: id.optional(),
   specimen_id: id,
   observed_at: z.iso.datetime({ offset: true }).optional(),
@@ -82,9 +82,9 @@ const ObservationUpdate = z.strictObject({
 }).refine((b) => Object.keys(b).length > 1, 'Send at least one field to change');
 const ObservationDelete = z.object({ version: z.coerce.number().int().min(1).optional() });
 // Records the botanist still holds: not sent yet (queued = waiting on the phone).
-const EDITABLE = ['draft', 'queued'];
+export const EDITABLE = ['draft', 'queued'];
 
-const isDuplicate = (error, constraint) => error?.code === '23505' && error.message.includes(constraint);
+export const isDuplicate = (error, constraint) => error?.code === '23505' && error.message.includes(constraint);
 const obsNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Observation not found');
 const plantNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Plant not found');
 const photoNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Photo not found');
@@ -109,6 +109,22 @@ async function protectSpecimens(db, user, specimens) {
       status: s.species_id ? statusOf.get(s.species_id) : null,
     })),
   };
+}
+
+export const REVIEW_IN_PROGRESS_MESSAGE =
+  'This plant has a record waiting for an officer. You can add to it once a decision is returned.';
+
+// A botanist cannot add to a plant while an officer is still deciding on it.
+// `exceptId` is the record being sent: a retry of the record that is waiting is
+// not blocked by itself. Returns { blocked } or { error }. Shared by
+// POST /observations and POST /sync, so the rule lives in one place.
+export async function reviewInProgress(db, user, specimenId, exceptId) {
+  if (user.role !== 'botanist') return { blocked: false };
+  let waiting = db.from('observations').select('id').eq('specimen_id', specimenId).eq('status', 'synced').eq('is_deleted', false);
+  if (exceptId) waiting = waiting.neq('id', exceptId);
+  const { data, error } = await waiting.limit(1);
+  if (error) return { error };
+  return { blocked: data.length > 0 };
 }
 
 // The observation named in the URL, or null after answering 500 or 404.
@@ -216,6 +232,13 @@ export const fieldHandlers = {
     const body = parseBody(SpecimenCreate, req, res);
     if (!body) return;
     const db = supabaseAs(req.user);
+    // A tag kept for one botanist's phone (batch_label 'reserved', CTIP-116) is not
+    // for anyone else. A missing tag falls through to TAG_NOT_FOUND below.
+    const kept = await db.from('qr_tags').select('batch_label, created_by').eq('qr_id', body.qr_id).maybeSingle();
+    if (kept.error) return dbError(res, kept.error);
+    if (kept.data?.batch_label === 'reserved' && kept.data.created_by !== req.user.id) {
+      return fail(res, 409, 'TAG_RESERVED', `Tag ${body.qr_id} is kept for another botanist. Pick or scan an unused tag.`);
+    }
     const { data, error } = await db
       .from('specimens')
       .insert({ ...body, species_id: null, registered_by: req.user.id, endangered_override: false, is_deleted: false })
@@ -232,6 +255,11 @@ export const fieldHandlers = {
     }
     if (error.code === '23503') {
       return fail(res, 422, 'TAG_NOT_FOUND', `Tag ${body.qr_id} is not in the tag list. Ask an officer to create it.`);
+    }
+    // The tag trigger (migration 20261028000000) refuses a retired or damaged tag.
+    // Without this it would be a 500, which the phone's sync retries for ever.
+    if (error.code === 'CTTG0') {
+      return fail(res, 409, 'TAG_RETIRED', `Tag ${body.qr_id} has been retired. Pick or scan an unused tag.`);
     }
     return dbError(res, error);
   },
@@ -258,15 +286,10 @@ export const fieldHandlers = {
     const body = parseBody(ObservationCreate, req, res);
     if (!body) return;
     const db = supabaseAs(req.user);
-    // A botanist cannot add to a plant while an officer is still deciding on it. A retry
-    // of the record that is waiting carries on below and gets that record back.
-    if (req.user.role === 'botanist') {
-      let waiting = db.from('observations').select('id').eq('specimen_id', body.specimen_id).eq('status', 'synced').eq('is_deleted', false);
-      if (body.id) waiting = waiting.neq('id', body.id);
-      const { data: open, error: openError } = await waiting.limit(1);
-      if (openError) return dbError(res, openError);
-      if (open.length) return fail(res, 409, 'REVIEW_IN_PROGRESS', 'This plant has a record waiting for an officer. You can add to it once a decision is returned.');
-    }
+    // A retry of the record that is waiting carries on below and gets that record back.
+    const review = await reviewInProgress(db, req.user, body.specimen_id, body.id);
+    if (review.error) return dbError(res, review.error);
+    if (review.blocked) return fail(res, 409, 'REVIEW_IN_PROGRESS', REVIEW_IN_PROGRESS_MESSAGE);
     const now = new Date().toISOString();
     const { data, error } = await db
       .from('observations')

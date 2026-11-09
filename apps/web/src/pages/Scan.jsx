@@ -5,12 +5,13 @@ import Icon from "../components/Icon.jsx";
 import { Mono } from "../components/Bits.jsx";
 import { useStore } from "../../../shared/store.js";
 import { can } from "../../../shared/permissions.js";
+import { isReservedForOther } from "../../../shared/offline/tags.js";
 import { extractTag } from "../../../shared/selectors.js";
 import { photoFileProblem } from "../../../shared/utils.js";
 import { go } from "../useRoute.js";
 
 export default function Scan() {
-  const { db, role, notify } = useStore();
+  const { db, me, role, notify } = useStore();
   const [tagInput, setTagInput] = useState("");
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState(null);
@@ -35,7 +36,8 @@ export default function Scan() {
       go(`/tag/${clean}`);
     } else {
       const unusedTag = (db.tags || []).find((t) => t.qr_id.toUpperCase() === clean);
-      if (unusedTag && unusedTag.status === "unused" && canAdd) {
+      // A tag kept on another botanist's phone is not free to start a record on (CTIP-116).
+      if (unusedTag && unusedTag.status === "unused" && canAdd && !isReservedForOther(unusedTag, me?.id)) {
         go(`/add/${clean}`);
       } else {
         go(`/tag/${clean}`);
