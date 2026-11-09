@@ -113,6 +113,24 @@ test('a wrong password for a disabled account still only says wrong email or pas
   assert.equal(res.body.code, 'INVALID_CREDENTIALS');
 });
 
+// A token that already carries a role (the hook did not leave it out) must not skip the check.
+test('a disabled account is refused even when its new token carries a user_role', async (t) => {
+  const jwt = `h.${Buffer.from(JSON.stringify({ user_role: 'officer' })).toString('base64url')}.s`;
+  const real = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const url = new URL(input);
+    if (url.pathname === '/auth/v1/token') return json(200, { ...session(++issued), access_token: jwt });
+    return real(input, init);
+  });
+  profile = { is_active: false, deleted_at: null };
+  for (const [path, body] of [['/v1/auth/sign-in', { email: 'officer@example.com', password: 'old-password' }], ['/v1/auth/refresh', { refresh_token: 'refresh-ok' }]]) {
+    const res = await request(app).post(path).send(body);
+    assert.equal(res.status, 403, path);
+    assert.equal(res.body.code, 'ACCOUNT_DISABLED', path);
+    assert.equal(res.body.access_token, undefined, path);
+  }
+});
+
 test('refresh for an account disabled since sign-in: 403 ACCOUNT_DISABLED', async () => {
   profile = { is_active: false, deleted_at: null };
   const res = await request(app).post('/v1/auth/refresh').send({ refresh_token: 'refresh-ok' });
