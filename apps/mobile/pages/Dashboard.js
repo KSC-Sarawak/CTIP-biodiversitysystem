@@ -163,7 +163,9 @@ function SpeciesCatalogue({ nav, params, onView }) {
   const loadMore = apiMode ? search.loadMore : local.loadMore;
   const total = apiMode ? (search.total ?? 0) : local.total;
   const done = apiMode ? !search.hasMore : local.done;
-  const refreshControl = usePullRefresh();
+  // A pull also asks for the API search results again (nothing to do when the
+  // list is searched on the phone: refresh() is then a no-op).
+  const refreshControl = usePullRefresh(search.refresh);
 
   // Insert a letter heading before the first species of each letter (when sorted alphabetically).
   const isAlphaSort = !apiMode && ['common', 'scientific'].includes(sort);

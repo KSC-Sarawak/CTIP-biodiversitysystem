@@ -185,7 +185,7 @@ export function Users({ nav }) {
   };
 
   return (
-    <Screen gap={14}>
+    <Screen gap={14} refresh={!inviting}>
       <TitleBlock title="Users" sub={`${db.profiles.length} accounts · ${off} deactivated`}
         right={!inviting ? <Button label="Invite member" icon="plus" height={44} size={15} onPress={() => setInviting(true)} /> : null} />
       {inviting ? (

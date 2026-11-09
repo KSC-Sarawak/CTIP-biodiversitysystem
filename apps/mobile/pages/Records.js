@@ -280,8 +280,10 @@ export function RecordDetail({ nav, params = {} }) {
     if (r.ok) nav.back();
   };
 
+  // No pull to refresh while a form is open, so a pull cannot interrupt the typing.
   return (
     <Screen
+      refresh={!(returned || canEdit)}
       header={<Bar title={plant.qr_id} sub={`${o.status === 'returned' ? 'Returned' : o.status === 'approved' ? 'Published' : 'Recorded'} ${shortDate(returned ? review?.created_at : o.observed_at)}`} onBack={nav.back} />}
       gap={20}
       top={20}

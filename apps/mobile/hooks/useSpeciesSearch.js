@@ -41,8 +41,9 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
   // dropped by nextSearchState/failSearchState, because their key no longer matches.
   // With no connection the same page comes from the saved species. `offline` rides
   // along in the state, so a late answer to an older search cannot set it either.
+  // Returns a promise that settles once the answer is in the state (never rejects).
   const fetchPage = useCallback((forKey, query) => {
-    fetchSpeciesPage(query)
+    return fetchSpeciesPage(query)
       .then(({ data, meta }) => setState((s) => ({ ...nextSearchState(s, { key: forKey, data, meta }), offline: false })))
       .catch(async (error) => {
         // Only a new search, or one already answered from the phone, falls back to the
@@ -57,7 +58,8 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
         const { list, cachedAt } = await speciesCache.all();
         const { data, meta } = searchSpeciesOffline(list, query);
         setState((s) => ({ ...nextSearchState(s, { key: forKey, data, meta }), offline: true, cachedAt, cachedCount: list.length }));
-      });
+      })
+      .catch((err) => console.warn('[SpeciesSearch] answer not shown:', err?.message || err));
   }, []);
 
   // A new search waits until typing pauses, then asks for page 1.
@@ -90,6 +92,17 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
     fetchPage(s.key, buildSpeciesQuery({ q: term, family: fam, page: s.page + 1 }));
   }, [fetchPage]);
 
+  // Pull to refresh: asks for page 1 of the current search again. What is shown
+  // stays until the answer replaces it (a page-1 answer replaces the list), and a
+  // failure keeps it with the error, as any failed page does.
+  const refresh = useCallback(() => {
+    const s = latest.current;
+    if (!s.key) return Promise.resolve();
+    const { q: term, family: fam } = JSON.parse(s.key);
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+    return fetchPage(s.key, buildSpeciesQuery({ q: term, family: fam, page: 1 }));
+  }, [fetchPage]);
+
   return {
     active: Boolean(key),
     items: state.items,
@@ -102,5 +115,6 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
     cachedCount: state.cachedCount ?? 0, // species saved on the phone (the "n" in the picker's caption)
     loadMore,
     retry,
+    refresh,
   };
 }

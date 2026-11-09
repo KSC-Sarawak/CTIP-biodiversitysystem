@@ -248,8 +248,10 @@ export function PhoneRecordDetail({ nav, params = {} }) {
     );
   };
 
+  // No pull to refresh while "Fix this record" is open, so a pull cannot interrupt the typing.
   return (
     <Screen
+      refresh={notice?.action !== 'fix_record'}
       header={<Bar title={view.qr_id || 'Record on this phone'} sub={STATUS_TEXT[view.status]} onBack={nav.back} />}
       gap={20}
       top={20}
