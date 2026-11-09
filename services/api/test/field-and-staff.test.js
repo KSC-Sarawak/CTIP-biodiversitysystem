@@ -29,7 +29,12 @@ function checkInsert(table, row) {
   if (db[table].some((r) => r[key] === row[key])) return pgError('23505', `duplicate key value violates unique constraint "${table}_pkey"`);
   if (table === 'specimens') {
     if (db.specimens.some((r) => r.qr_id === row.qr_id)) return pgError('23505', 'duplicate key value violates unique constraint "specimens_qr_id_key"');
-    if (!db.qr_tags.some((t) => t.qr_id === row.qr_id)) return pgError('23503', 'violates foreign key constraint "specimens_qr_id_fkey"');
+    const tagRow = db.qr_tags.find((t) => t.qr_id === row.qr_id);
+    if (!tagRow) return pgError('23503', 'violates foreign key constraint "specimens_qr_id_fkey"');
+    // The tag trigger (migration 20261028000000) refuses a retired or damaged tag.
+    if (['retired', 'damaged'].includes(tagRow.status)) {
+      return pgError('CTTG0', `Tag ${row.qr_id} is ${tagRow.status}, use another tag`);
+    }
   }
   return null;
 }
@@ -81,7 +86,9 @@ async function fakeSupabase(input, init = {}) {
       if (err) return err;
     }
     const now = new Date().toISOString();
-    rows = list.map((r) => ({ id: crypto.randomUUID(), created_at: now, ...r }));
+    // Column defaults the real table has, so a row inserted here is found by the not-deleted filters.
+    const defaults = table === 'observations' ? { is_deleted: false } : {};
+    rows = list.map((r) => ({ id: crypto.randomUUID(), created_at: now, ...defaults, ...r }));
     db[table].push(...rows);
   } else if (method === 'PATCH') {
     rows = db[table].filter(matches);
@@ -156,6 +163,18 @@ test('a tag already on another plant gets 409 TAG_IN_USE; an unknown tag 422 TAG
   const unknown = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-9999' });
   assert.equal(unknown.status, 422);
   assert.equal(unknown.body.code, 'TAG_NOT_FOUND');
+});
+
+test('a retired or damaged tag gets 409 TAG_RETIRED, not a 500', async () => {
+  tag('NIAH-0002', 'retired');
+  tag('NIAH-0003', 'damaged');
+  for (const qr_id of ['NIAH-0002', 'NIAH-0003']) {
+    const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ id: crypto.randomUUID(), qr_id });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.code, 'TAG_RETIRED');
+    assert.equal(res.body.message, `Tag ${qr_id} has been retired. Pick or scan an unused tag.`);
+  }
+  assert.equal(db.specimens.length, 0);
 });
 
 test('clients cannot set registered_by or species_id when registering', async () => {
@@ -327,6 +346,68 @@ test('a tag on a plant cannot be deleted (409); an unused one can (204)', async 
   assert.equal((await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('officer'))).status, 409);
   assert.equal((await request(app).delete('/v1/qr-tags/NIAH-0002').set(as('officer'))).status, 204);
   assert.deepEqual(db.qr_tags.map((t) => t.qr_id), ['NIAH-0001']);
+});
+
+/* ---------- kept tags (CTIP-116) ---------- */
+
+// A "kept" tag is one a botanist reserved on their phone for use with no signal.
+const keptTag = (qr_id, fields = {}) => {
+  db.qr_tags.push({ qr_id, status: 'unassigned', batch_label: 'reserved', created_by: users.botanist, ...fields });
+};
+
+test('botanist releases own reserved unused tag', async () => {
+  keptTag('NIAH-0001');
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 204);
+  assert.equal(db.qr_tags.length, 0);
+});
+
+test("botanist cannot release another botanist's tag", async () => {
+  keptTag('NIAH-0001', { created_by: users.officer });
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'FORBIDDEN');
+  assert.equal(db.qr_tags.length, 1);
+});
+
+test('botanist cannot release a printed tag', async () => {
+  keptTag('NIAH-0001', { batch_label: 'Print 3' });
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(db.qr_tags.length, 1);
+});
+
+test('an officer cannot make a batch labelled reserved', async () => {
+  // "reserved" marks a tag kept on one botanist's phone: an officer's batch with
+  // that label would be refused to every botanist.
+  for (const role of ['officer', 'admin']) {
+    for (const count of [1, 5]) {
+      const res = await request(app).post('/v1/qr-tags/batch').set(as(role)).send({ count, batch_label: 'reserved' });
+      assert.equal(res.status, 403, `${role} ${count}`);
+      assert.equal(res.body.code, 'FORBIDDEN');
+      assert.equal(res.body.message, "Only a botanist's phone can make kept tags.");
+    }
+  }
+  assert.equal(db.qr_tags.length, 0);
+  // A botanist's phone keeps one tag at a time.
+  const one = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 1, batch_label: 'reserved' });
+  assert.equal(one.status, 201);
+  assert.equal(one.body[0].batch_label, 'reserved');
+});
+
+test("POST /specimens on another botanist's reserved tag answers 409 TAG_RESERVED", async () => {
+  keptTag('NIAH-0001', { created_by: users.officer });
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'TAG_RESERVED');
+  assert.equal(db.specimens.length, 0);
+});
+
+test('POST /specimens on my own reserved tag works', async () => {
+  keptTag('NIAH-0001');
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
+  assert.equal(res.status, 201);
+  assert.equal(db.specimens.length, 1);
 });
 
 /* ---------- start-up load ---------- */
@@ -737,4 +818,144 @@ test('photo confirm: an uploaded photo is returned as it is; a pending one is ma
   assert.equal(notYet.body.code, 'UPLOAD_NOT_FOUND');
   assert.equal(missing.upload_status, 'pending');
   assert.equal((await confirm({ id: crypto.randomUUID() })).status, 404);
+});
+
+/* ---------- CTIP-16: POST /sync ---------- */
+
+const syncItem = (fields = {}) => ({
+  id: crypto.randomUUID(), specimen_id: crypto.randomUUID(), base_version: null,
+  observed_at: '2026-11-02T08:30:00.000Z', height_cm: 120, notes: 'seen on the trail', ...fields,
+});
+const sync = (items, who = 'botanist') =>
+  request(app).post('/v1/sync').set(as(who)).send({ device_id: 'phone-1', observations: items });
+// A row the phone already sent once (queued, version 1), ready to be edited.
+const queuedRow = (fields = {}) => observation({ status: 'queued', height_cm: 100, notes: 'first note', ...fields });
+const editItem = (row, fields = {}) => ({ id: row.id, specimen_id: row.specimen_id, base_version: row.version, ...fields });
+
+test('POST /sync creates new observations as queued', async () => {
+  const item = syncItem();
+  const res = await sync([item]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].id, item.id);
+  assert.equal(res.body.results[0].result, 'created');
+  assert.equal(res.body.results[0].server_version, 1);
+  const row = db.observations.find((o) => o.id === item.id);
+  assert.equal(row.status, 'queued');
+  assert.equal(row.observed_at, item.observed_at);
+  assert.equal(row.recorded_by, users.botanist);
+  assert.equal(row.last_synced_at, null);
+});
+
+test('POST /sync replayed batch stores each observation once', async () => {
+  const items = [syncItem(), syncItem()];
+  const before = db.observations.length;
+  const first = await sync(items);
+  const second = await sync(items);
+  assert.equal(db.observations.length, before + 2);
+  for (const res of [first, second]) {
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.results.map((r) => r.result), ['created', 'created']);
+  }
+});
+
+test('POST /sync answers another user\'s id with ID_TAKEN and keeps their row', async () => {
+  const theirs = observation({ recorded_by: users.officer, status: 'queued', notes: 'theirs' });
+  const res = await sync([syncItem({ id: theirs.id, notes: 'mine' })]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].result, 'error');
+  assert.equal(res.body.results[0].error.code, 'ID_TAKEN');
+  assert.equal(theirs.notes, 'theirs');
+});
+
+test('POST /sync leaves a plant waiting for an officer alone (botanist), and still saves the others', async () => {
+  const specimen_id = crypto.randomUUID();
+  observation({ specimen_id, status: 'synced' });
+  const res = await sync([syncItem({ specimen_id }), syncItem()]);
+  assert.equal(res.body.results[0].result, 'error');
+  assert.equal(res.body.results[0].error.code, 'REVIEW_IN_PROGRESS');
+  assert.equal(res.body.results[1].result, 'created');
+});
+
+test('POST /sync edit with the right base_version answers updated', async () => {
+  const row = queuedRow();
+  const res = await sync([editItem(row, { height_cm: 150, notes: 'taller now' })]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].result, 'updated');
+  assert.equal(res.body.results[0].server_version, 2);
+  assert.equal(row.version, 2);
+  assert.equal(row.height_cm, 150);
+  assert.equal(row.notes, 'taller now');
+});
+
+test('POST /sync edit with an old base_version answers conflict and changes nothing', async () => {
+  const row = queuedRow({ version: 3 });
+  const res = await sync([editItem(row, { base_version: 1, height_cm: 150, notes: 'from the phone' })]);
+  assert.equal(res.body.results[0].result, 'conflict');
+  assert.equal(res.body.results[0].server_version, 3);
+  assert.equal(row.version, 3);
+  assert.equal(row.height_cm, 100);
+  assert.equal(row.notes, 'first note');
+});
+
+test('POST /sync replayed edit answers updated, not conflict', async () => {
+  const row = queuedRow();
+  const item = editItem(row, { height_cm: 150, notes: 'taller now' });
+  const first = await sync([item]);
+  const second = await sync([item]); // the answer was lost, so the phone sends it again
+  assert.equal(first.body.results[0].result, 'updated');
+  assert.equal(second.body.results[0].result, 'updated');
+  assert.equal(second.body.results[0].server_version, 2);
+  assert.equal(row.version, 2);
+});
+
+test('POST /sync edit of a record sent for review answers conflict WRONG_STATUS', async () => {
+  const row = observation({ status: 'synced', notes: 'under review' });
+  const res = await sync([editItem(row, { notes: 'late edit' })]);
+  assert.equal(res.body.results[0].result, 'conflict');
+  assert.equal(res.body.results[0].error.code, 'WRONG_STATUS');
+  assert.equal(row.notes, 'under review');
+  assert.equal(row.version, 1);
+});
+
+test('POST /sync edit of a missing record answers NOT_FOUND, and another user\'s record looks missing too', async () => {
+  const theirs = queuedRow({ recorded_by: users.officer });
+  const res = await sync([
+    editItem({ id: crypto.randomUUID(), specimen_id: crypto.randomUUID(), version: 1 }, { notes: 'x' }),
+    editItem(theirs, { notes: 'x' }),
+  ]);
+  assert.equal(res.body.results[0].error.code, 'NOT_FOUND');
+  assert.equal(res.body.results[1].error.code, 'NOT_FOUND');
+  assert.equal(theirs.version, 1);
+});
+
+test('POST /sync item without id answers error and the others still save', async () => {
+  const { id, ...noId } = syncItem();
+  const good = syncItem();
+  const res = await sync([noId, good]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].result, 'error');
+  assert.equal(res.body.results[0].error.code, 'VALIDATION_ERROR');
+  assert.equal(res.body.results[1].result, 'created');
+  assert.ok(db.observations.some((o) => o.id === good.id));
+});
+
+test('POST /sync refuses a status from the phone and unknown fields, per item', async () => {
+  const res = await sync([syncItem({ status: 'synced' }), syncItem({ recorded_by: users.officer }), syncItem()]);
+  assert.equal(res.body.results[0].error.code, 'VALIDATION_ERROR');
+  assert.equal(res.body.results[1].error.code, 'VALIDATION_ERROR');
+  assert.equal(res.body.results[2].result, 'created');
+  assert.equal(db.observations.length, 1);
+});
+
+test('POST /sync refuses 21 items, or none, with 422', async () => {
+  const many = await sync(Array.from({ length: 21 }, () => syncItem()));
+  assert.equal(many.status, 422);
+  assert.equal(many.body.code, 'VALIDATION_ERROR');
+  assert.equal((await sync([])).status, 422);
+  assert.equal(db.observations.length, 0);
+});
+
+test('POST /sync needs sign-in', async () => {
+  const res = await request(app).post('/v1/sync').send({ device_id: 'phone-1', observations: [syncItem()] });
+  assert.equal(res.status, 401);
 });

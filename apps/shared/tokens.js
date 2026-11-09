@@ -90,7 +90,9 @@ export function colors(theme = "dark") {
 // One meaning per colour: every status maps to exactly one tone, on web and mobile.
 export const STATUS_TONE = {
   approved: "success", published: "success", active: "success", resolved: "success", "least concern": "success",
-  synced: "info", assigned: "info",
+  synced: "info", assigned: "info", sending: "info",
+  // A record on this phone that could not be sent, or that changed elsewhere (offline-sync.md §6).
+  sync_failed: "warning", sync_conflict: "warning",
   returned: "warning", acknowledged: "warning", vulnerable: "warning", "near threatened": "warning", medium: "warning",
   rejected: "danger", endangered: "danger", "critically endangered": "danger", "extinct in the wild": "danger", extinct: "danger", open: "danger", high: "danger", faulty: "danger", retired: "danger",
   draft: "neutral", queued: "neutral", unused: "neutral", offline: "neutral", low: "neutral", unknown: "neutral", "data deficient": "neutral", "not evaluated": "neutral",
@@ -101,6 +103,9 @@ export const STATUS_TEXT = {
   approved: "Published",
   synced: "Needs review",
   queued: "Waiting to sync",
+  sending: "Sending",
+  sync_failed: "Couldn't send",
+  sync_conflict: "Changed on another device",
   returned: "Returned",
   rejected: "Rejected",
   draft: "Draft",

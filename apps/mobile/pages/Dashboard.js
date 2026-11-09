@@ -15,11 +15,13 @@ import {
   SkeletonRow, LoadingMore, Empty, Notice, Button,
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
+import { OfflineCaption, OFFLINE_EMPTY_TEXT, speciesPhoto } from '../components/OfflineSpecies.js';
 import { useSpeciesSearch } from '../hooks/useSpeciesSearch.js';
 import { cleanTerm, isTagSearch } from '../../shared/speciesSearch.js';
 import { can } from '../../shared/permissions.js';
 import { fuzzyMatch } from '../../shared/fuzzy.js';
 import { usePolling } from '../hooks/usePolling.js';
+import { usePullRefresh } from '../hooks/usePullRefresh.js';
 
 const PAGE_SIZE = 20; // same as the API's default `limit`
 const ROW_HEIGHT = 77; // fixed row height lets the list jump straight to a letter
@@ -161,6 +163,9 @@ function SpeciesCatalogue({ nav, params, onView }) {
   const loadMore = apiMode ? search.loadMore : local.loadMore;
   const total = apiMode ? (search.total ?? 0) : local.total;
   const done = apiMode ? !search.hasMore : local.done;
+  // A pull also asks for the API search results again (nothing to do when the
+  // list is searched on the phone: refresh() is then a no-op).
+  const refreshControl = usePullRefresh(search.refresh);
 
   // Insert a letter heading before the first species of each letter (when sorted alphabetically).
   const isAlphaSort = !apiMode && ['common', 'scientific'].includes(sort);
@@ -193,6 +198,8 @@ function SpeciesCatalogue({ nav, params, onView }) {
         <SearchField value={q} onChangeText={setQ} placeholder="Search name or tag ID" />
         <Pills value={family} onChange={setFamily} items={[{ key: 'all', label: 'All families' }, ...families.map((f) => ({ key: f, label: f }))]} />
         {apiMode ? null : <SortBar items={SORT_SPECIES} value={sort} onChange={setSort} />}
+        {/* With nothing saved, the empty state below carries the same sentence. */}
+        {apiMode && search.cachedCount > 0 ? <OfflineCaption search={search} /> : null}
         {apiMode && search.error ? (
           <View style={{ gap: 8 }}>
             <Notice tone="warning" icon="info" title="Species search unavailable" body={search.error} />
@@ -215,6 +222,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
         onEndReachedThreshold={0.4}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         scrollEventThrottle={16}
+        refreshControl={refreshControl}
         renderItem={({ item }) => (
           // Only the rows make room for the rail; the header keeps the full width.
           <View style={{ paddingRight: showRail ? RAIL_SPACE : 0 }}>
@@ -227,7 +235,11 @@ function SpeciesCatalogue({ nav, params, onView }) {
             )}
           </View>
         )}
-        ListEmptyComponent={loading || (apiMode && search.error) ? null : <Empty icon="search">No species match. Try another name or family.</Empty>}
+        ListEmptyComponent={
+          loading || (apiMode && search.error) ? null
+          : apiMode && search.offline && search.cachedCount === 0 ? <Empty icon="search">{OFFLINE_EMPTY_TEXT}</Empty>
+          : <Empty icon="search">No species match. Try another name or family.</Empty>
+        }
         ListFooterComponent={
           loading ? (
             <View>
@@ -251,7 +263,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
 }
 
 function SpeciesRow({ s, plants, staff, onPress }) {
-  const photo = s.photo || s.primary_image_url || s.media?.[0]?.url || plants.find((p) => p.species_id === s.id && p.photos?.length)?.photos[0]?.url;
+  const photo = speciesPhoto(s) || plants.find((p) => p.species_id === s.id && p.photos?.length)?.photos[0]?.url;
   return (
     <View style={{ height: ROW_HEIGHT }}>
       <Row
@@ -329,6 +341,7 @@ function TaggedList({ nav, onView }) {
   });
 
   const { shown, loading, loadMore } = usePaged(sorted, `${q}|${filter}|${sort}|${db.plants.length}`);
+  const refreshControl = usePullRefresh();
   const filters = role === 'visitor'
     ? [{ key: 'all', label: 'All' }, { key: 'endangered', label: 'Endangered' }]
     : role === 'botanist'
@@ -343,6 +356,7 @@ function TaggedList({ nav, onView }) {
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: LIST_BOTTOM }}
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
+        refreshControl={refreshControl}
         ListHeaderComponent={
           <PlantsHeader nav={nav} view="tagged" onView={onView} count={`${all.length} tagged`}>
             <SearchField value={q} onChangeText={setQ} placeholder={role === 'visitor' ? 'Tag ID or species' : 'Tag ID, species or botanist'} />

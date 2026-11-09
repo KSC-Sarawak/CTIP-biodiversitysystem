@@ -9,6 +9,13 @@ import TagPrint from "../components/TagPrint.jsx";
 import { useStore } from "../../../shared/store.js";
 import { tagUrl } from "../../../shared/selectors.js";
 import { download, fmtDate } from "../../../shared/utils.js";
+import { RESERVED_LABEL } from "../../../shared/offline/tags.js";
+
+// An unused tag made for one botanist's phone, so they can make a tag with no
+// signal (CTIP-116). It is not stock: printing it would put a second sticker
+// with the same ID on a plant, and only its botanist can put it on a plant.
+const isKept = (t) => t.status === "unused" && t.batch_label === RESERVED_LABEL;
+const KEPT_WARNING = "This tag is kept on a botanist's phone for making a tag offline.";
 
 // QR tag stock (qr_tags table): make a batch, print tags at any size, retire damaged ones,
 // delete unused ones made by mistake. Each tag's QR code opens in a popup to share or print.
@@ -21,7 +28,16 @@ export default function Tags() {
   const [printing, setPrinting] = useState(null); // qr_ids ticked when the print setup opens
   const [ask, confirmDialog] = useConfirm();
 
+  // A kept tag gets one more question first: its botanist is counting on it.
+  const keptOk = (t, action) =>
+    !isKept(t) || ask({ title: `${action} QR tag`, body: `${KEPT_WARNING} ${action} it anyway?`, confirmLabel: `${action} tag`, danger: true });
+
+  const askRemove = async (t) => {
+    if (await keptOk(t, "Delete")) setRemoving(t);
+  };
+
   const retire = async (t) => {
+    if (!(await keptOk(t, "Retire"))) return;
     if (!(await ask({ title: "Retire QR tag", body: <p>Retire <Mono>{t.qr_id}</Mono>? A retired tag can no longer be put on a plant or printed, and this cannot be undone.</p>, confirmLabel: "Retire tag", danger: true }))) return;
     retireTag(t.qr_id);
   };
@@ -31,8 +47,9 @@ export default function Tags() {
     setRemoving(null);
   };
 
-  const unused = db.tags.filter((t) => t.status === "unused");
-  const printable = db.tags.filter((t) => t.status !== "retired"); // assigned ones can be reprinted if a tag gets damaged
+  // Kept tags are left out of printing: they live on a botanist's phone, not on paper.
+  const unused = db.tags.filter((t) => t.status === "unused" && !isKept(t));
+  const printable = db.tags.filter((t) => t.status !== "retired" && !isKept(t)); // assigned ones can be reprinted if a tag gets damaged
 
   const make = async (e) => {
     e.preventDefault();
@@ -60,14 +77,14 @@ export default function Tags() {
               <tr key={t.qr_id}>
                 <td><Mono>{t.qr_id}</Mono></td>
                 <td><Chip value={t.status} /></td>
-                <td>{t.batch_label}</td>
+                <td>{isKept(t) ? "Kept for a botanist" : t.batch_label}</td>
                 <td>{fmtDate(t.created_at)}</td>
                 <td className="actions">
                   <button className="btn ghost small-btn" onClick={() => setViewing(t)} aria-label={`Show QR code for ${t.qr_id}`}><Icon name="qr" size={16} /> QR</button>
                   {t.status === "unused" && (
                     <>
                       <button className="btn ghost small-btn" onClick={() => retire(t)}><Icon name="x" size={16} /> Retire</button>
-                      <button className="ic" onClick={() => setRemoving(t)} aria-label={`Delete ${t.qr_id}`}><Icon name="trash" size={18} /></button>
+                      <button className="ic" onClick={() => askRemove(t)} aria-label={`Delete ${t.qr_id}`}><Icon name="trash" size={18} /></button>
                     </>
                   )}
                 </td>
@@ -77,7 +94,7 @@ export default function Tags() {
         </table>
       </div>
 
-      {viewing && <TagQr tag={viewing} onClose={() => setViewing(null)} onPrint={() => { setPrinting([viewing.qr_id]); setViewing(null); }} />}
+      {viewing && <TagQr tag={viewing} onClose={() => setViewing(null)} onPrint={isKept(viewing) ? null : () => { setPrinting([viewing.qr_id]); setViewing(null); }} />}
       {printing && <TagPrint tags={printable} initial={printing} onClose={() => setPrinting(null)} />}
 
       {removing && (
@@ -94,6 +111,7 @@ export default function Tags() {
 }
 
 // Popup with one tag's QR code, big enough to scan from the screen, plus share, save and print.
+// No `onPrint` (a kept tag): no Print button.
 function TagQr({ tag, onClose, onPrint }) {
   const { notify } = useStore();
   const box = useRef(null);
@@ -158,11 +176,11 @@ function TagQr({ tag, onClose, onPrint }) {
         <QRCodeSVG value={url} size={240} marginSize={2} title={`QR code for ${tag.qr_id}`} />
         <figcaption>{tag.qr_id}</figcaption>
       </figure>
-      <p className="center"><Chip value={tag.status} /> <span className="mute small">Batch {tag.batch_label}</span></p>
+      <p className="center"><Chip value={tag.status} /> <span className="mute small">{isKept(tag) ? "Kept for a botanist" : `Batch ${tag.batch_label}`}</span></p>
       <p className="mute small center breakall">{url}</p>
       <div className="row wrap center">
         <button className="btn" onClick={share}><Icon name="upload" size={16} /> Share</button>
-        <button className="btn ghost" onClick={onPrint}><Icon name="printer" size={16} /> Print…</button>
+        {onPrint && <button className="btn ghost" onClick={onPrint}><Icon name="printer" size={16} /> Print…</button>}
         <button className="btn ghost" onClick={save}><Icon name="download" size={16} /> Save PNG</button>
         <button className="btn ghost" onClick={copy}><Icon name="file" size={16} /> Copy link</button>
       </div>

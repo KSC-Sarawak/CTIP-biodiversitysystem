@@ -35,7 +35,7 @@ function FadeScreen({ children }) {
 }
 
 export default function AppNavigator() {
-  const { role, me, db, toast } = useStore();
+  const { role, me, db, toast, outboxItems } = useStore();
   const { c, scheme } = useTheme();
   const { keyboard, keyboardOpen } = useKeyboardOffset();
   const navBar = useSafeAreaInsets().bottom;
@@ -78,7 +78,7 @@ export default function AppNavigator() {
         <TabBar
           role={role}
           current={currentTab}
-          badges={badgeCounts(db, me)}
+          badges={badgeCounts(db, me, outboxItems)}
           onTab={(key) => (key === 'scan' ? nav.go('scan') : nav.tab(key))}
         />
       ) : null}

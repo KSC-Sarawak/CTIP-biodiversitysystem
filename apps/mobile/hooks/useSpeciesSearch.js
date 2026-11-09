@@ -3,12 +3,16 @@
 // a time. The rules (what to send, which answers to keep) live in
 // apps/shared/speciesSearch.js, where they are tested; this hook only adds the
 // typing delay, the requests and React state.
+// With no connection it answers from the species saved on the phone instead
+// (CTIP-84, offlineSearch.js) and reports `offline`, so the picker can say so.
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { apiFetch, userMessage } from '../../shared/api.js';
 import {
   buildSpeciesQuery, initialSearchState, nextSearchState, failSearchState, hasMore as more,
 } from '../../shared/speciesSearch.js';
+import { searchSpeciesOffline, shouldUseCache } from '../../shared/offline/offlineSearch.js';
+import { speciesCache } from '../offline/speciesCache.js';
 
 const IDLE = { key: null, items: [], page: 0, total: null, loading: false, error: null };
 
@@ -35,10 +39,27 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
 
   // One page for the search named `forKey`. Late answers to an older search are
   // dropped by nextSearchState/failSearchState, because their key no longer matches.
+  // With no connection the same page comes from the saved species. `offline` rides
+  // along in the state, so a late answer to an older search cannot set it either.
+  // Returns a promise that settles once the answer is in the state (never rejects).
   const fetchPage = useCallback((forKey, query) => {
-    fetchSpeciesPage(query)
-      .then(({ data, meta }) => setState((s) => nextSearchState(s, { key: forKey, data, meta })))
-      .catch((error) => setState((s) => failSearchState(s, { key: forKey, error })));
+    return fetchSpeciesPage(query)
+      .then(({ data, meta }) => setState((s) => ({ ...nextSearchState(s, { key: forKey, data, meta }), offline: false })))
+      .catch(async (error) => {
+        // Only a new search, or one already answered from the phone, falls back to the
+        // saved species. A later page that fails while online keeps what is shown and
+        // reports the error (with retry), so pages from two sources are never mixed.
+        const cur = latest.current;
+        const alreadyOffline = cur.key === forKey && cur.offline === true;
+        if (error?.code !== 'NETWORK_ERROR' || !shouldUseCache({ page: query.page, offline: alreadyOffline })) {
+          setState((s) => failSearchState(s, { key: forKey, error }));
+          return;
+        }
+        const { list, cachedAt } = await speciesCache.all();
+        const { data, meta } = searchSpeciesOffline(list, query);
+        setState((s) => ({ ...nextSearchState(s, { key: forKey, data, meta }), offline: true, cachedAt, cachedCount: list.length }));
+      })
+      .catch((err) => console.warn('[SpeciesSearch] answer not shown:', err?.message || err));
   }, []);
 
   // A new search waits until typing pauses, then asks for page 1.
@@ -47,7 +68,8 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
       setState(IDLE);
       return undefined;
     }
-    setState(initialSearchState(key));
+    // Keep what is known about being offline, so the caption does not blink while typing.
+    setState((prev) => ({ ...initialSearchState(key), offline: prev.offline, cachedAt: prev.cachedAt, cachedCount: prev.cachedCount }));
     const { q: term, family: fam } = JSON.parse(key);
     const timer = setTimeout(() => fetchPage(key, buildSpeciesQuery({ q: term, family: fam, page: 1 })), debounceMs);
     return () => clearTimeout(timer);
@@ -70,6 +92,17 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
     fetchPage(s.key, buildSpeciesQuery({ q: term, family: fam, page: s.page + 1 }));
   }, [fetchPage]);
 
+  // Pull to refresh: asks for page 1 of the current search again. What is shown
+  // stays until the answer replaces it (a page-1 answer replaces the list), and a
+  // failure keeps it with the error, as any failed page does.
+  const refresh = useCallback(() => {
+    const s = latest.current;
+    if (!s.key) return Promise.resolve();
+    const { q: term, family: fam } = JSON.parse(s.key);
+    setState((prev) => ({ ...prev, loading: true, error: null }));
+    return fetchPage(s.key, buildSpeciesQuery({ q: term, family: fam, page: 1 }));
+  }, [fetchPage]);
+
   return {
     active: Boolean(key),
     items: state.items,
@@ -77,7 +110,11 @@ export function useSpeciesSearch({ q, family, debounceMs = 300 }) {
     error: state.error,
     total: state.total,
     hasMore: more(state),
+    offline: state.offline === true,
+    cachedAt: state.cachedAt ?? null,
+    cachedCount: state.cachedCount ?? 0, // species saved on the phone (the "n" in the picker's caption)
     loadMore,
     retry,
+    refresh,
   };
 }

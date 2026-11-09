@@ -5,7 +5,8 @@ import { Text, Pressable } from 'react-native';
 import Icon from '../Icon.js';
 import { useTheme, font } from '../Theme.js';
 
-export function Button({ label, onPress, kind = 'primary', icon, disabled, height = 52, flex, size = 16 }) {
+// `accessibilityLabel`: only when the words on the button are not enough on their own.
+export function Button({ label, onPress, kind = 'primary', icon, disabled, height = 52, flex, size = 16, accessibilityLabel }) {
   const { c } = useTheme();
   const look = {
     primary: { bg: c.accent, fg: c.onAccent },
@@ -20,6 +21,7 @@ export function Button({ label, onPress, kind = 'primary', icon, disabled, heigh
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}

@@ -6,20 +6,24 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, font } from '../Theme.js';
 import { Txt } from './text.js';
 import { IconButton } from './buttons.js';
+import { usePullRefresh } from '../../hooks/usePullRefresh.js';
 
 // A full screen: optional header, scrolling content, optional footer pinned above the tab bar.
 // The default bottom space clears the raised Add plant / Scan button in the tab bar.
 // Uses synchronous insets from useSafeAreaInsets() to prevent layout shifting on transitions.
-export function Screen({ header, children, footer, scroll = true, bg, pad = 20, gap = 24, top = 16, bottom = 40, safeTop = true }) {
+// Pull down to refresh (usePullRefresh). Forms pass refresh={false} so a pull
+// while filling one in does nothing.
+export function Screen({ header, children, footer, scroll = true, refresh = true, bg, pad = 20, gap = 24, top = 16, bottom = 40, safeTop = true }) {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
+  const refreshControl = usePullRefresh();
   const content = { paddingHorizontal: pad, paddingTop: top, paddingBottom: bottom, gap };
 
   return (
     <View style={{ flex: 1, backgroundColor: bg || c.surface, paddingTop: safeTop ? insets.top : 0 }}>
       {header}
       {scroll ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={content} keyboardShouldPersistTaps="handled">
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={content} keyboardShouldPersistTaps="handled" refreshControl={refresh ? refreshControl : undefined}>
           {children}
         </ScrollView>
       ) : (

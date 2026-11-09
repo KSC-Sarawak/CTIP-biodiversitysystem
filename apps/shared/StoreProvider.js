@@ -41,6 +41,7 @@ import {
   findSpecimenByQrApi,
   createSpecimenApi,
   updateSpecimenApi,
+  updateObservationApi,
   createObservationApi,
   submitObservationApi,
   addCommentApi,
@@ -69,6 +70,10 @@ import {
   markReadApi,
   markAllReadApi,
 } from "./api.js";
+import { newPlantRecord, revisitRecord, editRecord } from "./offline/records.js";
+import { tagCacheRows } from "./offline/tags.js";
+import { useOutboxSync } from "./offline/useOutboxSync.js";
+import { useReservedTags } from "./offline/useReservedTags.js";
 
 // Shown wherever a page needs the Express API and cannot reach it.
 export const API_DOWN = "Cannot reach the API server (Render). Please check your network connection.";
@@ -94,7 +99,13 @@ const savedUserId = () => getSession()?.user?.id || tokenClaims(getAuthToken())?
 // through the other endpoints, which check the role and run each query as the
 // user so RLS applies too. The one exception is loading photos, from the
 // short-lived Storage links the API hands out.
-export default function StoreProvider({ children, deviceId = "mobile" }) {
+//
+// The phone also passes `outbox` (unsent records, in the encrypted SQLite file)
+// and `tagCache` (the tag list for use without signal): new records are then
+// saved on the phone first and sent by the sync engine (CTIP-16, CTIP-83).
+// `reservedTags` holds the 3 tags kept for the botanist (CTIP-116). The web
+// passes none of them and sends records straight to the API, as before.
+export default function StoreProvider({ children, deviceId = "mobile", outbox = null, tagCache = null, reservedTags = null }) {
   // The sample plants are for visitors. Staff are recognised straight away, so
   // they would see them (no species, far from real data) until their own load.
   const [db, setDb] = useState(() => (savedUserId() ? staffStart : seed));
@@ -119,6 +130,11 @@ export default function StoreProvider({ children, deviceId = "mobile" }) {
   // on its way for the previous user is then dropped, so it cannot bring their
   // staff data back after it was cleared.
   const sessionEpoch = useRef(0);
+  // Records saved on this phone (mobile only; see the "records saved on the phone" section).
+  const [cachedTags, setCachedTags] = useState([]); // tag_cache rows, for scanning without signal
+  const userIdRef = useRef(userId);
+  userIdRef.current = userId; // read by the sync engine, which is made once
+  const savedTagRows = useRef(""); // the tag list last written to tag_cache, as JSON
 
   // The role always comes from the signed-in user's profile (loaded through the
   // API); nobody signed in is a visitor. The prototype role switch that could
@@ -194,6 +210,21 @@ function collectionMatches(a = [], b = []) {
     const base = Math.min(MAX_POLL_MS, pollAfter.current * 2 ** misses.current);
     return Math.round(base * (0.9 + Math.random() * 0.2));
   }, []);
+
+  // The phone keeps the tag list of the last load (tag_cache, no locations), so
+  // a tag can still be checked when the app is opened without signal. Written
+  // only when it changed. A failed write is not worth stopping the load for.
+  const saveTagCache = useCallback((owner, shaped) => {
+    if (!tagCache) return;
+    const rows = tagCacheRows(shaped, owner);
+    const json = JSON.stringify([owner, rows]);
+    if (json === savedTagRows.current) return;
+    savedTagRows.current = json;
+    tagCache.save(owner, rows).catch((err) => {
+      savedTagRows.current = "";
+      console.warn("tagCache.save:", err?.message || err);
+    });
+  }, [tagCache]);
 
   // Load everything the pages show from the API (GET /v1/workspace, or
   // /v1/public/workspace for visitors) and shape it for the store.
@@ -301,6 +332,8 @@ function collectionMatches(a = [], b = []) {
       created_by: t.created_by,
       created_at: t.created_at,
     }));
+
+    if (owner) saveTagCache(owner, { tags, plants, species: w.species });
 
     const reviews = w.observation_reviews.map((r) => ({
       id: r.id,
@@ -440,7 +473,7 @@ function collectionMatches(a = [], b = []) {
 
     if (!quiet) notify("Synchronized");
     return { ok: true };
-  }, [notify, markMiss, markReachable]);
+  }, [notify, markMiss, markReachable, saveTagCache]);
 
   // Reload everything from the API (/v1) and check the signed-in profile
   const syncWithBackend = useCallback(async (quiet = false) => {
@@ -602,6 +635,48 @@ function collectionMatches(a = [], b = []) {
     code: res.code, status: res.status, retryable: !!res.offline || res.status >= 500 || res.status === 429,
   });
 
+  /* ---------- records saved on the phone (CTIP-16, CTIP-83, CTIP-68) ---------- */
+  // Only the phone passes an outbox. Design: docs/architecture/offline-sync.md.
+  // The sync engine, the unsent list and what the botanist can do to a record
+  // that could not be sent live in useOutboxSync (apps/shared/offline/). When
+  // to sync is the phone's business: apps/mobile/offline/useSyncTriggers.js.
+
+  // Whose records may be sent now: the signed-in person, and only while the
+  // stored session (whose token every call carries) is that same person's.
+  // Otherwise null, and the engine stops without sending anything (shared phones).
+  const currentUserId = useCallback(() => {
+    const id = userIdRef.current;
+    return id && id === savedUserId() ? id : null;
+  }, []);
+
+  const {
+    outboxItems, syncState, syncNow, saveOnPhone, recordPhotos, recordFirstPhoto,
+    retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
+  } = useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify });
+
+  // The 3 tags kept for a botanist, so a new tag can be made with no signal (CTIP-116).
+  const { keptTags, keepOffline, setKeepOffline, topUpReservedTags, takeReservedTag } = useReservedTags({
+    reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi,
+  });
+
+  // The tag list saved at the last load, read once per person.
+  const loadCachedTags = useCallback(async () => {
+    if (!tagCache) return;
+    const id = userIdRef.current;
+    try {
+      const rows = id ? await tagCache.all(id) : [];
+      if (userIdRef.current === id) setCachedTags(rows);
+    } catch (err) {
+      console.warn("tagCache.all:", err?.message || err);
+    }
+  }, [tagCache]);
+
+  // A new person (or nobody): their own tag list.
+  useEffect(() => {
+    setCachedTags([]);
+    loadCachedTags();
+  }, [userId, loadCachedTags]);
+
   /* ---------- session & authentication ---------- */
   const logout = async () => {
     lastWorkspace.current = null;
@@ -761,11 +836,26 @@ function collectionMatches(a = [], b = []) {
   const tagInUse = (qr_id) =>
     Object.assign(new Error(`Tag ${qr_id} is already on another plant. Pick or scan an unused tag.`), { code: "TAG_IN_USE", retryable: false });
 
-  // New plant on an unused tag: specimen, first observation, photos, each
-  // through the API. Each step runs once. The ids are made here, so a retry
-  // after a dropped connection gets back the row it already saved instead of
-  // adding a second one. Returns { ok, ... } and never throws.
-  const addPlant = async ({ qr_id, proposed_species, morphology, height_cm, notes, photos = [], lat, lng, gps_accuracy_m }) => {
+  // New plant on an unused tag. Answers { ok: true, queued, id } (id: the
+  // observation's) or { ok: false, message }, and never throws.
+  // On the phone it is saved in the outbox first, then sent (queued: true when
+  // it is still waiting there). Without an outbox (the web), or when SQLite is
+  // not available on this phone, it goes straight to the API (queued: false).
+  const addPlant = async (fields) => {
+    if (outbox) {
+      const userId = currentUserId();
+      if (!userId) return { ok: false, message: "Sign in again to save records." };
+      const res = await saveOnPhone(newPlantRecord({ userId, ...fields }), fields.photos || [], `Plant tagged with ${fields.qr_id}`);
+      if (res.code !== "OUTBOX_UNAVAILABLE") return res;
+      console.warn("addPlant: the outbox is not available on this phone; sending online instead");
+    }
+    return addPlantOnline(fields);
+  };
+
+  // Straight to the API: specimen, first observation, photos. Each step runs
+  // once. The ids are made here, so a retry after a dropped connection gets
+  // back the row it already saved instead of adding a second one.
+  const addPlantOnline = async ({ qr_id, proposed_species, morphology, height_cm, notes, photos = [], lat, lng, gps_accuracy_m }) => {
     const authUid = userId || getSession()?.user?.id;
     const done = { specimenId: null, obsId: uid(), observation: false, photos: 0 };
     const photoIds = photos.map((p) => p.id || uid());
@@ -809,7 +899,7 @@ function collectionMatches(a = [], b = []) {
           must(await callApi(uploadObservationPhotoApi, done.obsId, { ...photos[done.photos], id: photoIds[done.photos] }));
         }
 
-        return { ok: true, id: done.specimenId, obsId: done.obsId };
+        return { ok: true, queued: false, id: done.obsId, specimenId: done.specimenId };
       }, { maxRetries: 3 });
 
       notify(`Plant tagged with ${qr_id}`);
@@ -838,7 +928,22 @@ function collectionMatches(a = [], b = []) {
     device_id: deviceId,
   });
 
-  const addRevisit = async ({ specimen_id, height_cm, morphology, notes, photos = [], lat, lng, gps_accuracy_m }) => {
+  // A revisit. Same answers and the same save-first rule as addPlant.
+  // `specimen_id` is the plant's server id; for a plant so far only in this
+  // phone's outbox it is null and `specimen_ref` is that plant's outbox record.
+  const addRevisit = async (fields) => {
+    if (outbox) {
+      const userId = currentUserId();
+      if (!userId) return { ok: false, message: "Sign in again to save records." };
+      const res = await saveOnPhone(revisitRecord({ userId, ...fields }), fields.photos || [], "Revisit recorded");
+      if (res.code !== "OUTBOX_UNAVAILABLE") return res;
+      console.warn("addRevisit: the outbox is not available on this phone; sending online instead");
+    }
+    if (!fields.specimen_id) return { ok: false, message: "This plant is not on the server yet. Try again once it has been sent." };
+    return addRevisitOnline(fields);
+  };
+
+  const addRevisitOnline = async ({ specimen_id, height_cm, morphology, notes, photos = [], lat, lng, gps_accuracy_m }) => {
     const obsId = uid();
     const photoIds = photos.map((p) => p.id || uid());
     let observationDone = false;
@@ -873,12 +978,12 @@ function collectionMatches(a = [], b = []) {
 
       notify("Revisit recorded");
       await loadFromApi(true);
-      return result;
+      return { ok: true, queued: false, id: result };
     } catch (err) {
       console.error("addRevisit error:", err);
       notify(`Failed to record revisit: ${err.message || err}`);
       await loadFromApi(true);
-      return null;
+      return { ok: false, message: err.message || String(err) };
     }
   };
 
@@ -906,7 +1011,9 @@ function collectionMatches(a = [], b = []) {
   // Send a draft or a record waiting for a signal: POST /v1/observations/:id/submit.
   // Returns { ok, message }.
   const syncObservation = async (id) => {
-    const res = await callApi(submitObservationApi, id);
+    // The empty body matters: callApi adds { token } as the last argument, which
+    // would otherwise land in the body slot (and be sent as the request body).
+    const res = await callApi(submitObservationApi, id, {});
     await loadFromApi(true);
     if (!res.ok) {
       const message = res.code === "WRONG_STATUS" ? "This record can no longer be sent. Refresh and check its status." : res.message;
@@ -915,6 +1022,58 @@ function collectionMatches(a = [], b = []) {
     }
     notify("Record sent for review");
     return { ok: true };
+  };
+
+  // Change a draft or queued record of the botanist's own: "Save changes" in My
+  // records. `changes` may hold height_cm, morphology and notes. Answers
+  // { ok, queued?, observation?, message? }. `obs` is the snapshot the form opened on
+  // (editSnapshot), NOT the live record: only fields changed against the snapshot are
+  // sent, and its version is the one checked, so a record that moved on since the form
+  // opened is refused (409 VERSION_CONFLICT) or becomes a conflict, never overwritten.
+  //   online         PATCH /observations/:id with the version the screen shows. If the
+  //                  record changed meanwhile (409 VERSION_CONFLICT) the message says so
+  //                  and nothing is saved.
+  //   no connection  (or the PATCH could not reach the API) on the phone: the edit is
+  //                  saved in the outbox and sent later. If the record changed on another
+  //                  device by then, the botanist chooses which version to keep (CTIP-67).
+  const editUnsent = async (obs, changes) => {
+    const userId = currentUserId();
+    if (!userId) return { ok: false, message: "Sign in again to save changes." };
+    const record = editRecord({
+      userId,
+      obs,
+      changes,
+      qr_id: (db.plants || []).find((p) => p.id === obs.specimen_id)?.qr_id ?? null,
+    });
+    const body = record.observation;
+    if (!Object.keys(body).length) return { ok: false, message: "Nothing was changed." };
+    if (body.height_cm != null && !(body.height_cm >= 0)) return { ok: false, message: "Height must be a number of 0 or more" };
+
+    // Changes already waiting on this phone for this record: one edit at a time.
+    if (outboxItems.some((r) => r.id === obs.id)) {
+      return { ok: false, message: "This record already has changes waiting on this phone." };
+    }
+
+    const saveOnThePhone = async () => {
+      const saved = await saveOnPhone(record, [], "Changes saved");
+      if (!saved.ok) return { ok: false, message: saved.code === "OUTBOX_UNAVAILABLE" ? API_DOWN : saved.message };
+      if (saved.queued) notify("Saved on this phone. It sends when you're back online.");
+      await loadFromApi(true);
+      return { ok: true, queued: saved.queued };
+    };
+
+    if (outbox && apiStatus === "offline") return saveOnThePhone();
+    const res = await callApi(updateObservationApi, obs.id, { ...body, version: obs.version });
+    if (res.ok) {
+      notify("Changes saved");
+      await loadFromApi(true);
+      return { ok: true, queued: false, observation: res.data }; // the form's next snapshot
+    }
+    if (res.offline && outbox) return saveOnThePhone();
+    await loadFromApi(true); // a record that changed meanwhile shows its newest version
+    const message = res.code === "WRONG_STATUS" ? "This record can no longer be changed. Refresh and check its status." : res.message;
+    notify(`Changes not saved: ${message}`);
+    return { ok: false, message };
   };
 
   // Send a returned record again, with the botanist's fixes and an optional
@@ -1432,6 +1591,10 @@ function collectionMatches(a = [], b = []) {
     ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, loadNodeTelemetry,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
+    outboxItems, syncState, syncNow, cachedTags,
+    keptTags, keepOffline, setKeepOffline, topUpReservedTags, takeReservedTag,
+    recordPhotos, recordFirstPhoto, retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
+    editUnsent,
     loadFromApi,
     pollFromBackend: () => loadFromApi(true),
     nextPollDelay,

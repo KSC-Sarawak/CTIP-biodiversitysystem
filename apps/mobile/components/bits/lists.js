@@ -7,10 +7,11 @@ import { useTheme, font } from '../Theme.js';
 import { initials as toInitials } from '../../../shared/utils.js';
 
 // Flat list row with hairline divider (no card). `serif` titles for plant names.
-export function Row({ left, title, sub, right, onPress, last, serif = true }) {
+// `accessibilityLabel`: one sentence a screen reader says for the whole row.
+export function Row({ left, title, sub, right, onPress, last, serif = true, accessibilityLabel }) {
   const { c } = useTheme();
   return (
-    <Pressable accessibilityRole={onPress ? 'button' : undefined} onPress={onPress} disabled={!onPress}
+    <Pressable accessibilityRole={onPress ? 'button' : undefined} accessibilityLabel={accessibilityLabel} onPress={onPress} disabled={!onPress}
       style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 14, paddingVertical: 12, borderBottomWidth: last ? 0 : 1, borderBottomColor: c.line, opacity: pressed ? 0.7 : 1 })}>
       {left || null}
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>

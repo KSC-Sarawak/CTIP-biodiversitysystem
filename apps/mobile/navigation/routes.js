@@ -8,6 +8,7 @@ import Scan from '../pages/Scan.js';
 import SignIn from '../pages/Login.js';
 import { AddPlant, Submitted, Revisit } from '../pages/AddPlant.js';
 import { MyRecords, RecordDetail } from '../pages/Records.js';
+import { PhoneRecordDetail } from '../pages/PhoneRecords.js';
 import { ReviewQueue, ReviewRecord } from '../pages/Review.js';
 import { Monitor, AlertDetail } from '../pages/Monitoring.js';
 import Alerts from '../pages/Notifications.js';
@@ -25,7 +26,7 @@ export const SCREENS = {
   home: Home, about: About, contact: Contact, more: More, signin: SignIn,
   plants: SpeciesList, species: SpeciesProfile, tag: TaggedPlant, map: MapPage, scan: Scan,
   tagged: TaggedPlants, add: AddPlant, submitted: Submitted, revisit: Revisit,
-  records: MyRecords, record: RecordDetail, alerts: Alerts, discussion: Discussion,
+  records: MyRecords, record: RecordDetail, phoneRecord: PhoneRecordDetail, alerts: Alerts, discussion: Discussion,
   review: ReviewQueue, reviewItem: ReviewRecord, monitor: Monitor, alert: AlertDetail,
   staffMore: StaffMore, speciesAdmin: SpeciesAdmin, tags: Tags, tagQr: TagQr, reports: Reports,
   users: Users, audit: Audit, account: Account, book: Book,

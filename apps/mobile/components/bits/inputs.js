@@ -27,7 +27,7 @@ export function SearchField({ value, onChangeText, placeholder, pill }) {
 }
 
 // Label + filled input. `mono` for tag IDs, `italic` for scientific names.
-export function Field({ label, value, onChangeText, placeholder, mono, italic, suffix, hint, optional, width, secure, rightIcon, onRightPress, keyboardType, error, editable = true }) {
+export function Field({ label, value, onChangeText, placeholder, mono, italic, suffix, hint, optional, width, secure, rightIcon, onRightPress, keyboardType, error, editable = true, maxLength }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
   const family = mono ? font('mono', 500) : italic ? font('display', 500, true) : font('text', 400);
@@ -49,6 +49,7 @@ export function Field({ label, value, onChangeText, placeholder, mono, italic, s
           secureTextEntry={secure}
           keyboardType={keyboardType}
           editable={editable}
+          maxLength={maxLength}
           autoCapitalize={mono || keyboardType === 'email-address' ? 'none' : 'sentences'}
           onFocus={() => setFocus(true)}
           onBlur={() => setFocus(false)}
@@ -67,7 +68,8 @@ export function Field({ label, value, onChangeText, placeholder, mono, italic, s
   );
 }
 
-export function Area({ label, value, onChangeText, placeholder, rows = 3, optional }) {
+// `maxLength`: the most characters the API accepts for this field, if it has a limit.
+export function Area({ label, value, onChangeText, placeholder, rows = 3, optional, maxLength }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
 
@@ -84,6 +86,7 @@ export function Area({ label, value, onChangeText, placeholder, rows = 3, option
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={c.ink3}
+        maxLength={maxLength}
         onFocus={() => setFocus(true)}
         onBlur={() => setFocus(false)}
         textAlignVertical="top"
