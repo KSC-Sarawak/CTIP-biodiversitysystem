@@ -15,7 +15,28 @@ const verify = async (who) => ({ sub: users[who], user_role: roleOf[who] });
 const app = createApp({ verify });
 const as = (who) => ({ Authorization: `Bearer ${who}` });
 
-let discussions, audience, posts, rpcCalls;
+let discussions, audience, posts, rpcCalls, history;
+
+// The rules of trg_guard_discussion_post (20261108120000), played on one
+// message: answers the changed row, or a 42501 refusal. History rows as the
+// history trigger writes them (discussion_post_versions).
+function updatePost(p, changes, me) {
+  const refuse = () => json(403, { code: '42501', message: 'not allowed' });
+  const before = { ...p };
+  if ('deleted_at' in changes && changes.deleted_at && !p.deleted_at) {
+    if (p.author_id !== me.id && me.role !== 'admin') return refuse();
+    Object.assign(p, { deleted_at: new Date().toISOString(), deleted_by: me.id, body: '', mentions: [] });
+  } else if ('deleted_at' in changes && !changes.deleted_at && p.deleted_at) {
+    if (p.deleted_by !== me.id) return refuse();
+    const del = history.findLast((a) => a.record_id === p.id && !a.old_value.deleted_at && a.new_value.deleted_at);
+    Object.assign(p, { deleted_at: null, deleted_by: null, body: del.old_value.body, mentions: del.old_value.mentions });
+  } else {
+    if (p.deleted_at || p.author_id !== me.id) return refuse();
+    Object.assign(p, { body: changes.body, mentions: changes.mentions, edited_at: new Date().toISOString() });
+  }
+  history.push({ record_id: p.id, changed_by: me.id, old_value: before, new_value: { ...p } });
+  return null;
+}
 
 const json = (status, body) =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -39,6 +60,7 @@ beforeEach((t) => {
   audience = [];
   posts = [];
   rpcCalls = [];
+  history = [];
   t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
     const url = new URL(input);
     const method = init.method ?? 'GET';
@@ -83,6 +105,14 @@ beforeEach((t) => {
       } else {
         rows = posts.filter((p) => visibleThread(p.discussion_id) && (!eq.id || p.id === eq.id) &&
           (!eq.discussion_id || p.discussion_id === eq.discussion_id));
+        if (method === 'PATCH') {
+          // RLS: the author or an admin; then the trigger's own rules.
+          rows = rows.filter((p) => p.author_id === me.id || me.role === 'admin');
+          for (const p of rows) {
+            const refused = updatePost(p, JSON.parse(init.body), me);
+            if (refused) return refused;
+          }
+        }
       }
     } else return json(404, { message: `no table ${table}` });
 
@@ -178,4 +208,66 @@ test('delete: not by another member, yes by an admin', async () => {
 test('visitors cannot use the board', async () => {
   const res = await request(app).post('/v1/discussions').send({ title: 'x', body: 'y', visibility: 'public' });
   assert.equal(res.status, 401);
+});
+
+/* ---------- messages: edit, delete, undo (20261108120000) ---------- */
+
+const threadWithReply = async () => {
+  const t = (await start('botanist', { visibility: 'public', share_roles: [] })).body;
+  const reply = (await request(app).post(`/v1/discussions/${t.id}/posts`).set(as('other')).send({ body: 'Yes, last week' })).body;
+  return { t, first: t.posts[0], reply };
+};
+const postUrl = (t, p, end = '') => `/v1/discussions/${t.id}/posts/${p.id}${end}`;
+
+test('edit: the author changes the text, it shows edited, and the private thread history has before and after', async () => {
+  const { t, first } = await threadWithReply();
+  const res = await request(app).patch(postUrl(t, first)).set(as('botanist')).send({ body: 'Has anyone seen fruit yet?' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.body, 'Has anyone seen fruit yet?');
+  assert.ok(res.body.edited_at);
+  assert.equal(history.at(-1).old_value.body, 'Has anyone seen flowers yet?');
+  assert.equal(history.at(-1).new_value.body, 'Has anyone seen fruit yet?');
+});
+
+test('edit: nobody else, not even an admin; empty text is refused; same text is not marked edited', async () => {
+  const { t, first, reply } = await threadWithReply();
+  assert.equal((await request(app).patch(postUrl(t, first)).set(as('other')).send({ body: 'changed' })).status, 403);
+  assert.equal((await request(app).patch(postUrl(t, reply)).set(as('admin')).send({ body: 'changed' })).status, 403);
+  assert.equal((await request(app).patch(postUrl(t, first)).set(as('botanist')).send({ body: '  ' })).status, 422);
+  const same = await request(app).patch(postUrl(t, first)).set(as('botanist')).send({ body: first.body });
+  assert.equal(same.status, 200);
+  assert.equal(same.body.edited_at, undefined);
+  assert.equal(history.length, 0);
+});
+
+test('delete and undo: the text goes, then comes back exactly from the private thread history', async () => {
+  const { t, reply } = await threadWithReply();
+  const del = await request(app).delete(postUrl(t, reply)).set(as('other'));
+  assert.equal(del.status, 200);
+  assert.equal(del.body.body, '');
+  assert.ok(del.body.deleted_at);
+  assert.equal((await request(app).patch(postUrl(t, reply)).set(as('other')).send({ body: 'x' })).status, 409);
+  const undo = await request(app).post(postUrl(t, reply, '/restore')).set(as('other'));
+  assert.equal(undo.status, 200);
+  assert.equal(undo.body.body, 'Yes, last week');
+  assert.equal(undo.body.deleted_at, null);
+  assert.equal(history.length, 2);
+});
+
+test('delete: someone else cannot; an admin can (moderation), and only the admin can undo it', async () => {
+  const { t, reply } = await threadWithReply();
+  assert.equal((await request(app).delete(postUrl(t, reply)).set(as('botanist'))).status, 403);
+  assert.equal(reply.body, 'Yes, last week');
+  assert.equal((await request(app).delete(postUrl(t, reply)).set(as('admin'))).status, 200);
+  assert.equal((await request(app).post(postUrl(t, reply, '/restore')).set(as('other'))).status, 403);
+  assert.equal((await request(app).post(postUrl(t, reply, '/restore')).set(as('admin'))).body.body, 'Yes, last week');
+});
+
+test('messages: bad or unknown ids, or a thread you cannot read, answer 404', async () => {
+  const { t, first } = await threadWithReply();
+  assert.equal((await request(app).delete(`/v1/discussions/${t.id}/posts/nope`).set(as('botanist'))).status, 404);
+  assert.equal((await request(app).delete(`/v1/discussions/${t.id}/posts/${crypto.randomUUID()}`).set(as('botanist'))).status, 404);
+  const hidden = (await start('officer', { share_roles: ['admin'] })).body;
+  assert.equal((await request(app).delete(postUrl(hidden, hidden.posts[0])).set(as('botanist'))).status, 404);
+  assert.equal((await request(app).delete(postUrl(t, { id: first.id })).set(as('botanist'))).status, 200);
 });

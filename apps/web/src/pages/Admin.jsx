@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
-import { Chip } from "../components/Bits.jsx";
+import { Chip, PasswordInput } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
 import { fuzzyMatch } from "../../../shared/fuzzy.js";
@@ -145,7 +145,7 @@ export function Users() {
         <div className="row wrap invite">
           <label>Name<input id="invite-name" value={name} onChange={edit("name", setName)} autoComplete="off" {...fieldProps("name")} />{fieldError("name")}</label>
           <label>Email<input id="invite-email" type="email" value={email} onChange={edit("email", setEmail)} autoComplete="off" {...fieldProps("email")} />{fieldError("email")}</label>
-          <label>Temporary Password<input id="invite-password" type="password" value={password} onChange={edit("password", setPassword)} placeholder="At least 8 characters" autoComplete="new-password" {...fieldProps("password")} />{fieldError("password")}</label>
+          <label>Temporary Password<PasswordInput id="invite-password" value={password} onChange={edit("password", setPassword)} placeholder="At least 8 characters" autoComplete="new-password" {...fieldProps("password")} />{fieldError("password")}</label>
           <label>Role
             <select value={newRole} onChange={(e) => setNewRole(e.target.value)}>
               {Object.entries(ROLE_LABEL).map(([r, text]) => <option key={r} value={r}>{text}</option>)}

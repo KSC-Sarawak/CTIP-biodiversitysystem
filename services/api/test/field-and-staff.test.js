@@ -64,6 +64,7 @@ async function fakeSupabase(input, init = {}) {
     const want = rest.join('.');
     if (op === 'eq') return `${row[k]}` === want;
     if (op === 'neq') return `${row[k]}` !== want;
+    if (op === 'gte') return `${row[k]}` >= want; // ISO timestamps compare as text
     if (op === 'ilike') return `${row[k]}`.toLowerCase() === want.toLowerCase();
     if (op === 'in') return want.replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/"/g, '')).includes(`${row[k]}`);
     if (op === 'is' && want === 'null') return row[k] == null;
@@ -108,7 +109,7 @@ async function fakeSupabase(input, init = {}) {
 beforeEach((t) => {
   db = {
     qr_tags: [], specimens: [], observations: [], observation_photos: [], observation_comments: [],
-    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [],
+    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], telemetry: [],
     notifications: [], audit_logs: [], profiles: [], zones: [],
     discussions: [], discussion_audience: [], discussion_posts: [], 'rpc/discussion_directory': [],
   };
@@ -340,6 +341,34 @@ test('workspace: every list, with signed links on field photos', async () => {
   assert.deepEqual(res.body.unavailable, []);
 });
 
+test('workspace: sensor readings from the last 24 hours only', async () => {
+  const node = crypto.randomUUID();
+  const ago = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  db.telemetry.push({ id: 'new', node_id: node, ts: ago(1), temperature: 30 }, { id: 'old', node_id: node, ts: ago(48), temperature: 20 });
+  const res = await request(app).get('/v1/workspace').set(as('officer'));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.telemetry.map((r) => r.id), ['new']);
+});
+
+test('sensor node telemetry: readings in the asked range, oldest first; bad input refused', async () => {
+  const node = crypto.randomUUID();
+  const other = crypto.randomUUID();
+  const ago = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  db.telemetry.push(
+    { id: 'a', node_id: node, ts: ago(2) }, { id: 'b', node_id: node, ts: ago(1) },
+    { id: 'c', node_id: node, ts: ago(100) }, { id: 'x', node_id: other, ts: ago(1) },
+  );
+  const day = await request(app).get(`/v1/sensor-nodes/${node}/telemetry`).set(as('officer'));
+  assert.equal(day.status, 200);
+  assert.deepEqual(day.body.map((r) => r.id).sort(), ['a', 'b']);
+  const week = await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=168`).set(as('admin'));
+  assert.deepEqual(week.body.map((r) => r.id).sort(), ['a', 'b', 'c']);
+  assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=0`).set(as('officer'))).status, 400);
+  assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=abc`).set(as('officer'))).status, 400);
+  assert.equal((await request(app).get('/v1/sensor-nodes/not-a-uuid/telemetry').set(as('officer'))).status, 404);
+  assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry`).set(as('botanist'))).status, 403);
+});
+
 test('workspace: a side list that fails comes back empty and named; a core list fails the request', async () => {
   failing = ['audit_logs'];
   const partial = await request(app).get('/v1/workspace').set(as('botanist'));
@@ -480,6 +509,16 @@ test("marking a notification read only touches the caller's own", async () => {
 
 const versionsAre = (v) => { db.table_versions = Object.entries(v).map(([table_name, version]) => ({ table_name, version })); };
 const poll = (who, cursor) => request(app).get('/v1/workspace').query(cursor ? { cursor } : {}).set(as(who));
+
+test('workspace: an account an admin turned off is told so, and gets no data', async () => {
+  db.profiles.push({ id: users.botanist, role: 'botanist', is_active: false, deleted_at: null });
+  const res = await request(app).get('/v1/workspace').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'ACCOUNT_DISABLED');
+  assert.equal(res.body.species, undefined);
+  db.profiles[0].deleted_at = '2026-11-01T00:00:00Z';
+  assert.match((await request(app).get('/v1/workspace').set(as('botanist'))).body.message, /deleted/);
+});
 
 test('workspace: the first load is full and hands back a cursor and a poll delay', async () => {
   versionsAre({ species: 1, notifications: 3 });

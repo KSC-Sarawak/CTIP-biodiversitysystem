@@ -111,7 +111,8 @@ paths:
       operationId: signIn
       summary: Sign in with email and password
       description: |
-        At most 10 sign-in attempts per caller address every 5 minutes; more get 429.
+        The API sets no limit on sign-in attempts. 429 only when Supabase Auth
+        refuses with its own rate limit.
       security: []
       requestBody:
         required: true
@@ -147,7 +148,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '403':
-          description: EMAIL_NOT_CONFIRMED
+          description: |
+            EMAIL_NOT_CONFIRMED, or ACCOUNT_DISABLED: the password was right but an
+            admin turned the account off (the message says disabled or deleted).
+            No session is returned. A wrong password still gets 401.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -180,6 +184,11 @@ paths:
               schema: { $ref: '#/components/schemas/Session' }
         '401':
           description: SESSION_ENDED (signed out, used already, or expired; sign in again)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: ACCOUNT_DISABLED (an admin turned the account off since sign-in; sign out)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -386,7 +395,14 @@ paths:
                   type: array
                   items: { type: object }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+        '403':
+          description: |
+            ACCOUNT_DISABLED when an admin has turned this account off (checked on every
+            load, so a signed-in person finds out within one poll; the apps sign out),
+            or FORBIDDEN / ACCOUNT_NOT_ACTIVE as for other routes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /me:
     get:
@@ -1896,6 +1912,104 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /discussions/{id}/posts/{postId}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - name: postId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      tags: [Discussions]
+      operationId: editDiscussionPost
+      summary: Edit your own message
+      description: |
+        Author only. The message gets edited_at, and the text before and after is
+        kept in the thread's private history (discussion_post_versions), which
+        only people in the thread can read. Sending the same text changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              additionalProperties: false
+              properties:
+                body: { type: string, minLength: 1, maxLength: 5000 }
+                mentions: { type: array, maxItems: 20, items: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Edited
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscussionPost' }
+        '403':
+          description: NOT_ALLOWED (not the author)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: MESSAGE_DELETED (undo the delete first)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Discussions]
+      operationId: deleteDiscussionPost
+      summary: Delete a message (author, or an admin for moderation)
+      description: |
+        The message stays in the thread with an empty body and deleted_at set.
+        Its text is kept only in the thread's private history, so the delete can be undone.
+        Deleting an already deleted message answers it unchanged.
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscussionPost' }
+        '403':
+          description: NOT_ALLOWED (not the author or an admin)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /discussions/{id}/posts/{postId}/restore:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - name: postId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [Discussions]
+      operationId: restoreDiscussionPost
+      summary: Undo deleting a message
+      description: |
+        Only the person who deleted it. The database puts back the exact text the
+        delete removed (from the thread's private history). A message that is not deleted is
+        answered unchanged.
+      responses:
+        '200':
+          description: Restored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DiscussionPost' }
+        '403':
+          description: NOT_ALLOWED (someone else deleted it)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: CANNOT_UNDO (the deleted text was not found)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   # ----------------------------------------------------------- Notifications
   /notifications:
     get:
@@ -2571,6 +2685,9 @@ components:
         body: { type: string }
         mentions: { type: array, items: { type: string, format: uuid } }
         created_at: { type: string, format: date-time }
+        edited_at: { type: [string, 'null'], format: date-time, description: Last time the author changed the text }
+        deleted_at: { type: [string, 'null'], format: date-time, description: Set when deleted; body is then empty }
+        deleted_by: { type: [string, 'null'], format: uuid }
 
     # ---------- sync
     SyncRequest:

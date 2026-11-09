@@ -120,10 +120,12 @@ export function Empty({ icon = "leaf", children }) {
 }
 
 // Line chart for sensor readings. `limit` draws a dashed threshold line.
-export function Sparkline({ values, limit, unit, title }) {
+export function Sparkline({ values: raw, limit, unit, title }) {
   const w = 320;
   const h = 90;
-  if (!values.length) return <Empty icon="activity">No readings yet.</Empty>;
+  // A sensor can send nothing for one reading (e.g. a timed-out distance): skip those.
+  const values = raw.filter((v) => v != null && Number.isFinite(Number(v))).map(Number);
+  if (!values.length) return <figure className="spark"><figcaption>{title}</figcaption><Empty icon="activity">No readings yet.</Empty></figure>;
   const all = limit == null ? values : [...values, limit];
   const lo = Math.min(...all) - 1;
   const hi = Math.max(...all) + 1;
