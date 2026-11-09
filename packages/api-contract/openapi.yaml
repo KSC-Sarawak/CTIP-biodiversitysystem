@@ -1925,7 +1925,8 @@ paths:
       summary: Edit your own message
       description: |
         Author only. The message gets edited_at, and the text before and after is
-        written to the audit log. Sending the same text changes nothing.
+        kept in the thread's private history (discussion_post_versions), which
+        only people in the thread can read. Sending the same text changes nothing.
       requestBody:
         required: true
         content:
@@ -1961,7 +1962,7 @@ paths:
       summary: Delete a message (author, or an admin for moderation)
       description: |
         The message stays in the thread with an empty body and deleted_at set.
-        Its text is kept only in the audit log, so the delete can be undone.
+        Its text is kept only in the thread's private history, so the delete can be undone.
         Deleting an already deleted message answers it unchanged.
       responses:
         '200':
@@ -1989,7 +1990,7 @@ paths:
       summary: Undo deleting a message
       description: |
         Only the person who deleted it. The database puts back the exact text the
-        delete removed (from the audit log). A message that is not deleted is
+        delete removed (from the thread's private history). A message that is not deleted is
         answered unchanged.
       responses:
         '200':

@@ -23,9 +23,6 @@ export const routes = [
   // Health check for the apps' "API down" notice: no database call
   ['get', '/health', PUBLIC],
 
-  // Health check for the apps' "API down" notice: no database call
-  ['get', '/health', PUBLIC],
-
   // Public (Visitor)
   ['get', '/public/species', PUBLIC],
   ['get', '/public/species/:id', PUBLIC],
