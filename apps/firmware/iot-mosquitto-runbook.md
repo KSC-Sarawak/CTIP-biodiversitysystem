@@ -26,12 +26,13 @@ Nodegateway.py (same laptop) <--TLS 8883, login = gateway---'
 | `make_certs.py` | same folder | Yes (no secrets) |
 | `passwd` | same folder | **No** (logins) |
 | `certs/ca.crt`, `ca.key`, `server.crt`, `server.key` | same folder, **inside `certs\`** | **No** |
-| `Nodegateway.py`, `wiretrap.ino`, `.gitignore` | IoT-AI repo `wiretrap/` | Yes |
-| `bridge_secrets.py` | `wiretrap/` | **No** (Supabase key, gateway MQTT password) |
-| `secrets.h` | `wiretrap/` | **No** (Wi-Fi, NODE_ID, node MQTT password, ROOT_CA) |
-| `ca.crt` (copy) | `wiretrap/` | **No** |
+| `Nodegateway.py` | team repo `services/anomaly-detection/` | Yes |
+| `bridge_secrets.py` | `services/anomaly-detection/` | **No** (Supabase key, gateway MQTT password) |
+| `ca.crt` (copy) | `services/anomaly-detection/` | **No** |
+| `wiretrap.ino` | team repo `apps/firmware/wiretrap/` | Yes |
+| `secrets.h` | `apps/firmware/wiretrap/` | **No** (Wi-Fi, NODE_ID, node MQTT password, ROOT_CA) |
 
-`wiretrap/.gitignore` must contain:
+The `.gitignore` in the top folder of the team repo must contain:
 ```
 bridge_secrets.py
 secrets.h
@@ -78,10 +79,10 @@ Run everything in **PowerShell**. Steps marked **(Admin)** need "Run as Administ
 
 ### 3.2 Get the team repo
 ```powershell
-git clone https://github.com/KSC-Sarawak/CTIP-biodiversitysystem
+git clone https://github.com/Kampung-Semua-Cina/CTIP-biodiversitysystem
 cd CTIP-biodiversitysystem\infra\mosquitto
 ```
-(Already cloned: `git pull` on `main`.) Copy `make_certs.py` into this folder.
+(Already cloned: `git pull` on `main`.) `make_certs.py` is already in this folder.
 
 ### 3.3 Certificates
 From `infra\mosquitto`, with Python available:
@@ -114,10 +115,10 @@ Get-NetFirewallApplicationFilter -Program "*mosquitto*" | Get-NetFirewallRule | 
 Get-NetFirewallApplicationFilter -Program "*mosquitto*" | Get-NetFirewallRule | Where-Object Action -eq Block | Remove-NetFirewallRule
 ```
 
-### 3.6 Gateway config (`wiretrap\`)
+### 3.6 Gateway config (`services\anomaly-detection\`)
 1. Copy the CA next to the gateway:
    ```powershell
-   Copy-Item <team repo>\infra\mosquitto\certs\ca.crt <IoT-AI repo>\wiretrap\
+   Copy-Item <team repo>\infra\mosquitto\certs\ca.crt <team repo>\services\anomaly-detection\
    ```
 2. `Nodegateway.py` settings (top of file):
    ```python
@@ -169,7 +170,7 @@ Get-NetFirewallApplicationFilter -Program "*mosquitto*" | Get-NetFirewallRule | 
 |---|---|---|---|
 | 1 | Hotspot on | Windows Settings | `DESKTOP-FCAD7GL`, 2.4 GHz |
 | 2 | Broker (window 1) | `$M = "C:\Program Files\mosquitto"`<br>`cd <team repo>\infra\mosquitto`<br>`& "$M\mosquitto.exe" -c mosquitto.conf -v` | `Opening ipv4 listen socket on port 8883.` and it stays running |
-| 3 | Gateway (window 2) | `cd <IoT-AI repo>\wiretrap`<br>`.venv\Scripts\Activate.ps1`<br>`python Nodegateway.py` | `[MQTT] connected to localhost, listening on ...` |
+| 3 | Gateway (window 2) | `cd <team repo>\services\anomaly-detection`<br>`.venv\Scripts\Activate.ps1`<br>`python Nodegateway.py` | `[MQTT] connected to localhost, listening on ...` |
 | 4 | ESP32 | Power on | Serial: `WiFi: OK, IP 192.168.137.x` then `MQTT: connecting to 192.168.137.1:8883 as <UUID> ... OK` |
 
 Working state: Mosquitto shows `New connection from 192.168.137.x`, the gateway prints `[TELEMETRY] <UUID> saved {...}` every interval, and a wire tug prints `TRIGGER from ...` with a photo in `captures\uploaded\`.
@@ -236,7 +237,7 @@ All of these passed in Claude's Linux test with the same config on 8 Nov.
 | ESP32 `rc=4` or `rc=5` | Wrong node username or password | Username = full UUID; reset with 3.4 |
 | ESP32 silent after `WiFi: OK` | Waiting for NTP time | Laptop needs internet; wait up to 30 s |
 | Gateway `connect failed, rc=Not authorized` | Wrong gateway login | `bridge_secrets.py` vs 3.4 |
-| Gateway `CERTIFICATE_VERIFY_FAILED` | Old `ca.crt` in `wiretrap\` | Copy `certs\ca.crt` again (3.6) |
+| Gateway `CERTIFICATE_VERIFY_FAILED` | Old `ca.crt` in `services\anomaly-detection\` | Copy `certs\ca.crt` again (3.6) |
 | Gateway `cannot reach localhost:8883` | Mosquitto not running | Session step 2 |
 | Gateway `ignored message from unregistered node` | UUID mismatch | Same UUID in `REGISTERED_NODES`, `NODE_ID`, `passwd` |
 | Gateway `skipped, <field> is outside ...` | F-15 range check | Check the sensor; dropped on purpose |
@@ -261,7 +262,6 @@ Must **not** list: `secrets.h`, `bridge_secrets.py`, `*.pyc`, `__pycache__`, `ca
 ## 9. Still open
 
 1. Michelle runs the 5.2 re-test.
-2. Push `Nodegateway.py`, `wiretrap.ino`, `.gitignore` to IoT-AI; `make_certs.py` to the team repo.
-3. Remove committed secrets from IoT-AI (`WORKING, can send to supabase/`, `bridge_secrets.pyc`, `__pycache__/`). Michelle coordinates rotating the Supabase service key.
-4. Jira: CTIP-60 done after 5.2 passes; CTIP-61 comment (TLS login + F-15 checks); tell the CTIP-48 owner the logins were made with `mosquitto_passwd`.
-5. Later: switch the gateway to `MODE = "api"` once `POST /telemetry` works; move the broker off the laptop when the bridge moves to `services/api`.
+2. Remove committed secrets from IoT-AI (`bridge_secrets.pyc`, `__pycache__/`, `certs/ca.key`, `certs/server.key`), make new certificates and MQTT passwords. Michelle coordinates turning off the Supabase legacy keys.
+3. Jira: CTIP-60 done after 5.2 passes; CTIP-61 comment (TLS login + F-15 checks); tell the CTIP-48 owner the logins were made with `mosquitto_passwd`.
+4. Later: switch the gateway to `MODE = "api"` once `POST /telemetry` works; move the broker off the laptop when the bridge moves to `services/api`.
