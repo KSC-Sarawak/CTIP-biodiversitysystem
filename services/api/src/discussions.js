@@ -66,7 +66,7 @@ async function findPost(req, res, db) {
 
 // Saves a change to one message. The database trigger
 // (20261108120000_discussion_post_edit_delete) decides who may do it, sets the
-// times, and writes the audit log; this answers its refusals in plain words.
+// times, and keeps the change in the thread's private history; this answers its refusals in plain words.
 async function changePost(req, res, db, changes, refused) {
   const { data, error } = await db.from('discussion_posts').update(changes)
     .eq('id', req.params.postId).eq('discussion_id', req.params.id).select(POST_COLUMNS).maybeSingle();
@@ -202,7 +202,7 @@ export const discussionHandlers = {
   },
 
   // The author changes the text of their own message. It shows "edited", and
-  // the text before and after goes to the audit log.
+  // the text before and after goes to the thread's private history.
   'patch /discussions/:id/posts/:postId': async (req, res) => {
     const db = supabaseAs(req.user);
     const post = await findPost(req, res, db);
@@ -216,7 +216,7 @@ export const discussionHandlers = {
   },
 
   // The author, or an admin (moderation). The message stays in the thread as
-  // "Message deleted"; its text is kept only in the audit log, for undo.
+  // "Message deleted"; its text is kept only in the thread's private history, for undo.
   'delete /discussions/:id/posts/:postId': async (req, res) => {
     const db = supabaseAs(req.user);
     const post = await findPost(req, res, db);
@@ -229,7 +229,7 @@ export const discussionHandlers = {
   },
 
   // Undo a delete: whoever deleted the message. The database puts back the
-  // exact text from the audit log.
+  // exact text from the thread's private history.
   'post /discussions/:id/posts/:postId/restore': async (req, res) => {
     const db = supabaseAs(req.user);
     const post = await findPost(req, res, db);

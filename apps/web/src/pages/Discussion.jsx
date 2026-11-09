@@ -624,7 +624,8 @@ function Thread({ thread, people }) {
 
 // One message. The author can edit or delete it, an admin can delete it
 // (moderation), and whoever deleted it can undo that. Every change is kept
-// in the audit log, which admins can read.
+// in the thread's private history (discussion_post_versions): only people in
+// the thread can read it, not admins outside it, and never the audit log.
 function Post({ post, threadId, people, readers, ask }) {
   const { me, role, editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost } = useStore();
   const [editing, setEditing] = useState(false);
@@ -653,7 +654,7 @@ function Post({ post, threadId, people, readers, ask }) {
     if (!mine) {
       const ok = await ask({
         title: "Delete this message?",
-        body: `The message from ${author?.full_name || "this person"} will show as deleted for everyone. Its text stays in the audit log.`,
+        body: `The message from ${author?.full_name || "this person"} will show as deleted for everyone. Its text is kept in this thread's private history, so it can be undone.`,
         confirmLabel: "Delete",
         danger: true,
       });
@@ -709,7 +710,7 @@ function Post({ post, threadId, people, readers, ask }) {
           <p className="row wrap">
             <button className="btn" type="submit" disabled={busy || !text.trim()}><Icon name="check" size={16} /> {busy ? "Saving…" : "Save"}</button>
             <button className="btn ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
-            <span className="mute small">The earlier text is kept in the audit log.</span>
+            <span className="mute small">The earlier text is kept in this thread's private history.</span>
           </p>
         </form>
       ) : (

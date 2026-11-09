@@ -15,11 +15,11 @@ const verify = async (who) => ({ sub: users[who], user_role: roleOf[who] });
 const app = createApp({ verify });
 const as = (who) => ({ Authorization: `Bearer ${who}` });
 
-let discussions, audience, posts, rpcCalls, audit;
+let discussions, audience, posts, rpcCalls, history;
 
 // The rules of trg_guard_discussion_post (20261108120000), played on one
-// message: answers the changed row, or a 42501 refusal. Audit rows as the
-// audit trigger writes them.
+// message: answers the changed row, or a 42501 refusal. History rows as the
+// history trigger writes them (discussion_post_versions).
 function updatePost(p, changes, me) {
   const refuse = () => json(403, { code: '42501', message: 'not allowed' });
   const before = { ...p };
@@ -28,13 +28,13 @@ function updatePost(p, changes, me) {
     Object.assign(p, { deleted_at: new Date().toISOString(), deleted_by: me.id, body: '', mentions: [] });
   } else if ('deleted_at' in changes && !changes.deleted_at && p.deleted_at) {
     if (p.deleted_by !== me.id) return refuse();
-    const del = audit.findLast((a) => a.record_id === p.id && !a.old_value.deleted_at && a.new_value.deleted_at);
+    const del = history.findLast((a) => a.record_id === p.id && !a.old_value.deleted_at && a.new_value.deleted_at);
     Object.assign(p, { deleted_at: null, deleted_by: null, body: del.old_value.body, mentions: del.old_value.mentions });
   } else {
     if (p.deleted_at || p.author_id !== me.id) return refuse();
     Object.assign(p, { body: changes.body, mentions: changes.mentions, edited_at: new Date().toISOString() });
   }
-  audit.push({ record_id: p.id, changed_by: me.id, old_value: before, new_value: { ...p } });
+  history.push({ record_id: p.id, changed_by: me.id, old_value: before, new_value: { ...p } });
   return null;
 }
 
@@ -60,7 +60,7 @@ beforeEach((t) => {
   audience = [];
   posts = [];
   rpcCalls = [];
-  audit = [];
+  history = [];
   t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
     const url = new URL(input);
     const method = init.method ?? 'GET';
@@ -219,14 +219,14 @@ const threadWithReply = async () => {
 };
 const postUrl = (t, p, end = '') => `/v1/discussions/${t.id}/posts/${p.id}${end}`;
 
-test('edit: the author changes the text, it shows edited, and the audit log has before and after', async () => {
+test('edit: the author changes the text, it shows edited, and the private thread history has before and after', async () => {
   const { t, first } = await threadWithReply();
   const res = await request(app).patch(postUrl(t, first)).set(as('botanist')).send({ body: 'Has anyone seen fruit yet?' });
   assert.equal(res.status, 200);
   assert.equal(res.body.body, 'Has anyone seen fruit yet?');
   assert.ok(res.body.edited_at);
-  assert.equal(audit.at(-1).old_value.body, 'Has anyone seen flowers yet?');
-  assert.equal(audit.at(-1).new_value.body, 'Has anyone seen fruit yet?');
+  assert.equal(history.at(-1).old_value.body, 'Has anyone seen flowers yet?');
+  assert.equal(history.at(-1).new_value.body, 'Has anyone seen fruit yet?');
 });
 
 test('edit: nobody else, not even an admin; empty text is refused; same text is not marked edited', async () => {
@@ -237,10 +237,10 @@ test('edit: nobody else, not even an admin; empty text is refused; same text is 
   const same = await request(app).patch(postUrl(t, first)).set(as('botanist')).send({ body: first.body });
   assert.equal(same.status, 200);
   assert.equal(same.body.edited_at, undefined);
-  assert.equal(audit.length, 0);
+  assert.equal(history.length, 0);
 });
 
-test('delete and undo: the text goes, then comes back exactly from the audit log', async () => {
+test('delete and undo: the text goes, then comes back exactly from the private thread history', async () => {
   const { t, reply } = await threadWithReply();
   const del = await request(app).delete(postUrl(t, reply)).set(as('other'));
   assert.equal(del.status, 200);
@@ -251,7 +251,7 @@ test('delete and undo: the text goes, then comes back exactly from the audit log
   assert.equal(undo.status, 200);
   assert.equal(undo.body.body, 'Yes, last week');
   assert.equal(undo.body.deleted_at, null);
-  assert.equal(audit.length, 2);
+  assert.equal(history.length, 2);
 });
 
 test('delete: someone else cannot; an admin can (moderation), and only the admin can undo it', async () => {
