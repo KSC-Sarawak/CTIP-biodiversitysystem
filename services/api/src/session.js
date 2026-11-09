@@ -68,12 +68,14 @@ async function authRequest(path, { method = 'POST', token, body } = {}) {
   });
 }
 
-// A new session for an account an admin has turned off: end it and say why.
-// Its token has no role (the access token hook leaves it out), so only then is
-// the profile read. Returns the message, or null to carry on.
+// A new session for an account an admin has turned off or deleted: end it and
+// say why. The profile is always read, even when the token carries a role: the
+// access token hook normally leaves the role out for such accounts, but this
+// check must not depend on that hook being set up and working.
+// Returns the message, or null to carry on.
 async function refuseIfDisabled(session) {
   const token = session?.access_token;
-  if (!token || roleIn(token)) return null;
+  if (!token) return null;
   const blocked = await accountBlock({ id: session.user?.id, token });
   if (blocked) await authRequest('/logout?scope=local', { token }).catch(() => {});
   return blocked;

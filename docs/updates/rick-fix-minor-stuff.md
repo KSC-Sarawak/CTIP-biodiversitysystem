@@ -112,6 +112,11 @@ Before, an account an admin turned off just failed quietly. Now:
 - The website goes to the sign-in page and shows the reason there; the phone app shows it
   as a message.
 - A wrong password for a disabled account still says only "wrong email or password".
+- **The profile is always checked at sign-in and refresh**, even when the new token already
+  carries a role. Supabase's token hook (`20261010000000_access_token_role_claim.sql`)
+  normally leaves the role out for turned-off and deleted accounts, but that hook is a manual
+  dashboard setting, so this check does not rely on it. Cost: one small profile read per
+  sign-in or refresh.
 
 New file: `services/api/src/accountStatus.js`. Changed: `session.js`, `staff.js`,
 `apps/shared/api.js`, `apps/shared/StoreProvider.js`.
@@ -180,8 +185,8 @@ API (`npm test` in `services/api`, all passing):
 
 - `discussions.test.js`: edit (author only, empty text refused, same text not marked edited),
   delete and undo (text comes back exactly), admin moderation, bad ids → 404.
-- `session.test.js`: disabled and deleted accounts at sign-in and refresh; wrong password for
-  a disabled account; sign-in has no API limit.
+- `session.test.js`: disabled and deleted accounts at sign-in and refresh, including a new
+  token that carries a `user_role`; wrong password for a disabled account; sign-in has no API limit.
 - `field-and-staff.test.js`: workspace refuses a turned-off account; telemetry only from the
   last 24 hours; per-node telemetry range, order and bad input.
 
