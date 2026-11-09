@@ -65,6 +65,7 @@ import {
   resolveAlertApi,
   addAlertNoteApi,
   setThresholdsApi,
+  getNodeTelemetryApi,
   markReadApi,
   markAllReadApi,
 } from "./api.js";
@@ -353,6 +354,12 @@ function collectionMatches(a = [], b = []) {
       last_seen: n.last_seen,
     }));
 
+    // Readings per node, oldest first (the API sends the newest first).
+    const telemetry = {};
+    for (const r of [...(w.telemetry || [])].sort((a, b) => String(a.ts).localeCompare(String(b.ts)))) {
+      (telemetry[r.node_id] ||= []).push(r);
+    }
+
     setDb((prevDb) => {
       let mergedProfiles = prevDb.profiles || [];
       if (w.profiles && w.profiles.length > 0) {
@@ -381,6 +388,7 @@ function collectionMatches(a = [], b = []) {
       const altEqual = collectionMatches(prevDb.alerts, w.alerts);
       const notesEqual = collectionMatches(prevDb.alertNotes, alertNotes);
       const nodesEqual = collectionMatches(prevDb.nodes, nodes);
+      const telemetryEqual = JSON.stringify(prevDb.telemetry || {}) === JSON.stringify(telemetry);
       const notifsEqual = collectionMatches(prevDb.notifications, w.notifications);
       const auditEqual = collectionMatches(prevDb.audit, audit);
       const profEqual = collectionMatches(prevDb.profiles, mergedProfiles);
@@ -397,7 +405,7 @@ function collectionMatches(a = [], b = []) {
       const dirEqual = collectionMatches(prevDb.directory, directory);
 
       const hasChanges = !spEqual || !mediaEqual || !plEqual || !obsEqual || !tagsEqual ||
-        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual ||
+        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !telemetryEqual ||
         !notifsEqual || !auditEqual || !profEqual || !zonesEqual ||
         !discEqual || !audEqual || !postsEqual || !dirEqual;
 
@@ -418,6 +426,7 @@ function collectionMatches(a = [], b = []) {
         alerts: altEqual ? prevDb.alerts : w.alerts,
         alertNotes: notesEqual ? prevDb.alertNotes : alertNotes,
         nodes: nodesEqual ? prevDb.nodes : nodes,
+        telemetry: telemetryEqual ? prevDb.telemetry : telemetry,
         notifications: notifsEqual ? prevDb.notifications : w.notifications,
         audit: auditEqual ? prevDb.audit : audit,
         profiles: profEqual ? prevDb.profiles : mergedProfiles,
@@ -1351,6 +1360,13 @@ function collectionMatches(a = [], b = []) {
     notify("Thresholds updated");
   };
 
+  // One node's readings over a longer range than the workspace's last 24 hours.
+  // Returns { ok, rows } (oldest first) and never changes db.
+  const loadNodeTelemetry = async (nodeId, hours = 24) => {
+    const res = await callApi(getNodeTelemetryApi, nodeId, hours);
+    return res.ok ? { ok: true, rows: Array.isArray(res.data) ? res.data : [] } : { ok: false, message: res.message };
+  };
+
   /* ---------- notifications and tags ---------- */
   const markRead = async (id) => {
     const res = await callApi(markReadApi, id);
@@ -1413,7 +1429,7 @@ function collectionMatches(a = [], b = []) {
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
-    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds,
+    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, loadNodeTelemetry,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     loadFromApi,

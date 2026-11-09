@@ -682,6 +682,7 @@ export const assignAlertApi = (id, assigned_to, { token } = {}) => send("POST", 
 export const acknowledgeAlertApi = (id, { token } = {}) => send("POST", `/alerts/${enc(id)}/acknowledge`, undefined, token);
 export const resolveAlertApi = (id, outcome, { token } = {}) => send("POST", `/alerts/${enc(id)}/resolve`, { outcome }, token);
 export const addAlertNoteApi = (id, note, { token } = {}) => send("POST", `/alerts/${enc(id)}/notes`, { note }, token);
+export const getNodeTelemetryApi = (nodeId, hours = 24, { token } = {}) => send("GET", `/sensor-nodes/${enc(nodeId)}/telemetry?hours=${enc(hours)}`, undefined, token);
 export const setThresholdsApi = (nodeId, thresholds, { token } = {}) => send("PATCH", `/sensor-nodes/${enc(nodeId)}`, { thresholds }, token);
 
 // Notifications (the signed-in person's own)
