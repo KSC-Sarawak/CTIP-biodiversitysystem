@@ -43,6 +43,7 @@ export function mockApi(page, state) {
       return json({
         species: state.species, species_media: [], qr_tags: [], specimens: state.specimens, observations: state.observations,
         observation_photos: state.photos, observation_reviews: [], observation_comments: [], alerts: state.alerts || [], alert_notes: [], sensor_nodes: state.sensorNodes || [],
+        telemetry: state.telemetry || [],
         notifications: [], audit_logs: [],
         profiles: [
           { id: ME, full_name: "Olive Officer", email: "officer@example.com", role: state.role || "officer", is_active: true },
@@ -65,6 +66,11 @@ export function mockApi(page, state) {
       return json({ data: state.observations.filter((o) => o.status === wanted), meta: { total: state.observations.filter((o) => o.status === wanted).length } });
     }
     if (path === "/distribution") return json({ data: state.points });
+    if (/^\/sensor-nodes\/[^/]+\/telemetry$/.test(path)) {
+      const id = path.split("/")[2];
+      state.telemetryRequests = [...(state.telemetryRequests || []), { id, hours: new URL(req.url()).searchParams.get("hours") }];
+      return json((state.longTelemetry || state.telemetry || []).filter((r) => r.node_id === id));
+    }
     // Like the real route: 404 unless a spec gives the published plant.
     if (path.startsWith("/public/tags/")) return state.publicPlant ? json(state.publicPlant) : json({ code: "NOT_FOUND", message: "No published plant on this tag" }, 404);
     if (path === "/species" && method === "POST") {

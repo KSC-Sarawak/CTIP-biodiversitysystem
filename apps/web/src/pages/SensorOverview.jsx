@@ -1,5 +1,5 @@
 // apps/web/src/pages/SensorOverview.jsx
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
 import { Chip, Empty, Mono, Pills, Sparkline } from "../components/Bits.jsx";
@@ -8,24 +8,64 @@ import { useStore } from "../../../shared/store.js";
 import { nameOf, plantView } from "../../../shared/selectors.js";
 import { fmtDateTime, label } from "../../../shared/utils.js";
 
-const latest = (rows) => rows[rows.length - 1];
+const latest = (rows) => rows?.[rows.length - 1];
+const has = (v) => v != null && Number.isFinite(Number(v));
+// "21.4" not "21.400000001"; "-" when the sensor sent nothing.
+const num = (v, digits = 1) => (has(v) ? String(Number(Number(v).toFixed(digits))) : "-");
+const RANGES = [
+  { key: 24, label: "24 hours" },
+  { key: 24 * 7, label: "7 days" },
+  { key: 24 * 30, label: "30 days" },
+];
 
-// Sensor nodes, their readings, and the alerts they raise (officers and admins).
+// Is a reading outside the node's alert limits?
+const tooHot = (r, t) => has(r?.temperature) && has(t?.temp_max) && Number(r.temperature) > Number(t.temp_max);
+const tooDry = (r, t) => has(r?.soil_moisture) && has(t?.moisture_min) && Number(r.soil_moisture) < Number(t.moisture_min);
+
+function stats(rows, key) {
+  const vals = rows.map((r) => r[key]).filter(has).map(Number);
+  if (!vals.length) return null;
+  return { min: Math.min(...vals), max: Math.max(...vals), avg: vals.reduce((a, b) => a + b, 0) / vals.length };
+}
+
+// Sensor nodes, their readings (telemetry table), and the alerts they raise (officers and admins).
 // Order on the page: summary, open alerts, nodes, readings for the chosen node, alert history.
 export default function SensorOverview() {
-    const { db, role, setThresholds, notify } = useStore();
+  const { db, role, setThresholds, notify, loadNodeTelemetry } = useStore();
   const [nodeId, setNodeId] = useState(db.nodes?.[0]?.id || null);
   const [tab, setTab] = useState("acknowledged");
+  const [hours, setHours] = useState(24);
+  const [longRange, setLongRange] = useState({ key: null, rows: [], error: null });
   const [ask, confirmDialog] = useConfirm();
 
-  const node = db.nodes?.find((n) => n.id === nodeId) || db.nodes?.[0] || null;
-  const data = node ? db.telemetry[node.id] || [] : [];
+  const nodes = db.nodes || [];
+  const telemetry = db.telemetry || {};
+  const node = nodes.find((n) => n.id === nodeId) || nodes[0] || null;
+
+  // The last 24 hours come with the live workspace load; longer ranges are asked for per node.
+  const rangeKey = node ? `${node.id}:${hours}` : null;
+  useEffect(() => {
+    if (!node || hours === 24 || !loadNodeTelemetry) return;
+    let stale = false; // loading shows while longRange.key is not this range's key
+    loadNodeTelemetry(node.id, hours).then((res) => {
+      if (stale) return;
+      setLongRange({ key: rangeKey, rows: res.ok ? res.rows : [], error: res.ok ? null : res.message });
+    });
+    return () => { stale = true; };
+  }, [rangeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const data = !node ? [] : hours === 24 ? telemetry[node.id] || [] : longRange.key === rangeKey ? longRange.rows : [];
+  const loading = hours !== 24 && longRange.key !== rangeKey;
+
   // A node can be unassigned, or its plant not visible to this role: show a placeholder, never crash.
   const plantOf = (n) => plantView(db, db.plants.find((p) => p.id === n.specimen_id)) || { name: "No plant assigned", qr_id: "-" };
   const byNewest = (a, b) => b.created_at.localeCompare(a.created_at);
   const open = db.alerts.filter((a) => a.status === "open").sort(byNewest);
   const history = db.alerts.filter((a) => a.status !== "open" && (tab === "all" || a.status === tab)).sort(byNewest);
-  const online = (db.nodes || []).filter((n) => n.status === "active").length;
+  const online = nodes.filter((n) => n.status === "active").length;
+  const readings24h = Object.values(telemetry).reduce((sum, rows) => sum + rows.length, 0);
+  const newestTs = Object.values(telemetry).map((rows) => latest(rows)?.ts).filter(Boolean).sort().at(-1) || null;
+  const outOfLimits = nodes.filter((n) => { const r = latest(telemetry[n.id]); return tooHot(r, n.thresholds) || tooDry(r, n.thresholds); }).length;
 
   const saveLimits = async (e) => {
     e.preventDefault();
@@ -36,20 +76,30 @@ export default function SensorOverview() {
     notify("Limits saved");
   };
 
+  const now = latest(data);
+  const temp = stats(data, "temperature");
+  const soil = stats(data, "soil_moisture");
+  const humid = stats(data, "humidity");
+  const motionCount = data.filter((r) => r.motion_detected === true).length;
+  const breaches = node ? data.filter((r) => tooHot(r, node.thresholds) || tooDry(r, node.thresholds)).length : 0;
+  const rangeLabel = RANGES.find((r) => r.key === hours)?.label || "24 hours";
+
   return (
     <Shell seg="monitoring" plain>
       {confirmDialog}
       <div className="pagehead">
         <div>
           <h1>Monitoring</h1>
-          <p className="mute">Sensor nodes protecting tagged plants · last 24 hours</p>
+          <p className="mute">Sensor nodes protecting tagged plants · live readings from the last 24 hours{newestTs ? ` · newest ${fmtDateTime(newestTs)}` : ""}</p>
         </div>
       </div>
 
       <div className="tiles">
         <div className={"glass tile" + (open.length ? " tile-bad" : "")}><span className="mute">Open alerts</span><b>{open.length}</b></div>
-        <div className="glass tile"><span className="mute">Nodes online</span><b>{online} <small className="mute">of {db.nodes.length}</small></b></div>
-        <div className={"glass tile" + (db.nodes.length - online ? " tile-warn" : "")}><span className="mute">Offline or faulty</span><b>{db.nodes.length - online}</b></div>
+        <div className="glass tile"><span className="mute">Nodes online</span><b>{online} <small className="mute">of {nodes.length}</small></b></div>
+        <div className={"glass tile" + (nodes.length - online ? " tile-warn" : "")}><span className="mute">Offline or faulty</span><b>{nodes.length - online}</b></div>
+        <div className={"glass tile" + (outOfLimits ? " tile-warn" : "")}><span className="mute">Outside alert limits</span><b>{outOfLimits}</b></div>
+        <div className="glass tile"><span className="mute">Readings, last 24 h</span><b>{readings24h}</b></div>
       </div>
 
       <section className="gap-section-s" aria-labelledby="attn">
@@ -63,23 +113,29 @@ export default function SensorOverview() {
 
       <section className="gap-section-s" aria-labelledby="nodes">
         <h2 id="nodes">Sensor nodes</h2>
-        {db.nodes.length === 0 ? (
+        {nodes.length === 0 ? (
           <div className="glass pad"><Empty icon="shield">No sensor nodes have been registered yet.</Empty></div>
         ) : (
           <div className="grid g3">
-            {db.nodes.map((n) => {
-              const last = latest(db.telemetry[n.id] || []);
+            {nodes.map((n) => {
+              const last = latest(telemetry[n.id]);
               const up = n.status === "active";
+              const seen = last?.ts || n.last_seen;
               return (
                 <button key={n.id} className={"glass nodecard" + (n.id === node?.id ? " on" : "") + (up ? "" : " down")} aria-pressed={n.id === node?.id} onClick={() => setNodeId(n.id)}>
                   <span className="row between"><b>{n.name}</b><span className={"dotstatus " + (up ? "up" : "off")}>{up ? "Online" : label(n.status)}</span></span>
                   <small className="mute">{plantOf(n).name} · <Mono>{plantOf(n).qr_id}</Mono></small>
-                  {up && last ? (
-                    <span className="row"><span><Mono>{last.temperature}°C</Mono> temp</span><span><Mono>{last.soil_moisture}%</Mono> soil</span></span>
+                  {last ? (
+                    <span className="row wrap">
+                      <span className={tooHot(last, n.thresholds) ? "warntext" : ""}><Mono>{num(last.temperature)}°C</Mono> temp</span>
+                      <span className={tooDry(last, n.thresholds) ? "warntext" : ""}><Mono>{num(last.soil_moisture, 0)}%</Mono> soil</span>
+                      {has(last.humidity) && <span><Mono>{num(last.humidity, 0)}%</Mono> humidity</span>}
+                      {last.motion_detected && <span className="warntext">Movement</span>}
+                    </span>
                   ) : (
-                    <span className="warntext"><b>{n.last_seen ? `No data since ${fmtDateTime(n.last_seen)}` : "No data yet"}</b></span>
+                    <span className="warntext"><b>{n.last_seen ? `No readings since ${fmtDateTime(n.last_seen)}` : "No readings yet"}</b></span>
                   )}
-                  <small className="mute">{up ? (n.last_seen ? `Updated ${fmtDateTime(n.last_seen)}` : "Waiting for the first reading") : "Check the node's battery or Wi-Fi"}</small>
+                  <small className="mute">{!up ? "Check the node's battery or Wi-Fi" : seen ? `Updated ${fmtDateTime(seen)}` : "Waiting for the first reading"}</small>
                 </button>
               );
             })}
@@ -91,21 +147,62 @@ export default function SensorOverview() {
         <section className="glass pad gap-section-s" aria-labelledby="readings">
           <div className="row between wrap">
             <h2 id="readings">{node.name} readings</h2>
-            <span className="mute small row"><svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" className="spark-limit" /></svg> alert limit</span>
+            <Pills label="Time range" value={hours} onChange={setHours} items={RANGES} />
           </div>
+          <p className="mute small">
+            {loading ? "Loading readings…" : longRange.error && hours !== 24 && longRange.key === rangeKey
+              ? `Could not load readings: ${longRange.error}`
+              : `${data.length} reading${data.length === 1 ? "" : "s"} in the last ${rangeLabel}${now ? ` · latest ${fmtDateTime(now.ts)}` : ""}`}
+            {" · "}<svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" className="spark-limit" /></svg> alert limit
+          </p>
+
           <div className="charts">
             <Sparkline title="Temperature" unit="°C" values={data.map((d) => d.temperature)} limit={node.thresholds?.temp_max} />
             <Sparkline title="Soil moisture" unit="%" values={data.map((d) => d.soil_moisture)} limit={node.thresholds?.moisture_min} />
+            <Sparkline title="Air humidity" unit="%" values={data.map((d) => d.humidity)} />
+            <Sparkline title="Distance to nearest object" unit=" cm" values={data.map((d) => d.distance_cm)} />
           </div>
+
+          {data.length > 0 && (
+            <div className="tiles gap-top-s">
+              <div className="glass tile"><span className="mute">Temperature min · avg · max</span><span><Mono>{temp ? `${num(temp.min)} · ${num(temp.avg)} · ${num(temp.max)} °C` : "-"}</Mono></span></div>
+              <div className="glass tile"><span className="mute">Soil moisture min · avg · max</span><span><Mono>{soil ? `${num(soil.min, 0)} · ${num(soil.avg, 0)} · ${num(soil.max, 0)} %` : "-"}</Mono></span></div>
+              <div className="glass tile"><span className="mute">Humidity min · avg · max</span><span><Mono>{humid ? `${num(humid.min, 0)} · ${num(humid.avg, 0)} · ${num(humid.max, 0)} %` : "-"}</Mono></span></div>
+              <div className={"glass tile" + (breaches ? " tile-warn" : "")}><span className="mute">Outside limits · movement</span><span><Mono>{breaches} · {motionCount}</Mono> readings</span></div>
+            </div>
+          )}
+
+          {data.length > 0 && (
+            <details className="limits">
+              <summary>Latest {Math.min(data.length, 20)} readings</summary>
+              <div className="tablewrap">
+                <table>
+                  <thead><tr><th>Time</th><th>Temp (°C)</th><th>Soil (%)</th><th>Humidity (%)</th><th>Distance (cm)</th><th>Movement</th></tr></thead>
+                  <tbody>
+                    {data.slice(-20).reverse().map((r) => (
+                      <tr key={r.id || r.ts}>
+                        <td>{fmtDateTime(r.ts)}</td>
+                        <td className={tooHot(r, node.thresholds) ? "warntext" : ""}><Mono>{num(r.temperature)}</Mono></td>
+                        <td className={tooDry(r, node.thresholds) ? "warntext" : ""}><Mono>{num(r.soil_moisture, 0)}</Mono></td>
+                        <td><Mono>{num(r.humidity, 0)}</Mono></td>
+                        <td><Mono>{num(r.distance_cm)}</Mono></td>
+                        <td>{r.motion_detected == null ? "-" : r.motion_detected ? "Yes" : "No"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          )}
 
           {node.thresholds && (
             <details className="limits">
               <summary>Alert limits for {node.name} · {node.thresholds.temp_max}°C max, {node.thresholds.moisture_min}% soil min</summary>
-                            {role === "admin" ? (<form key={node.id} className="row wrap" onSubmit={saveLimits}>
+              {role === "admin" ? (<form key={node.id} className="row wrap" onSubmit={saveLimits}>
                 <label>Temperature max (°C)<input name="temp_max" type="number" step="0.5" defaultValue={node.thresholds.temp_max} /></label>
                 <label>Soil moisture min (%)<input name="moisture_min" type="number" step="1" defaultValue={node.thresholds.moisture_min} /></label>
                 <button className="btn ghost" type="submit"><Icon name="check" size={18} /> Save limits</button>
-                            </form>) : <p className="mute small">Only an admin can change these limits.</p>}
+              </form>) : <p className="mute small">Only an admin can change these limits.</p>}
             </details>
           )}
         </section>
