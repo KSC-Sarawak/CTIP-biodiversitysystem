@@ -491,7 +491,7 @@ export function AddPlant({ nav, params = {} }) {
 
   if (!qr) {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />} gap={20}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />} gap={20}>
         <View style={{ gap: 6 }}>
           <Txt v="title1">{params.make ? 'New tag' : 'Add plant'}</Txt>
           <Txt v="body" color={c.ink2}>
@@ -642,7 +642,7 @@ export function AddPlant({ nav, params = {} }) {
   };
 
   return (
-    <Screen
+    <Screen refresh={false}
       header={<Header left={<IconButton name="x" label="Close" onPress={leave} />} />}
       top={0}
       gap={20}
@@ -726,7 +726,7 @@ export function Submitted({ nav, params = {} }) {
   const stillSending = queued && !failed && apiStatus === 'connected';
   const tone = failed ? 'warning' : queued ? 'neutral' : 'success';
   return (
-    <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.home} />} />} top={0} gap={24}>
+    <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.home} />} />} top={0} gap={24}>
       <View style={{ alignItems: 'center', gap: 14, paddingTop: 40 }}>
         <View style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: c[tone + 'Soft'] }}>
           <Icon name="check" size={40} color={c[tone]} strokeWidth={2.25} />
@@ -787,7 +787,7 @@ export function Revisit({ nav, params = {} }) {
 
   if (!target) {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
         <Empty icon="qr">This tag is not on a plant yet.</Empty>
       </Screen>
     );
@@ -795,7 +795,7 @@ export function Revisit({ nav, params = {} }) {
   const pendingObs = !!plant && db.observations.some((o) => o.specimen_id === plant.id && o.status === 'synced');
   if (pendingObs) {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
         <Empty icon="lock">This plant has an observation waiting for officer review. Edits and revisits are locked until a decision is returned.</Empty>
       </Screen>
     );
@@ -854,7 +854,7 @@ export function Revisit({ nav, params = {} }) {
   };
 
   return (
-    <Screen
+    <Screen refresh={false}
       header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}
       top={0}
       gap={20}

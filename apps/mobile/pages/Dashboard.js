@@ -21,6 +21,7 @@ import { cleanTerm, isTagSearch } from '../../shared/speciesSearch.js';
 import { can } from '../../shared/permissions.js';
 import { fuzzyMatch } from '../../shared/fuzzy.js';
 import { usePolling } from '../hooks/usePolling.js';
+import { usePullRefresh } from '../hooks/usePullRefresh.js';
 
 const PAGE_SIZE = 20; // same as the API's default `limit`
 const ROW_HEIGHT = 77; // fixed row height lets the list jump straight to a letter
@@ -162,6 +163,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
   const loadMore = apiMode ? search.loadMore : local.loadMore;
   const total = apiMode ? (search.total ?? 0) : local.total;
   const done = apiMode ? !search.hasMore : local.done;
+  const refreshControl = usePullRefresh();
 
   // Insert a letter heading before the first species of each letter (when sorted alphabetically).
   const isAlphaSort = !apiMode && ['common', 'scientific'].includes(sort);
@@ -218,6 +220,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
         onEndReachedThreshold={0.4}
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
         scrollEventThrottle={16}
+        refreshControl={refreshControl}
         renderItem={({ item }) => (
           // Only the rows make room for the rail; the header keeps the full width.
           <View style={{ paddingRight: showRail ? RAIL_SPACE : 0 }}>
@@ -336,6 +339,7 @@ function TaggedList({ nav, onView }) {
   });
 
   const { shown, loading, loadMore } = usePaged(sorted, `${q}|${filter}|${sort}|${db.plants.length}`);
+  const refreshControl = usePullRefresh();
   const filters = role === 'visitor'
     ? [{ key: 'all', label: 'All' }, { key: 'endangered', label: 'Endangered' }]
     : role === 'botanist'
@@ -350,6 +354,7 @@ function TaggedList({ nav, onView }) {
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: LIST_BOTTOM }}
         onEndReached={loadMore}
         onEndReachedThreshold={0.4}
+        refreshControl={refreshControl}
         ListHeaderComponent={
           <PlantsHeader nav={nav} view="tagged" onView={onView} count={`${all.length} tagged`}>
             <SearchField value={q} onChangeText={setQ} placeholder={role === 'visitor' ? 'Tag ID or species' : 'Tag ID, species or botanist'} />
