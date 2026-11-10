@@ -10,16 +10,16 @@ test("a draft opens only for the person who started it", async () => {
   await clearAllDrafts();
   // Botanist A starts a record on a tag, then the session ends (not a sign-out,
   // so the drafts are not cleared). Botanist B signs in and scans the same tag.
-  await saveDraft("NIAH-0001", { user_id: "user-a", notes: "near the stream", gps: { lat: 1, lng: 2 } });
-  assert.equal(await getDraft("NIAH-0001", "user-b"), null, "B must not get A's notes, photos or GPS");
-  assert.equal((await getDraft("NIAH-0001", "user-a"))?.notes, "near the stream");
-  assert.equal(await getDraft("NIAH-0001"), null, "nobody signed in gets nothing");
+  await saveDraft("TEST-TAG-1", { user_id: "user-a", notes: "near the stream", gps: { lat: 1, lng: 2 } });
+  assert.equal(await getDraft("TEST-TAG-1", "user-b"), null, "B must not get A's notes, photos or GPS");
+  assert.equal((await getDraft("TEST-TAG-1", "user-a"))?.notes, "near the stream");
+  assert.equal(await getDraft("TEST-TAG-1"), null, "nobody signed in gets nothing");
   await clearAllDrafts();
 });
 
 test("a draft from before drafts had an owner still opens when its tag is scanned", async () => {
   await clearAllDrafts();
-  await saveDraft("NIAH-0002", { notes: "old build" });
-  assert.equal((await getDraft("NIAH-0002", "user-b"))?.notes, "old build");
+  await saveDraft("TEST-TAG-2", { notes: "old build" });
+  assert.equal((await getDraft("TEST-TAG-2", "user-b"))?.notes, "old build");
   await clearAllDrafts();
 });
