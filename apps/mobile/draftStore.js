@@ -70,9 +70,19 @@ export async function saveDraft(qr_id, draft) {
 }
 
 /**
- * Retrieve a saved draft for a specific QR tag.
+ * The draft `userId` started on a QR tag, or null. Drafts are kept per tag and
+ * are cleared on sign-out, but not when a session ends some other way (it
+ * expired, or the account was turned off), so on a shared phone the next person
+ * to scan the tag must not get someone else's notes, photos and GPS, or send
+ * them as their own. Drafts from before user_id was added have no owner and
+ * still open.
  */
-export async function getDraft(qr_id) {
+export async function getDraft(qr_id, userId) {
+  const draft = await readDraft(qr_id);
+  return draft && (!draft.user_id || draft.user_id === userId) ? draft : null;
+}
+
+async function readDraft(qr_id) {
   if (!qr_id) return null;
 
   try {

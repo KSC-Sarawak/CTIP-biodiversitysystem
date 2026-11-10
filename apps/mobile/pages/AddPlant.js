@@ -462,7 +462,7 @@ export function AddPlant({ nav, params = {} }) {
     fetchGps();
     // Restore crash-safe draft if present (CTIP-57)
     if (qr) {
-      getDraft(qr).then((d) => {
+      getDraft(qr, me?.id).then((d) => {
         if (d) {
           if (d.proposed_species) setSp(d.proposed_species);
           if (d.picked_species) setPicked(d.picked_species);
