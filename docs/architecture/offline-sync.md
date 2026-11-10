@@ -139,6 +139,7 @@ The action on a failed record:
 | `wait_review` | `REVIEW_IN_PROGRESS` |
 | `remove_photo` | 413 or 415 on a photo |
 | `fix_record` | `VALIDATION_ERROR` (any status) or `ID_TAKEN`: the API refused the record's content |
+| `record_gone` | `NOT_FOUND` on an edit: the record was deleted on another device |
 | `retry` | Anything else, shown with the API's message |
 
 The capture forms check the API's limits first (height 0 to 100000 cm, Appearance and
@@ -182,6 +183,7 @@ returned ones.
 | `wait_review` | "This plant has a record waiting for an officer. It will be sent once they decide." | none; the record goes back to `pending` on every manual sync |
 | `remove_photo` | "Photo {n} can't be sent: it is too large, or not a JPEG, PNG or WebP. Remove it to send the rest." | "Remove photo" |
 | `fix_record` | "The server can't accept this record as it is: {API message} Change the details below and send it again." Under it, a "Fix this record" form (Height, Appearance, Field notes, and the species name for a new plant). Only the text changes; the record keeps every ID. | "Save and send" |
+| `record_gone` | "This record was deleted on another device, so the changes on this phone can't be sent. Delete them from this phone to clear it." | "Delete from this phone" (the usual delete dialog) |
 | `retry` | The API's message | "Try again" |
 
 Every record on the phone can also be deleted with "Delete from this phone". It asks

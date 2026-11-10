@@ -117,6 +117,15 @@ test("a failed record's notice follows its action, in the design's words", () =>
   assert.equal(failureNotice(rec({ state: "pending" }), photos), null);
 });
 
+test("an edit of a record deleted on another device offers only Delete from this phone", () => {
+  const notice = failureNotice(rec({ state: "failed", kind: "edit", error: { action: "record_gone", code: "NOT_FOUND", message: "Observation not found" } }));
+  assert.deepEqual(notice, {
+    action: "record_gone",
+    body: "This record was deleted on another device, so the changes on this phone can't be sent. Delete them from this phone to clear it.",
+    button: "Delete from this phone",
+  });
+});
+
 test("a VALIDATION_ERROR record gets the fix_record notice", () => {
   const failed = (error) => rec({ state: "failed", error });
   const notice = failureNotice(failed({ code: "VALIDATION_ERROR", action: "fix_record", message: "Height must be at most 100000." }));
