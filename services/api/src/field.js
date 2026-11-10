@@ -261,6 +261,11 @@ export const fieldHandlers = {
     if (error.code === 'CTTG0') {
       return fail(res, 409, 'TAG_RETIRED', `Tag ${body.qr_id} has been retired. Pick or scan an unused tag.`);
     }
+    // The same trigger refuses a tag kept for another botanist (migration
+    // 20261110000000), the database's side of the check above.
+    if (error.code === 'CTTG1') {
+      return fail(res, 409, 'TAG_RESERVED', `Tag ${body.qr_id} is kept for another botanist. Pick or scan an unused tag.`);
+    }
     return dbError(res, error);
   },
 

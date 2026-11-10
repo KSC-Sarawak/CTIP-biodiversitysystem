@@ -182,6 +182,25 @@ test('a retired or damaged tag gets 409 TAG_RETIRED, not a 500', async () => {
   assert.equal(db.specimens.length, 0);
 });
 
+test("the database refusing another botanist's kept tag answers 409 TAG_RESERVED, not a 500", async (t) => {
+  // The tag was kept for someone else at the moment of the insert, though the
+  // API's own check just before did not see it (a race), so the database's tag
+  // trigger refuses it (migration 20261110000000, errcode CTTG1). A 500 would
+  // make the phone's sync retry it for ever; TAG_RESERVED lets the botanist pick another tag.
+  tag('TEST-0001');
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const path = new URL(input).pathname;
+    if (path === '/rest/v1/specimens' && init.method === 'POST') {
+      return pgError('CTTG1', 'Tag TEST-0001 is kept for another botanist');
+    }
+    return fakeSupabase(input, init);
+  });
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ id: crypto.randomUUID(), qr_id: 'TEST-0001' });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'TAG_RESERVED');
+  assert.equal(res.body.message, 'Tag TEST-0001 is kept for another botanist. Pick or scan an unused tag.');
+});
+
 test('clients cannot set registered_by or species_id when registering', async () => {
   tag('NIAH-0001');
   const res = await request(app).post('/v1/specimens').set(as('botanist'))
