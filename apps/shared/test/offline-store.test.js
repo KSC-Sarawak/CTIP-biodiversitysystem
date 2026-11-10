@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createMemoryOutbox } from "../offline/memoryOutbox.js";
 import { saveFirst, waitAtMost } from "../offline/syncEngine.js";
-import { newPlantRecord, revisitRecord, outboxPhotos, revisitLocation } from "../offline/records.js";
+import { newPlantRecord, revisitRecord, outboxPhotos, revisitLocation, cameraCacheFiles, photoPreview } from "../offline/records.js";
 
 const ME = "user-1";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -133,4 +133,28 @@ test("a revisit with no GPS fix saves no location", () => {
   // A fix, or a spot set by hand (which has no accuracy): all three come from it.
   assert.deepEqual(revisitLocation({ lat: 4.1, lng: 113.8, acc: 6 }, { hasFix: true }), { lat: 4.1, lng: 113.8, gps_accuracy_m: 6 });
   assert.deepEqual(revisitLocation({ lat: 4.1, lng: 113.8, acc: null }, { hasFix: true }), { lat: 4.1, lng: 113.8, gps_accuracy_m: null });
+});
+
+// The design keeps unsent records only in the encrypted file, never in plain
+// files. expo-image-picker leaves a plain JPEG of every photo in the app's
+// cache; once the record is saved on the phone (or sent) those are deleted.
+test("after a save only the camera's own cache files are deleted, never a gallery original", () => {
+  const cache = "file:///data/user/0/com.example.app/cache/";
+  const photos = [
+    { id: "p1", url: `${cache}ImagePicker/a.jpg`, base64: "AAAA" },
+    { id: "p2", url: "content://media/external/images/media/12", base64: "BBBB" }, // a gallery original
+    { id: "p3", url: `${cache}ImagePicker/a.jpg` }, // the same file twice
+    { id: "p4", url: `${cache}../files/daun_drafts_secure.db` }, // never outside the cache
+    { id: "p5" },
+  ];
+  assert.deepEqual(cameraCacheFiles(photos, cache), [`${cache}ImagePicker/a.jpg`]);
+  assert.deepEqual(cameraCacheFiles(photos, cache.slice(0, -1)), [`${cache}ImagePicker/a.jpg`], "with or without the last slash");
+  assert.deepEqual(cameraCacheFiles(photos, null), []);
+});
+
+test("the saved screen's thumbnail comes from the photo's bytes, so it shows after the file is deleted", () => {
+  assert.equal(photoPreview({ base64: "AAAA", type: "image/png", url: "file:///x.png" }), "data:image/png;base64,AAAA");
+  assert.equal(photoPreview({ base64: "AAAA" }), "data:image/jpeg;base64,AAAA");
+  assert.equal(photoPreview({ url: "file:///x.jpg" }), "file:///x.jpg");
+  assert.equal(photoPreview(undefined), null);
 });

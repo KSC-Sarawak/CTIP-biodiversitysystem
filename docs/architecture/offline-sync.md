@@ -63,7 +63,10 @@ they start a sync and wait up to 8 s.
 The web app passes no outbox and keeps today's online path.
 
 Unsent records live **only** in the encrypted SQLite file (`daun_drafts_secure.db`, key in
-`expo-secure-store`). Never in AsyncStorage, plain files or the gallery.
+`expo-secure-store`). Never in AsyncStorage, plain files or the gallery. The plain JPEG
+expo-image-picker leaves in the app's cache for each photo is deleted once the record is
+saved on the phone or sent (`apps/mobile/offline/photoFiles.js`). Form drafts are kept in
+the same encrypted file, or in memory when it cannot be opened, never in AsyncStorage.
 
 ---
 

@@ -24,7 +24,8 @@ import { uid } from '../../shared/utils.js';
 import { extractTag, plantView } from '../../shared/selectors.js';
 import { revisitTarget, outboxTagsFrom, isReservedForOther } from '../../shared/offline/tags.js';
 import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
-import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation } from '../../shared/offline/records.js';
+import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation, photoPreview } from '../../shared/offline/records.js';
+import { deleteCameraFiles } from '../offline/photoFiles.js';
 
 const MAX_PHOTOS = 6;
 
@@ -613,8 +614,9 @@ export function AddPlant({ nav, params = {} }) {
       // it is cleared only once the record is safe (saved on the phone or sent).
       if (!res?.ok) throw new Error(res?.message || 'Failed to submit observation.');
       await clearDraft(qr); // Clean up crash draft after successful submit (CTIP-57)
+      deleteCameraFiles(photos); // the photos are in the encrypted outbox (or sent): drop the camera's plain copies
       nav.replace('submitted', {
-        qr, name: sp.trim(), photos: photos.length, located: hasFix(gps), acc: gps.acc, cover: photos[0]?.url,
+        qr, name: sp.trim(), photos: photos.length, located: hasFix(gps), acc: gps.acc, cover: photoPreview(photos[0]),
         queued: !!res.queued, // saved on this phone, not sent yet
         failed: res.state === 'failed', // saved, but the first send was refused
       });
@@ -838,10 +840,11 @@ export function Revisit({ nav, params = {} }) {
         if (res?.message) notify(res.message); // keep what was entered
         return;
       }
+      deleteCameraFiles(photos); // the photos are in the encrypted outbox (or sent): drop the camera's plain copies
       if (res.queued) {
         nav.replace('submitted', {
           queued: true, failed: res.state === 'failed', qr: target.qr_id, name: target.name, photos: photos.length,
-          located: hasFix(gps), acc: gps.acc, cover: photos[0]?.url,
+          located: hasFix(gps), acc: gps.acc, cover: photoPreview(photos[0]),
         });
         return;
       }
