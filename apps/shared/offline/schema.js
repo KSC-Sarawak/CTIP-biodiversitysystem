@@ -76,6 +76,17 @@ export const MIGRATIONS = [
       );
     `,
   },
+  {
+    // Kept tags belong to the phone that made them, not to the account, so two
+    // phones signed in to one account never hand out the same tag ID. made_here
+    // is 1 for a tag this phone made. Rows saved before this version held the
+    // account's whole list (another phone may hold the same IDs), so they get 0:
+    // never handed out, only released when "Keep tags for offline use" is turned off.
+    version: 5,
+    sql: `
+      ALTER TABLE reserved_tags ADD COLUMN made_here INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /**

@@ -100,6 +100,7 @@ Use a record that the app lets you edit: one in "Draft" status (it shows "Edit r
 | 6m | Use all 3 kept tags offline (3 records). Then try "Generate new QR tag" again, and the "New tag" link on a form. | The button is disabled with the hint "No offline tags left. Connect to the internet to get more, or scan a pre-printed tag." The "New tag" link shows an alert "No offline tags left". | | | | |
 | 6n | Airplane mode off. Wait for the records to send. Open Add plant. | The 3 records send once each, with their kept tags, and each plant exists once on the website. The kept list fills back up to 3 (new tags, not the used ones). | | | | |
 | 6o | Sign in as a second botanist (on a phone, or the web). Open Add plant and Scan, and look at the unused tags. Scan the first botanist's kept tag. | The second botanist is not offered the first botanist's kept tags. Scanning one shows "This tag is kept for another botanist" with "Scan again". | | | | |
+| 6p | Two phones, same botanist account, both online with "Keep tags for offline use" ticked. Open Add plant on both and compare the IDs under "Kept for offline use". Then untick the box on phone A only. | Each phone lists 3 kept tags and no ID appears on both. After unticking on phone A, phone B still lists its own 3 (reopen Add plant on B to check). | | | | |
 
 ## Case 7: species search offline (CTIP-84)
 

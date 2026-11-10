@@ -217,6 +217,7 @@ export function PhoneRecordDetail({ nav, params = {} }) {
     pick_tag: () => nav.go('scan', { pickFor: record.id }),
     remove_photo: () => act(() => removeRecordPhoto(record.id, notice.photoId)),
     retry: () => act(() => retryRecord(record.id)),
+    record_gone: () => askDelete(),
   };
 
   // The botanist's choice for a record two devices edited (CTIP-67). The store

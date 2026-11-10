@@ -261,6 +261,11 @@ export const fieldHandlers = {
     if (error.code === 'CTTG0') {
       return fail(res, 409, 'TAG_RETIRED', `Tag ${body.qr_id} has been retired. Pick or scan an unused tag.`);
     }
+    // The same trigger refuses a tag kept for another botanist (migration
+    // 20261110000000), the database's side of the check above.
+    if (error.code === 'CTTG1') {
+      return fail(res, 409, 'TAG_RESERVED', `Tag ${body.qr_id} is kept for another botanist. Pick or scan an unused tag.`);
+    }
     return dbError(res, error);
   },
 
@@ -448,6 +453,14 @@ export const fieldHandlers = {
       })
       .select(PHOTO_COLUMNS)
       .single();
+    if (isDuplicate(error, 'observation_photos_pkey')) {
+      // A retry that overlapped the first upload of this photo (the phone lost
+      // the answer and sent it again): the first one saved the row meanwhile.
+      // Its row points at this same file, so the file stays.
+      const saved = await db.from('observation_photos').select(PHOTO_COLUMNS).eq('id', photoId).maybeSingle();
+      if (saved.error) return dbError(res, saved.error);
+      if (saved.data?.s3_key === key) return res.status(200).json((await withSignedUrls(db, [saved.data]))[0]);
+    }
     if (error) {
       await db.storage.from(PHOTO_BUCKET).remove([key]); // no record, so do not keep the file
       return dbError(res, error);

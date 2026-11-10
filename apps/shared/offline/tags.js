@@ -46,11 +46,40 @@ export function myKeptTags(tags = [], meId) {
  * How many more tags to make so the person has `keep` free ones. A kept tag a
  * record on this phone has taken (`usedOnPhone`) is still "unused" on the server
  * until that record is sent, but it is no longer free.
+ *
+ * `madeHere` is the list of tags this phone made (reservedTags.all). Kept tags
+ * belong to the phone that made them, not to the account: a botanist signed in
+ * on two phones must never be offered the same kept ID on both, or one ID could
+ * be written on two spare tags. So only this phone's own tags count as free.
  */
-export function reservedToCreate(tags, meId, { usedOnPhone = [], keep = RESERVED_KEEP } = {}) {
+export function reservedToCreate(tags, meId, { usedOnPhone = [], keep = RESERVED_KEEP, madeHere = null } = {}) {
   const used = new Set(usedOnPhone.map(norm));
-  const free = myKeptTags(tags, meId).filter((id) => !used.has(id));
+  const here = madeHere && new Set(madeHere.map(norm));
+  const free = myKeptTags(tags, meId).filter((id) => !used.has(id) && (!here || here.has(id)));
   return Math.max(0, keep - free.length);
+}
+
+/**
+ * The tags this phone keeps on its list after a workspace load: those the
+ * server still holds as this person's free kept tags, those a record on this
+ * phone has taken (still "unused" on the server until it is sent), and those
+ * just made that the loaded list does not show yet. Anything else on the
+ * phone's list was used or released, and is dropped (reservedTags.retain).
+ */
+export function keptTagsToRetain(tags, meId, { usedOnPhone = [], justMade = [] } = {}) {
+  return [...new Set([...myKeptTags(tags, meId), ...usedOnPhone.map(norm), ...justMade.map(norm)])];
+}
+
+/**
+ * The tags turning "Keep tags for offline use" off gives back: this phone's own
+ * (`madeHere`, `justMade`) and those it kept before kept tags were per phone
+ * (`legacy`), while the server still holds them free and no record on this
+ * phone has taken them. Another phone's kept tags are never released from here.
+ */
+export function tagsToRelease(tags, meId, { madeHere = [], legacy = [], usedOnPhone = [], justMade = [] } = {}) {
+  const used = new Set(usedOnPhone.map(norm));
+  const free = new Set([...myKeptTags(tags, meId), ...justMade.map(norm)]);
+  return [...new Set([...madeHere, ...legacy, ...justMade].map(norm))].filter((id) => free.has(id) && !used.has(id));
 }
 
 /** The first kept tag no record on this phone has taken, or null. */

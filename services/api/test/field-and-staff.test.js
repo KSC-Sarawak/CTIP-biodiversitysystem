@@ -57,6 +57,11 @@ async function fakeSupabase(input, init = {}) {
     stored.push(key);
     return json(200, { Key: `observation-photos/${key}` });
   }
+  if (url.pathname === '/storage/v1/object/observation-photos' && method === 'DELETE') {
+    const { prefixes } = JSON.parse(init.body);
+    stored = stored.filter((k) => !prefixes.includes(k));
+    return json(200, prefixes.map((name) => ({ name })));
+  }
 
   const table = url.pathname.replace('/rest/v1/', '');
   if (!db[table]) return json(404, { message: `no table ${table}` });
@@ -177,6 +182,25 @@ test('a retired or damaged tag gets 409 TAG_RETIRED, not a 500', async () => {
   assert.equal(db.specimens.length, 0);
 });
 
+test("the database refusing another botanist's kept tag answers 409 TAG_RESERVED, not a 500", async (t) => {
+  // The tag was kept for someone else at the moment of the insert, though the
+  // API's own check just before did not see it (a race), so the database's tag
+  // trigger refuses it (migration 20261110000000, errcode CTTG1). A 500 would
+  // make the phone's sync retry it for ever; TAG_RESERVED lets the botanist pick another tag.
+  tag('TEST-0001');
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const path = new URL(input).pathname;
+    if (path === '/rest/v1/specimens' && init.method === 'POST') {
+      return pgError('CTTG1', 'Tag TEST-0001 is kept for another botanist');
+    }
+    return fakeSupabase(input, init);
+  });
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ id: crypto.randomUUID(), qr_id: 'TEST-0001' });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'TAG_RESERVED');
+  assert.equal(res.body.message, 'Tag TEST-0001 is kept for another botanist. Pick or scan an unused tag.');
+});
+
 test('clients cannot set registered_by or species_id when registering', async () => {
   tag('NIAH-0001');
   const res = await request(app).post('/v1/specimens').set(as('botanist'))
@@ -251,6 +275,32 @@ test('photo upload: stored at {observation_id}/{photo_id}.jpg, row saved, signed
     .field('id', photoId).attach('file', jpeg, 'leaf.jpg');
   assert.equal(again.status, 200, 'a retry with the same photo id is not saved twice');
   assert.equal(db.observation_photos.length, 1);
+});
+
+test('a retry that overlaps the first upload of a photo keeps the file the saved row points to', async (t) => {
+  // Case 2d: the connection drops while the server is still saving the photo,
+  // and the phone sends it again as soon as the signal is back. The retry finds
+  // no row yet, writes the same file, and then loses the insert to the first request.
+  const obs = observation({ status: 'queued' });
+  const photoId = crypto.randomUUID();
+  const key = `${obs.id}/${photoId}.jpg`;
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const res = await fakeSupabase(input, init);
+    const path = new URL(input).pathname;
+    if (path === `/storage/v1/object/observation-photos/${key}` && (init.method ?? 'GET') === 'POST') {
+      // The first request finishes here: its row is saved, pointing at the same file.
+      db.observation_photos.push({ id: photoId, observation_id: obs.id, s3_bucket: 'observation-photos', s3_key: key,
+        content_type: 'image/jpeg', size_bytes: 10, upload_status: 'uploaded', caption: null, traits: [] });
+    }
+    return res;
+  });
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const res = await request(app).post(`/v1/observations/${obs.id}/photos`).set(as('botanist'))
+    .field('id', photoId).attach('file', jpeg, 'leaf.jpg');
+  assert.equal(res.status, 200, 'the retry answers with the photo already saved');
+  assert.equal(res.body.id, photoId);
+  assert.equal(db.observation_photos.length, 1);
+  assert.deepEqual(stored, [key], 'the saved photo still has its file');
 });
 
 test('photo upload keeps its caption and traits, and refuses a trait not on the list', async () => {
@@ -874,6 +924,21 @@ test('POST /sync leaves a plant waiting for an officer alone (botanist), and sti
   assert.equal(res.body.results[0].result, 'error');
   assert.equal(res.body.results[0].error.code, 'REVIEW_IN_PROGRESS');
   assert.equal(res.body.results[1].result, 'created');
+});
+
+test('POST /sync resend of a create the server already holds answers created, even once the plant waits for an officer', async () => {
+  // The first send of this revisit was stored as queued, but its answer was lost.
+  // Before the phone sends it again, another record of the same plant is sent for
+  // review (say from the botanist's second phone). The resend must still be
+  // answered "created", so the phone goes on to its photos and submit.
+  const specimen_id = crypto.randomUUID();
+  const item = syncItem({ specimen_id });
+  assert.equal((await sync([item])).body.results[0].result, 'created');
+  observation({ specimen_id, status: 'synced' });
+  const again = await sync([item]);
+  assert.equal(again.body.results[0].result, 'created');
+  assert.equal(again.body.results[0].server_version, 1);
+  assert.equal(db.observations.filter((o) => o.id === item.id).length, 1);
 });
 
 test('POST /sync edit with the right base_version answers updated', async () => {

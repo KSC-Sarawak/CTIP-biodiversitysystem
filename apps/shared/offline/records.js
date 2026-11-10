@@ -169,6 +169,27 @@ export function editRecord({ userId, obs, changes, qr_id = null }) {
  * id gets one now. Only the bytes and the botanist's notes are kept, not the
  * file link, which points at the camera's temporary cache.
  */
+/**
+ * The camera's temporary files for these photos, to delete once the record is
+ * saved in the encrypted outbox (or sent): file links inside the app's cache
+ * folder (`cacheUri`), where expo-image-picker writes every photo it takes or
+ * copies from the gallery. They are plain JPEGs, and the design keeps unsent
+ * records only in the encrypted file. A link outside the cache (a gallery
+ * original, a content:// link) is never listed.
+ */
+export function cameraCacheFiles(photos = [], cacheUri) {
+  if (!cacheUri) return [];
+  const base = cacheUri.endsWith("/") ? cacheUri : `${cacheUri}/`;
+  const inCache = (u) => typeof u === "string" && u.startsWith(base) && !u.includes("/../");
+  return [...new Set(photos.map((p) => p?.url).filter(inCache))];
+}
+
+/** A photo as an image link from its own bytes when it has them, so it still shows once its file is gone. */
+export function photoPreview(photo) {
+  if (photo?.base64) return `data:${photo.type || "image/jpeg"};base64,${photo.base64}`;
+  return photo?.url || null;
+}
+
 export function outboxPhotos(photos = []) {
   return photos.map((p, i) => ({
     id: p.id || uid(),

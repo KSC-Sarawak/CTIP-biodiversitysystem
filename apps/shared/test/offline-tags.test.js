@@ -6,11 +6,25 @@ import assert from "node:assert/strict";
 import {
   lookupTagOffline, tagCacheRows, cleanTagRow, outboxTagsFrom, revisitTarget,
   isReservedForOther, myKeptTags, reservedToCreate, nextReservedTag, RESERVED_LABEL, RESERVED_KEEP,
+  keptTagsToRetain, tagsToRelease,
 } from "../offline/tags.js";
 import { createTopUp, shouldTopUp } from "../offline/reservedTopUp.js";
 import { DatabaseSync } from "node:sqlite";
-import { migrate } from "../offline/schema.js";
+import { migrate, MIGRATIONS } from "../offline/schema.js";
 import { createReservedTags } from "../../mobile/offline/reservedTags.js";
+
+// The calls expo-sqlite's database object has, on Node's own SQLite.
+function sqliteDb() {
+  const raw = new DatabaseSync(":memory:");
+  return {
+    raw,
+    execSync: (sql) => raw.exec(sql),
+    runSync: (sql, params = []) => raw.prepare(sql).run(...params),
+    getFirstSync: (sql, params = []) => raw.prepare(sql).get(...params) ?? null,
+    getAllSync: (sql, params = []) => raw.prepare(sql).all(...params),
+    withTransactionSync(task) { raw.exec("BEGIN;"); try { task(); raw.exec("COMMIT;"); } catch (e) { raw.exec("ROLLBACK;"); throw e; } },
+  };
+}
 
 const ME = "user-1";
 // What the store holds before any workspace has loaded (staffStart in StoreProvider).
@@ -253,4 +267,80 @@ test("the keep-offline setting is on by default, kept per person, and a no-op wi
   assert.equal(await none.getKeepOffline("a"), true);
   await none.setKeepOffline("a", false); // nothing to save into, and no error
   assert.equal(await none.getKeepOffline("a"), true);
+});
+
+// Kept tags belong to the phone that made them, not to the account (CTIP-116).
+// A botanist signed in on two phones writes a kept ID on a spare tag with no
+// signal; if both phones offered the same IDs, one ID could end up on two plants.
+test("two phones signed in to one account never offer the same kept tag", async () => {
+  const db1 = sqliteDb();
+  const db2 = sqliteDb();
+  migrate(db1);
+  migrate(db2);
+  const phone1 = createReservedTags(async () => db1);
+  const phone2 = createReservedTags(async () => db2);
+  const server = []; // the account's tags, as the workspace lists them
+
+  // Phone 1 tops up first: the server makes three tags, and phone 1 remembers them.
+  const count1 = reservedToCreate(server, ME, { madeHere: await phone1.all(ME) });
+  assert.equal(count1, 3);
+  const made1 = ["TEST-K-1", "TEST-K-2", "TEST-K-3"];
+  server.push(...made1.map((id) => kept(id, ME)));
+  await phone1.add(ME, made1);
+
+  // Phone 2 loads the same account: those three are not its own, so it makes its own three.
+  const count2 = reservedToCreate(server, ME, { madeHere: await phone2.all(ME) });
+  assert.equal(count2, 3);
+  const made2 = ["TEST-K-4", "TEST-K-5", "TEST-K-6"];
+  server.push(...made2.map((id) => kept(id, ME)));
+  await phone2.add(ME, made2);
+
+  assert.deepEqual(await phone1.all(ME), made1);
+  assert.deepEqual(await phone2.all(ME), made2);
+  // Phone 1 now has its three: nothing more to make.
+  assert.equal(reservedToCreate(server, ME, { madeHere: await phone1.all(ME) }), 0);
+});
+
+test("after a load the phone keeps only its kept tags still free on the server, or taken by its own records", async () => {
+  const db = sqliteDb();
+  migrate(db);
+  const phone = createReservedTags(async () => db);
+  await phone.add(ME, ["TEST-K-1", "TEST-K-2", "TEST-K-3", "TEST-K-4"]);
+  const server = [
+    kept("TEST-K-1", ME), // still free
+    kept("TEST-K-2", ME, { status: "assigned" }), // its record was sent: no longer kept
+    kept("TEST-K-3", ME), // taken by a record still on this phone
+    // TEST-K-4 is gone from the server (released): no longer kept
+  ];
+  const keepIds = keptTagsToRetain(server, ME, { usedOnPhone: ["TEST-K-3"], justMade: ["TEST-K-5"] });
+  await phone.retain(ME, keepIds);
+  assert.deepEqual(await phone.all(ME), ["TEST-K-1", "TEST-K-3"]);
+});
+
+test("turning kept tags off releases this phone's free tags and the ones kept before per-phone tags, never another phone's", async () => {
+  const raw = sqliteDb();
+  // A phone that kept tags before per-phone kept tags (schema v4): its list was the account's.
+  for (const m of MIGRATIONS.filter((m) => m.version <= 4)) raw.execSync(m.sql);
+  raw.execSync("PRAGMA user_version = 4;");
+  raw.runSync("INSERT INTO reserved_tags (qr_id, user_id) VALUES (?, ?);", ["TEST-L-1", ME]);
+  raw.runSync("INSERT INTO reserved_tags (qr_id, user_id) VALUES (?, ?);", ["TEST-L-2", ME]);
+  migrate(raw);
+  const phone = createReservedTags(async () => raw);
+  // Kept before the update: never handed out (another phone may hold the same list), but released when turned off.
+  assert.deepEqual(await phone.all(ME), []);
+  assert.deepEqual(await phone.legacy(ME), ["TEST-L-1", "TEST-L-2"]);
+
+  await phone.add(ME, ["TEST-K-1", "TEST-K-2"]);
+  const server = [
+    kept("TEST-K-1", ME), kept("TEST-K-2", ME), // this phone's; K-2 is taken by a record on the phone
+    kept("TEST-L-1", ME), kept("TEST-L-2", ME, { status: "assigned" }), // from before; L-2 already used
+    kept("TEST-K-9", ME), // another phone's
+  ];
+  const release = tagsToRelease(server, ME, {
+    madeHere: await phone.all(ME), legacy: await phone.legacy(ME), usedOnPhone: ["TEST-K-2"],
+  });
+  assert.deepEqual(release, ["TEST-K-1", "TEST-L-1"]);
+  await phone.remove(ME, release);
+  assert.deepEqual(await phone.all(ME), ["TEST-K-2"]);
+  assert.deepEqual(await phone.legacy(ME), ["TEST-L-2"]);
 });

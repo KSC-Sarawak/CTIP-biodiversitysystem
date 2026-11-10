@@ -301,7 +301,10 @@ export function createSyncEngine({ outbox, api, deviceId, currentUserId }) {
           // here), so this record stays pending and the others go on.
           stop = (await setBack(record, { ok: false, status: 503, code: "DB_ERROR", message: answer?.error?.message })) ?? stop;
         } else {
-          await setBack(record, { ok: false, status: 422, code: answer.error?.code, message: answer.error?.message });
+          // An edit of a record that is gone (deleted on another device) can never
+          // land: the botanist can only delete the phone's copy (record_gone).
+          const gone = record.kind === "edit" && answer.error?.code === "NOT_FOUND" ? { action: "record_gone" } : {};
+          await setBack(record, { ok: false, status: 422, code: answer.error?.code, message: answer.error?.message }, gone);
         }
       }
       if (stop) return stop;

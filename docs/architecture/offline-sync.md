@@ -63,7 +63,10 @@ they start a sync and wait up to 8 s.
 The web app passes no outbox and keeps today's online path.
 
 Unsent records live **only** in the encrypted SQLite file (`daun_drafts_secure.db`, key in
-`expo-secure-store`). Never in AsyncStorage, plain files or the gallery.
+`expo-secure-store`). Never in AsyncStorage, plain files or the gallery. The plain JPEG
+expo-image-picker leaves in the app's cache for each photo is deleted once the record is
+saved on the phone or sent (`apps/mobile/offline/photoFiles.js`). Form drafts are kept in
+the same encrypted file, or in memory when it cannot be opened, never in AsyncStorage.
 
 ---
 
@@ -139,6 +142,7 @@ The action on a failed record:
 | `wait_review` | `REVIEW_IN_PROGRESS` |
 | `remove_photo` | 413 or 415 on a photo |
 | `fix_record` | `VALIDATION_ERROR` (any status) or `ID_TAKEN`: the API refused the record's content |
+| `record_gone` | `NOT_FOUND` on an edit: the record was deleted on another device |
 | `retry` | Anything else, shown with the API's message |
 
 The capture forms check the API's limits first (height 0 to 100000 cm, Appearance and
@@ -182,6 +186,7 @@ returned ones.
 | `wait_review` | "This plant has a record waiting for an officer. It will be sent once they decide." | none; the record goes back to `pending` on every manual sync |
 | `remove_photo` | "Photo {n} can't be sent: it is too large, or not a JPEG, PNG or WebP. Remove it to send the rest." | "Remove photo" |
 | `fix_record` | "The server can't accept this record as it is: {API message} Change the details below and send it again." Under it, a "Fix this record" form (Height, Appearance, Field notes, and the species name for a new plant). Only the text changes; the record keeps every ID. | "Save and send" |
+| `record_gone` | "This record was deleted on another device, so the changes on this phone can't be sent. Delete them from this phone to clear it." | "Delete from this phone" (the usual delete dialog) |
 | `retry` | The API's message | "Try again" |
 
 Every record on the phone can also be deleted with "Delete from this phone". It asks
@@ -201,6 +206,12 @@ Every record on the phone can also be deleted with "Delete from this phone". It 
   keeps 3 tags made for this botanist (`batch_label: 'reserved'`). The API refuses them
   to anyone else (`409 TAG_RESERVED`). Only their owner may release (delete) them, and a
   botanist may release their own unused ones.
+- **Kept tags belong to the phone that made them, not to the account (10 Nov 2026).** A
+  botanist signed in on two phones gets 3 kept tags on each, never the same IDs, so one ID
+  is never written on two spare tags. The phone remembers which tags it made in
+  `reserved_tags` (schema v5, `made_here = 1`) and hands out only those. Tags a phone kept
+  before this change (`made_here = 0`) are never handed out, because another phone may hold
+  the same list; they are released when the switch is turned off.
 - **Kept tags are a fallback only, and one switch controls them.** A botanist carries
   pre-printed tags and writes a kept tag ID on a spare tag only when they run out, so
   there is no per-tag "Release": releasing one tag only for the phone to make a new one
@@ -211,8 +222,9 @@ Every record on the phone can also be deleted with "Delete from this phone". It 
   - **Where it is saved:** per person on the phone, in the `meta` table (schema v3), key
     `keep_offline_tags:<userId>`, value `"1"` or `"0"`. No row means on. With no database
     the phone reads it as on and saves nothing.
-  - **Off:** the phone releases every free kept tag with `DELETE /qr-tags/{id}`, one by
-    one. Only if every release works does it save `"0"` and clear the phone's list. If
+  - **Off:** the phone releases its own free kept tags (and those kept before kept tags
+    were per phone) with `DELETE /qr-tags/{id}`, one by one. Another phone's kept tags are
+    never released. Only if every release works does it save `"0"` and clear the phone's list. If
     one fails, the switch stays on, the list is reloaded and the API's message is shown
     (until the migration `20261108000000` is pushed, a botanist's release answers "not
     found"). Tags a record on the phone has already taken are not released.

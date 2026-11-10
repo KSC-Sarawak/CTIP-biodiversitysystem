@@ -38,8 +38,8 @@ test("migrate runs each migration once and sets user_version", () => {
   const db = makeDb();
 
   assert.equal(migrate(db), LATEST);
-  assert.equal(LATEST, 4);
-  assert.equal(userVersion(db), 4);
+  assert.equal(LATEST, 5);
+  assert.equal(userVersion(db), 5);
   assert.deepEqual(tables(db), [
     "drafts",
     "meta",
@@ -50,7 +50,7 @@ test("migrate runs each migration once and sets user_version", () => {
     "tag_cache",
   ]);
 
-  // A second call finds user_version 4 and runs nothing.
+  // A second call finds user_version 5 and runs nothing.
   db.seen.length = 0;
   assert.equal(migrate(db), LATEST);
   assert.equal(db.seen.length, 0);
@@ -100,7 +100,7 @@ test("outbox_records is indexed by user and created_at", () => {
   assert.deepEqual(cols, ["user_id", "created_at"]);
 });
 
-test("reserved_tags holds one row per kept tag, with its owner", () => {
+test("reserved_tags holds one row per kept tag, with its owner and whether this phone made it", () => {
   const db = makeDb();
   migrate(db);
   const cols = db.raw
@@ -110,5 +110,6 @@ test("reserved_tags holds one row per kept tag, with its owner", () => {
   assert.deepEqual(cols, [
     { name: "qr_id", type: "TEXT", pk: 1, notnull: 0 },
     { name: "user_id", type: "TEXT", pk: 0, notnull: 1 },
+    { name: "made_here", type: "INTEGER", pk: 0, notnull: 1 },
   ]);
 });
