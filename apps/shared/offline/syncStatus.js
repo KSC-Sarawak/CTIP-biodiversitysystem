@@ -159,6 +159,13 @@ export function failureNotice(record, photos = []) {
       button: null, // it goes back to pending on every manual sync (resetsOnManualSync)
     };
   }
+  if (error.action === "record_gone") {
+    return {
+      action: "record_gone",
+      body: "This record was deleted on another device, so the changes on this phone can't be sent. Delete them from this phone to clear it.",
+      button: "Delete from this phone",
+    };
+  }
   if (error.action === "remove_photo") {
     const index = photos.findIndex((p) => p.id === error.photo_id);
     if (index >= 0) {

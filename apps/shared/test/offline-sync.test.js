@@ -696,6 +696,26 @@ test("an edit that is accepted leaves the outbox without a submit", async () => 
   assert.equal(callsTo(server, "submit").length, 0);
 });
 
+test("an edit of a record deleted on another device fails with record_gone, not a retry that can never work", async () => {
+  const { outbox, server, engine } = setup();
+  const obsId = randomUUID();
+  const specimenId = randomUUID();
+  server.state.specimens.push({ id: specimenId, qr_id: "DS-3" });
+  // Phone A deleted the draft; phone B had already saved an edit of it offline.
+  server.state.observations.push({ id: obsId, specimen_id: specimenId, status: "draft", recorded_by: U, version: 2, is_deleted: true });
+  await outbox.add(plantRecord({
+    id: obsId, kind: "edit", specimen_id: specimenId, specimen: null, step: "observation", base_version: 2,
+    observation: { height_cm: 40 },
+  }), []);
+
+  const summary = await engine.run(U);
+  assert.equal(summary.failed, 1);
+  const record = await outbox.get(obsId);
+  assert.equal(record.state, "failed");
+  assert.equal(record.error.code, "NOT_FOUND");
+  assert.equal(record.error.action, "record_gone");
+});
+
 // ---- Choosing a version when two phones edited one record (CTIP-67) ----
 
 // A draft the server holds at version 3, edited on this phone from version 2:

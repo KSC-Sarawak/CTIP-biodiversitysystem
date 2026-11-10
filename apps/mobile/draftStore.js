@@ -1,6 +1,7 @@
 // apps/mobile/draftStore.js
 // Crash-safe local draft persistence for in-progress plant observations (CTIP-57).
-// Uses expo-sqlite on native devices, with graceful fallback to AsyncStorage / memory.
+// Uses the encrypted expo-sqlite database on native devices, falling back to memory only
+// (never to plain AsyncStorage). Drafts older builds left in AsyncStorage are still read and cleared.
 // The SQLite file is encrypted with SQLCipher (CTIP-107); see offline/localDb.js.
 
 import { getLocalDb } from './offline/localDb.js';
@@ -12,10 +13,20 @@ const memoryStore = new Map();
 // Drafts keep their own fallback below for when SQLite is not available.
 const getDb = getLocalDb;
 
+// Tests (plain Node, where the AsyncStorage package may not be installed) pass
+// a stand-in here, to check what draftStore reads and writes. null: the real one.
+let asyncStorageOverride = null;
+export function setDraftAsyncStorageForTests(storage) {
+  asyncStorageOverride = storage;
+}
+
 async function getAsyncStorage() {
+  if (asyncStorageOverride) return asyncStorageOverride;
   try {
     const mod = await import('@react-native-async-storage/async-storage');
-    return mod.default || mod;
+    const storage = mod.default || mod;
+    // Plain Node (the tests) nests the CommonJS export one level deeper than Metro does.
+    return typeof storage.getItem === 'function' ? storage : storage.default || storage;
   } catch {
     return null;
   }
@@ -55,24 +66,28 @@ export async function saveDraft(qr_id, draft) {
     console.warn('[DraftStore SQLite Error]', err?.message || err);
   }
 
-  try {
-    const storage = await getAsyncStorage();
-    if (storage && typeof storage.setItem === 'function') {
-      await storage.setItem(`${STORAGE_PREFIX}${qr_id}`, json);
-      return true;
-    }
-  } catch {
-    // fallback to memory
-  }
-
+  // Never AsyncStorage: it is a plain file, and a draft holds GPS and photos.
+  // Without the encrypted database the draft is kept in memory only, so it is
+  // lost if the app is killed. (Older builds wrote here; those drafts are still
+  // read and cleared below.)
   memoryStore.set(qr_id, payload);
   return true;
 }
 
 /**
- * Retrieve a saved draft for a specific QR tag.
+ * The draft `userId` started on a QR tag, or null. Drafts are kept per tag and
+ * are cleared on sign-out, but not when a session ends some other way (it
+ * expired, or the account was turned off), so on a shared phone the next person
+ * to scan the tag must not get someone else's notes, photos and GPS, or send
+ * them as their own. Drafts from before user_id was added have no owner and
+ * still open.
  */
-export async function getDraft(qr_id) {
+export async function getDraft(qr_id, userId) {
+  const draft = await readDraft(qr_id);
+  return draft && (!draft.user_id || draft.user_id === userId) ? draft : null;
+}
+
+async function readDraft(qr_id) {
   if (!qr_id) return null;
 
   try {
