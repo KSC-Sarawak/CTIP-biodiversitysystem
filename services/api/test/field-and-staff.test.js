@@ -907,6 +907,21 @@ test('POST /sync leaves a plant waiting for an officer alone (botanist), and sti
   assert.equal(res.body.results[1].result, 'created');
 });
 
+test('POST /sync resend of a create the server already holds answers created, even once the plant waits for an officer', async () => {
+  // The first send of this revisit was stored as queued, but its answer was lost.
+  // Before the phone sends it again, another record of the same plant is sent for
+  // review (say from the botanist's second phone). The resend must still be
+  // answered "created", so the phone goes on to its photos and submit.
+  const specimen_id = crypto.randomUUID();
+  const item = syncItem({ specimen_id });
+  assert.equal((await sync([item])).body.results[0].result, 'created');
+  observation({ specimen_id, status: 'synced' });
+  const again = await sync([item]);
+  assert.equal(again.body.results[0].result, 'created');
+  assert.equal(again.body.results[0].server_version, 1);
+  assert.equal(db.observations.filter((o) => o.id === item.id).length, 1);
+});
+
 test('POST /sync edit with the right base_version answers updated', async () => {
   const row = queuedRow();
   const res = await sync([editItem(row, { height_cm: 150, notes: 'taller now' })]);
