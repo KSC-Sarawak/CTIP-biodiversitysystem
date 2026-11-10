@@ -201,6 +201,12 @@ Every record on the phone can also be deleted with "Delete from this phone". It 
   keeps 3 tags made for this botanist (`batch_label: 'reserved'`). The API refuses them
   to anyone else (`409 TAG_RESERVED`). Only their owner may release (delete) them, and a
   botanist may release their own unused ones.
+- **Kept tags belong to the phone that made them, not to the account (10 Nov 2026).** A
+  botanist signed in on two phones gets 3 kept tags on each, never the same IDs, so one ID
+  is never written on two spare tags. The phone remembers which tags it made in
+  `reserved_tags` (schema v5, `made_here = 1`) and hands out only those. Tags a phone kept
+  before this change (`made_here = 0`) are never handed out, because another phone may hold
+  the same list; they are released when the switch is turned off.
 - **Kept tags are a fallback only, and one switch controls them.** A botanist carries
   pre-printed tags and writes a kept tag ID on a spare tag only when they run out, so
   there is no per-tag "Release": releasing one tag only for the phone to make a new one
@@ -211,8 +217,9 @@ Every record on the phone can also be deleted with "Delete from this phone". It 
   - **Where it is saved:** per person on the phone, in the `meta` table (schema v3), key
     `keep_offline_tags:<userId>`, value `"1"` or `"0"`. No row means on. With no database
     the phone reads it as on and saves nothing.
-  - **Off:** the phone releases every free kept tag with `DELETE /qr-tags/{id}`, one by
-    one. Only if every release works does it save `"0"` and clear the phone's list. If
+  - **Off:** the phone releases its own free kept tags (and those kept before kept tags
+    were per phone) with `DELETE /qr-tags/{id}`, one by one. Another phone's kept tags are
+    never released. Only if every release works does it save `"0"` and clear the phone's list. If
     one fails, the switch stays on, the list is reloaded and the API's message is shown
     (until the migration `20261108000000` is pushed, a botanist's release answers "not
     found"). Tags a record on the phone has already taken are not released.

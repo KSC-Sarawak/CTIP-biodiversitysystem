@@ -10,8 +10,10 @@
 //  - tops the botanist up to 3 free tags after each workspace load, and again
 //    when a record on the phone takes one or the connection comes back, but only
 //    while the switch is on;
-//  - saves the free ones on the phone (reservedTags, apps/mobile/offline/reservedTags.js)
-//    so they are there when the app is opened with no signal;
+//  - remembers on the phone which kept tags this phone made (reservedTags,
+//    apps/mobile/offline/reservedTags.js), so they are there when the app is opened
+//    with no signal. Kept tags belong to the phone, not the account: two phones
+//    signed in to one account never hand out the same ID;
 //  - hands one out (takeReservedTag), and turns the switch on or off
 //    (setKeepOffline; turning it off gives every kept tag back).
 //
@@ -21,7 +23,7 @@
 // No JSX and no React Native imports: it is shared code.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createTagBatchApi, deleteTagApi } from "../api.js";
-import { RESERVED_LABEL, myKeptTags, nextReservedTag, outboxTagsFrom, reservedToCreate } from "./tags.js";
+import { RESERVED_LABEL, nextReservedTag, outboxTagsFrom, reservedToCreate, keptTagsToRetain, tagsToRelease } from "./tags.js";
 import { createTopUp, shouldTopUp } from "./reservedTopUp.js";
 
 /**
@@ -38,7 +40,10 @@ import { createTopUp, shouldTopUp } from "./reservedTopUp.js";
  */
 export function useReservedTags({ reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi }) {
   const isBotanist = role === "botanist";
-  const [saved, setSaved] = useState([]); // kept tag IDs, as the last load (or the phone) said
+  // The kept tag IDs this phone made for this person (reservedTags.all). Kept tags
+  // belong to the phone, not the account, so two phones signed in to one account
+  // never hand out the same ID (tags.js, reservedToCreate).
+  const [saved, setSaved] = useState([]);
   // The switch. `null` until the phone has been read: nothing is made before that,
   // so a person who turned it off never gets tags made in the moment before it is read.
   const [keep, setKeep] = useState(null);
@@ -51,13 +56,13 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
 
   // Always the newest values, for the top-up run (it may start inside an older render).
   const latest = useRef({});
-  latest.current = { userId, isBotanist, loaded, db, usedOnPhone, apiStatus, callApi, loadFromApi, keep };
+  latest.current = { userId, isBotanist, loaded, db, usedOnPhone, apiStatus, callApi, loadFromApi, keep, saved };
   // True while the switch is being changed, so a top-up does not make tags that are being released.
   const switching = useRef(false);
   // Tags this phone has just made, until the store's tag list shows them. Without it a
   // second run started before the reload reaches the screen would make three more.
   const justMade = useRef(new Set());
-  const savedJson = useRef(""); // what was last written to the phone, as JSON
+  const savedJson = useRef(""); // the list last kept on the phone after a load, as JSON
 
   // The list and the switch saved on the phone, for a person who opens the app with no signal.
   useEffect(() => {
@@ -78,7 +83,7 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
     );
     reservedTags.all(userId).then(
       (ids) => {
-        if (current) setSaved((now) => (now.length ? now : ids));
+        if (current) setSaved((now) => [...new Set([...now, ...ids])]);
       },
       (err) => console.warn("reservedTags.all:", err?.message || err),
     );
@@ -87,19 +92,25 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
     };
   }, [reservedTags, userId]);
 
-  // After each load: keep the store's list, and write the free tags to the phone.
+  // After each load: the phone keeps only its tags the server still holds free
+  // (or that a record on the phone took); used and released ones are dropped.
   useEffect(() => {
     if (!reservedTags || !isBotanist || !loaded) return;
-    const mine = myKeptTags(db.tags, userId);
-    setSaved((now) => (now.join() === mine.join() ? now : mine));
-    const free = mine.filter((id) => !usedOnPhone.includes(id));
-    const json = JSON.stringify([userId, free]);
+    const keepIds = keptTagsToRetain(db.tags, userId, { usedOnPhone, justMade: [...justMade.current] });
+    const json = JSON.stringify([userId, keepIds]);
     if (json === savedJson.current) return;
     savedJson.current = json;
-    reservedTags.save(userId, free).catch((err) => {
-      savedJson.current = "";
-      console.warn("reservedTags.save:", err?.message || err);
-    });
+    reservedTags.retain(userId, keepIds)
+      // A tag made while this ran is in justMade: write it back in case retain dropped it.
+      .then(() => reservedTags.add(userId, [...justMade.current]))
+      .then(() => reservedTags.all(userId))
+      .then((ids) => {
+        if (latest.current.userId === userId) setSaved(ids);
+      })
+      .catch((err) => {
+        savedJson.current = "";
+        console.warn("reservedTags.retain:", err?.message || err);
+      });
   }, [reservedTags, isBotanist, loaded, db.tags, userId, usedOnPhone]);
 
   // Make the missing tags, one at a time, then reload so the store shows them.
@@ -121,7 +132,9 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
       ...(now.db.tags || []),
       ...[...justMade.current].map((qr_id) => ({ qr_id, status: "unused", batch_label: RESERVED_LABEL, created_by: now.userId })),
     ];
-    const count = reservedToCreate(tags, now.userId, { usedOnPhone: now.usedOnPhone });
+    // Only this phone's own kept tags count: another phone of the same account keeps its own.
+    const madeHere = [...now.saved, ...justMade.current];
+    const count = reservedToCreate(tags, now.userId, { usedOnPhone: now.usedOnPhone, madeHere });
     let made = 0;
     for (let i = 0; i < count; i += 1) {
       const res = await now.callApi(createTagBatchApi, 1, RESERVED_LABEL);
@@ -129,7 +142,14 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
         console.warn("reserved tags: could not make one:", res.message || res.code);
         break;
       }
-      for (const t of res.data || []) justMade.current.add(t.qr_id);
+      const ids = (res.data || []).map((t) => t.qr_id);
+      for (const id of ids) justMade.current.add(id);
+      try {
+        await reservedTags.add(now.userId, ids);
+      } catch (err) {
+        console.warn("reservedTags.add:", err?.message || err);
+      }
+      if (latest.current.userId === now.userId) setSaved((list) => [...new Set([...list, ...ids])]);
       made += 1;
     }
     if (made) await now.loadFromApi(true);
@@ -177,21 +197,28 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
         setKeep(true); // the effect above then makes the missing tags
         return { ok: true };
       }
-      // The free tags the list shows, and any this phone has just made that it does not show yet.
-      const free = [...new Set([...myKeptTags(now.db.tags, now.userId), ...justMade.current])].filter((id) => !now.usedOnPhone.includes(id));
+      // This phone's free kept tags (and those it kept before kept tags were per
+      // phone), never another phone's: tagsToRelease in tags.js.
+      const free = tagsToRelease(now.db.tags, now.userId, {
+        madeHere: await reservedTags.all(now.userId),
+        legacy: await reservedTags.legacy(now.userId),
+        usedOnPhone: now.usedOnPhone,
+        justMade: [...justMade.current],
+      });
       for (const id of free) {
         const res = await now.callApi(deleteTagApi, id);
         if (!res.ok) {
           // The screen shows the message; the list is reloaded so it shows what is left.
+          setSaved(await reservedTags.all(now.userId));
           await now.loadFromApi(true);
           return { ok: false, message: res.message };
         }
         justMade.current.delete(id);
+        await reservedTags.remove(now.userId, [id]);
       }
       await reservedTags.setKeepOffline(now.userId, false);
-      await reservedTags.save(now.userId, []);
-      savedJson.current = JSON.stringify([now.userId, []]);
-      setSaved([]);
+      savedJson.current = "";
+      setSaved(await reservedTags.all(now.userId)); // only tags records on the phone took are left
       setKeep(false);
       notify("Offline tags turned off");
       await now.loadFromApi(true);
