@@ -4,7 +4,7 @@
 // follows the same rules.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { saveDraft, getDraft, clearAllDrafts } from "../../mobile/draftStore.js";
+import { saveDraft, getDraft, clearAllDrafts, setDraftAsyncStorageForTests } from "../../mobile/draftStore.js";
 
 test("a draft opens only for the person who started it", async () => {
   await clearAllDrafts();
@@ -28,17 +28,16 @@ test("a draft from before drafts had an owner still opens when its tag is scanne
 // (as under Node, where there is no SQLite), they must not be written to
 // AsyncStorage, which is a plain file: the draft is kept in memory instead.
 test("a draft is never written to plain AsyncStorage when the encrypted database is not available", async () => {
+  // A stand-in for AsyncStorage (the package is not installed for these tests), so we see what is written.
   const plain = new Map();
-  globalThis.window = {
-    localStorage: {
-      getItem: (k) => (plain.has(k) ? plain.get(k) : null),
-      setItem: (k, v) => plain.set(k, String(v)),
-      removeItem: (k) => plain.delete(k),
-      key: (i) => [...plain.keys()][i] ?? null,
-      get length() { return plain.size; },
-      clear: () => plain.clear(),
-    },
-  };
+  setDraftAsyncStorageForTests({
+    getItem: async (k) => (plain.has(k) ? plain.get(k) : null),
+    setItem: async (k, v) => { plain.set(k, String(v)); },
+    removeItem: async (k) => { plain.delete(k); },
+    getAllKeys: async () => [...plain.keys()],
+    multiGet: async (keys) => keys.map((k) => [k, plain.get(k) ?? null]),
+    multiRemove: async (keys) => { for (const k of keys) plain.delete(k); },
+  });
   try {
     await clearAllDrafts();
     await saveDraft("TEST-TAG-3", { user_id: "user-a", notes: "by the cave", gps: { lat: 1, lng: 2 } });
@@ -51,7 +50,7 @@ test("a draft is never written to plain AsyncStorage when the encrypted database
     await clearAllDrafts();
     assert.equal(plain.has("daun_draft_TEST-TAG-4"), false);
   } finally {
-    delete globalThis.window;
     await clearAllDrafts();
+    setDraftAsyncStorageForTests(null);
   }
 });

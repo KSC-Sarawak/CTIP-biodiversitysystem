@@ -13,7 +13,15 @@ const memoryStore = new Map();
 // Drafts keep their own fallback below for when SQLite is not available.
 const getDb = getLocalDb;
 
+// Tests (plain Node, where the AsyncStorage package may not be installed) pass
+// a stand-in here, to check what draftStore reads and writes. null: the real one.
+let asyncStorageOverride = null;
+export function setDraftAsyncStorageForTests(storage) {
+  asyncStorageOverride = storage;
+}
+
 async function getAsyncStorage() {
+  if (asyncStorageOverride) return asyncStorageOverride;
   try {
     const mod = await import('@react-native-async-storage/async-storage');
     const storage = mod.default || mod;
