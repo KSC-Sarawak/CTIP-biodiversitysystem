@@ -57,6 +57,11 @@ async function fakeSupabase(input, init = {}) {
     stored.push(key);
     return json(200, { Key: `observation-photos/${key}` });
   }
+  if (url.pathname === '/storage/v1/object/observation-photos' && method === 'DELETE') {
+    const { prefixes } = JSON.parse(init.body);
+    stored = stored.filter((k) => !prefixes.includes(k));
+    return json(200, prefixes.map((name) => ({ name })));
+  }
 
   const table = url.pathname.replace('/rest/v1/', '');
   if (!db[table]) return json(404, { message: `no table ${table}` });
@@ -251,6 +256,32 @@ test('photo upload: stored at {observation_id}/{photo_id}.jpg, row saved, signed
     .field('id', photoId).attach('file', jpeg, 'leaf.jpg');
   assert.equal(again.status, 200, 'a retry with the same photo id is not saved twice');
   assert.equal(db.observation_photos.length, 1);
+});
+
+test('a retry that overlaps the first upload of a photo keeps the file the saved row points to', async (t) => {
+  // Case 2d: the connection drops while the server is still saving the photo,
+  // and the phone sends it again as soon as the signal is back. The retry finds
+  // no row yet, writes the same file, and then loses the insert to the first request.
+  const obs = observation({ status: 'queued' });
+  const photoId = crypto.randomUUID();
+  const key = `${obs.id}/${photoId}.jpg`;
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const res = await fakeSupabase(input, init);
+    const path = new URL(input).pathname;
+    if (path === `/storage/v1/object/observation-photos/${key}` && (init.method ?? 'GET') === 'POST') {
+      // The first request finishes here: its row is saved, pointing at the same file.
+      db.observation_photos.push({ id: photoId, observation_id: obs.id, s3_bucket: 'observation-photos', s3_key: key,
+        content_type: 'image/jpeg', size_bytes: 10, upload_status: 'uploaded', caption: null, traits: [] });
+    }
+    return res;
+  });
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const res = await request(app).post(`/v1/observations/${obs.id}/photos`).set(as('botanist'))
+    .field('id', photoId).attach('file', jpeg, 'leaf.jpg');
+  assert.equal(res.status, 200, 'the retry answers with the photo already saved');
+  assert.equal(res.body.id, photoId);
+  assert.equal(db.observation_photos.length, 1);
+  assert.deepEqual(stored, [key], 'the saved photo still has its file');
 });
 
 test('photo upload keeps its caption and traits, and refuses a trait not on the list', async () => {

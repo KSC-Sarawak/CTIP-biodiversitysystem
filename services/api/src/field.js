@@ -448,6 +448,14 @@ export const fieldHandlers = {
       })
       .select(PHOTO_COLUMNS)
       .single();
+    if (isDuplicate(error, 'observation_photos_pkey')) {
+      // A retry that overlapped the first upload of this photo (the phone lost
+      // the answer and sent it again): the first one saved the row meanwhile.
+      // Its row points at this same file, so the file stays.
+      const saved = await db.from('observation_photos').select(PHOTO_COLUMNS).eq('id', photoId).maybeSingle();
+      if (saved.error) return dbError(res, saved.error);
+      if (saved.data?.s3_key === key) return res.status(200).json((await withSignedUrls(db, [saved.data]))[0]);
+    }
     if (error) {
       await db.storage.from(PHOTO_BUCKET).remove([key]); // no record, so do not keep the file
       return dbError(res, error);
