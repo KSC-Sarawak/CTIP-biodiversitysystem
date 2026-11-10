@@ -23,3 +23,35 @@ test("a draft from before drafts had an owner still opens when its tag is scanne
   assert.equal((await getDraft("TEST-TAG-2", "user-b"))?.notes, "old build");
   await clearAllDrafts();
 });
+
+// Drafts hold GPS and photos. When the encrypted database cannot be opened
+// (as under Node, where there is no SQLite), they must not be written to
+// AsyncStorage, which is a plain file: the draft is kept in memory instead.
+test("a draft is never written to plain AsyncStorage when the encrypted database is not available", async () => {
+  const plain = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem: (k) => (plain.has(k) ? plain.get(k) : null),
+      setItem: (k, v) => plain.set(k, String(v)),
+      removeItem: (k) => plain.delete(k),
+      key: (i) => [...plain.keys()][i] ?? null,
+      get length() { return plain.size; },
+      clear: () => plain.clear(),
+    },
+  };
+  try {
+    await clearAllDrafts();
+    await saveDraft("TEST-TAG-3", { user_id: "user-a", notes: "by the cave", gps: { lat: 1, lng: 2 } });
+    assert.deepEqual([...plain.keys()].filter((k) => k.includes("TEST-TAG-3")), [], "nothing in plain storage");
+    assert.equal((await getDraft("TEST-TAG-3", "user-a"))?.notes, "by the cave", "still kept, in memory");
+
+    // A draft an older build left in plain storage still opens, and is cleared on sign-out.
+    plain.set("daun_draft_TEST-TAG-4", JSON.stringify({ qr_id: "TEST-TAG-4", user_id: "user-a", notes: "old" }));
+    assert.equal((await getDraft("TEST-TAG-4", "user-a"))?.notes, "old");
+    await clearAllDrafts();
+    assert.equal(plain.has("daun_draft_TEST-TAG-4"), false);
+  } finally {
+    delete globalThis.window;
+    await clearAllDrafts();
+  }
+});
