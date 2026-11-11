@@ -16,8 +16,38 @@ import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } 
 const ROLES = ['botanist', 'officer', 'admin'];
 const TELEMETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const TELEMETRY_LIMIT = 5000;
-const TELEMETRY_MAX_HOURS = 24 * 30;
+const TELEMETRY_MAX_HOURS = 24 * 30;   // longest range one request can ask for
+const TELEMETRY_KEEP_DAYS = 366;        // how far back a custom range can start
+const IMAGE_BUCKET = 'sensor-images';
+const IMAGE_LINK_SECONDS = 60 * 60;     // signed links to sensor photos last an hour
+const ImageList = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
 
+
+// The time range asked for on GET /sensor-nodes/:id/telemetry: { from, to } or { error }.
+// `to` is null when the range runs up to now.
+function telemetryRange({ hours, from, to }) {
+  if (from === undefined && to === undefined) {
+    const h = hours === undefined ? 24 : Number(hours);
+    if (!Number.isFinite(h) || h < 1 || h > TELEMETRY_MAX_HOURS) {
+      return { error: `hours must be a number from 1 to ${TELEMETRY_MAX_HOURS}` };
+    }
+    return { from: new Date(Date.now() - h * 3600_000), to: null };
+  }
+  if (hours !== undefined) return { error: 'Use either hours, or from and to, not both' };
+  if (from === undefined) return { error: 'from is needed with to' };
+  const start = new Date(from);
+  const end = to === undefined ? new Date() : new Date(to);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return { error: 'from and to must be dates, like 2026-11-01' };
+  if (start >= end) return { error: 'from must be before to' };
+  if (end - start > TELEMETRY_MAX_HOURS * 3600_000) return { error: `The range can be at most ${TELEMETRY_MAX_HOURS / 24} days` };
+  if (Date.now() - start > TELEMETRY_KEEP_DAYS * 86400_000) return { error: `from can be at most ${TELEMETRY_KEEP_DAYS} days ago` };
+  return { from: start, to: end };
+}
 
 // The start-up load. Each list is what RLS lets this user see, the same rows
 // the apps read before. Without plants, tags or observations the apps would
@@ -631,20 +661,46 @@ export const staffHandlers = {
     res.json(data);
   },
 
-  // One node's readings, oldest first. ?hours= picks how far back (1 to 720, default 24).
+  // One node's readings, oldest first (CTIP-81). Pick the range with either
+  //   ?hours=   how far back from now (1 to 720, default 24), or
+  //   ?from=&to= two dates or times (to defaults to now), at most 30 days apart.
   // At most TELEMETRY_LIMIT readings: the newest ones when there are more.
   'get /sensor-nodes/:id/telemetry': async (req, res) => {
     if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
-    const hours = req.query.hours === undefined ? 24 : Number(req.query.hours);
-    if (!Number.isFinite(hours) || hours < 1 || hours > TELEMETRY_MAX_HOURS) {
-      return fail(res, 400, 'VALIDATION_ERROR', `hours must be a number from 1 to ${TELEMETRY_MAX_HOURS}`);
-    }
-    const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
-    const { data, error } = await supabaseAs(req.user).from('telemetry').select('*')
-      .eq('node_id', req.params.id).gte('ts', since)
-      .order('ts', { ascending: false }).limit(TELEMETRY_LIMIT);
+    const range = telemetryRange(req.query);
+    if (range.error) return fail(res, 400, 'VALIDATION_ERROR', range.error);
+    let query = supabaseAs(req.user).from('telemetry').select('*')
+      .eq('node_id', req.params.id).gte('ts', range.from.toISOString());
+    if (range.to) query = query.lte('ts', range.to.toISOString());
+    const { data, error } = await query.order('ts', { ascending: false }).limit(TELEMETRY_LIMIT);
     if (error) return dbError(res, error);
     res.json(data.reverse());
+  },
+
+  // Photos a node's webcam took when it saw movement (CTIP-82), newest first, one page
+  // at a time (?page=, ?limit= up to 100, default 20), optionally only ?from= / ?to=.
+  // The bucket is private: each photo comes with view_url, a signed link that works for
+  // an hour. Signed as the signed-in user, so Storage RLS (officers and admins) applies too.
+  'get /sensor-nodes/:id/images': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    const query = ImageList.safeParse(req.query);
+    if (!query.success) return fail(res, 400, 'VALIDATION_ERROR', 'Bad from, to, page or limit');
+    const { from, to, page, limit } = query.data;
+    const db = supabaseAs(req.user);
+    let q = db.from('sensor_images').select('*', { count: 'exact' }).eq('node_id', req.params.id);
+    if (from) q = q.gte('captured_at', from.toISOString());
+    if (to) q = q.lte('captured_at', to.toISOString());
+    const { data, count, error } = await q.order('captured_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+    if (error) return dbError(res, error);
+    const signed = new Map();
+    const keys = data.map((r) => r.s3_key).filter(Boolean);
+    if (keys.length) {
+      const links = await db.storage.from(IMAGE_BUCKET).createSignedUrls(keys, IMAGE_LINK_SECONDS);
+      if (links.error) console.warn('sensor image links not signed:', links.error.message);
+      for (const item of links.data ?? []) if (item?.signedUrl) signed.set(item.path, item.signedUrl);
+    }
+    res.json({ data: data.map((r) => ({ ...r, view_url: signed.get(r.s3_key) ?? null })), meta: { page, limit, total: count ?? data.length } });
   },
 
   'patch /sensor-nodes/:id': async (req, res) => {

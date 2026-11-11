@@ -68,8 +68,16 @@ export function mockApi(page, state) {
     if (path === "/distribution") return json({ data: state.points });
     if (/^\/sensor-nodes\/[^/]+\/telemetry$/.test(path)) {
       const id = path.split("/")[2];
-      state.telemetryRequests = [...(state.telemetryRequests || []), { id, hours: new URL(req.url()).searchParams.get("hours") }];
+      const q = new URL(req.url()).searchParams;
+      const asked = { id, hours: q.get("hours") };
+      if (q.get("from")) Object.assign(asked, { from: q.get("from"), to: q.get("to") });
+      state.telemetryRequests = [...(state.telemetryRequests || []), asked];
       return json((state.longTelemetry || state.telemetry || []).filter((r) => r.node_id === id));
+    }
+    if (/^\/sensor-nodes\/[^/]+\/images$/.test(path)) {
+      const id = path.split("/")[2];
+      const rows = (state.sensorImages || []).filter((r) => r.node_id === id);
+      return json({ data: rows, meta: { page: 1, limit: 20, total: rows.length } });
     }
     // Like the real route: 404 unless a spec gives the published plant.
     if (path.startsWith("/public/tags/")) return state.publicPlant ? json(state.publicPlant) : json({ code: "NOT_FOUND", message: "No published plant on this tag" }, 404);

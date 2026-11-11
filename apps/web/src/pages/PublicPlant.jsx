@@ -85,7 +85,7 @@ export default function PublicPlant({ qr }) {
         <h2 id="where">Where it grows</h2>
         {where.length ? (
           <>
-            <MiniMap points={where} label={`Map of where ${name} grows`} />
+            <MiniMap points={where} label={`Map of where ${name} grows`} expandable />
             {plant.location_reduced && <p className="mute small gap-top-s">This plant is protected, so the map only shows the area it grows in (within about a kilometre), not the plant itself.</p>}
           </>
         ) : (

@@ -41,15 +41,13 @@ function PickBars({ title, rows, onPick }) {
     </div>
   );
 }
-const SORTS = {
-  tag: { label: "Tag", by: (a, b) => (a.qr_id || "").localeCompare(b.qr_id || "") }, // a plant may have no tag
-  name: { label: "Name A–Z", by: (a, b) => a.name.localeCompare(b.name) },
-  recent: { label: "Last recorded, newest", by: (a, b) => (b.lastSeen || "").localeCompare(a.lastSeen || "") },
-  height: { label: "Tallest", by: (a, b) => (b.height_cm ?? -1) - (a.height_cm ?? -1) },
-};
+// Compares two column values. Numbers by size, text and ISO dates in natural order.
+const cmp = (a, b) => (typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), undefined, { numeric: true }));
+const DEFAULT_SORT = "recorded"; // newest record first
 
 // Officer reports: counts, a searchable and filterable table of plant records, and a
-// CSV export of every matching record (not only the page on screen). Filters, sort and
+// CSV export of every matching record (not only the page on screen). Click a column header
+// to sort (newest record first by default). Filters, sort and
 // page are kept in the URL (#/reports?q=…&family=…&from=…), so a search can be shared.
 export default function ReportSummary() {
   const { db, role } = useStore();
@@ -61,7 +59,6 @@ export default function ReportSummary() {
   const status = query.status || "all";
   const from = query.from || ""; // yyyy-mm-dd, last recorded on or after
   const to = query.to || "";     // yyyy-mm-dd, last recorded on or before
-  const sort = SORTS[query.sort] ? query.sort : "tag";
   const page = Math.max(1, parseInt(query.page, 10) || 1);
   const filter = (key) => (v) => setQuery({ [key]: v === "all" ? null : v, page: null });
 
@@ -75,6 +72,30 @@ export default function ReportSummary() {
   // Only squares holding a plant are listed. An address with an unknown zone filters nothing.
   const zoneNames = Object.fromEntries((db.zones || []).filter((z) => all.some((p) => p.zone_id === z.id)).map((z) => [z.id, z.name]));
   const zone = query.zone === NO_ZONE || zoneNames[query.zone] ? query.zone : "all";
+  // Table columns. Clicking a header sorts by it; clicking again reverses. Dates and heights
+  // start newest/tallest first, the rest A–Z. Empty values always go last.
+  const COLUMNS = [
+    { key: "tag", label: "Tag", get: (p) => p.qr_id || null },
+    { key: "name", label: "Plant and family", get: (p) => p.name || null },
+    { key: "conservation", label: "Conservation", get: (p) => (p.species && CONSERVATION.includes(p.conservation) ? CONSERVATION.indexOf(p.conservation) : null) },
+    { key: "status", label: "Record", get: (p) => STATUS_TEXT[p.status] || label(p.status) },
+    { key: "recorded", label: "Last recorded", get: (p) => p.lastSeen, desc: true },
+    { key: "height", label: "Height", get: (p) => p.height_cm ?? null, desc: true },
+    { key: "zone", label: "Zone", get: (p) => zoneNames[p.zone_id] || null },
+    { key: "location", label: "Location", get: (p) => p.lat ?? null },
+  ];
+  const sortCol = COLUMNS.find((c) => c.key === query.sort) || COLUMNS.find((c) => c.key === DEFAULT_SORT);
+  const dir = query.dir === "asc" ? 1 : query.dir === "desc" ? -1 : sortCol.desc ? -1 : 1;
+  const byCol = (a, b) => {
+    const va = sortCol.get(a), vb = sortCol.get(b);
+    if (va == null || vb == null) return (va == null) - (vb == null);
+    return dir * cmp(va, vb);
+  };
+  const sortBy = (c) => {
+    const next = c.key === sortCol.key ? -dir : c.desc ? -1 : 1;
+    const isDefault = c.key === DEFAULT_SORT && next === -1;
+    setQuery({ sort: isDefault ? null : c.key, dir: isDefault ? null : next > 0 ? "asc" : "desc", page: null });
+  };
   const day = (iso) => (iso ? iso.slice(0, 10) : "");
   const text = (p) => `${p.qr_id || ""} ${p.name} ${p.scientific} ${p.proposed_species || ""} ${p.species?.family || ""} ${p.species?.genus || ""}`.toLowerCase();
   const rows = all
@@ -86,7 +107,7 @@ export default function ReportSummary() {
     .filter((p) => status === "all" || p.status === status)
     .filter((p) => !from || (p.lastSeen && day(p.lastSeen) >= from))
     .filter((p) => !to || (p.lastSeen && day(p.lastSeen) <= to))
-    .sort((a, b) => SORTS[sort].by(a, b) || SORTS.tag.by(a, b));
+    .sort((a, b) => byCol(a, b) || cmp(a.qr_id || "", b.qr_id || "") || cmp(a.name || "", b.name || ""));
   const pages = Math.max(1, Math.ceil(rows.length / PAGE));
   const cur = Math.min(page, pages);
   const slice = rows.slice((cur - 1) * PAGE, cur * PAGE);
@@ -134,11 +155,6 @@ export default function ReportSummary() {
           <Icon name="search" size={20} />
           <input type="search" value={query.q || ""} onChange={(e) => setQuery({ q: e.target.value, page: null })}
             placeholder="Search by tag, common or scientific name, or the botanist's guess" aria-label="Search plant records" />
-        </label>
-        <label className="inline">Sort
-          <select value={sort} onChange={(e) => setQuery({ sort: e.target.value === "tag" ? null : e.target.value })}>
-            {Object.entries(SORTS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-          </select>
         </label>
       </div>
       <div className="row wrap gap-top-s">
@@ -193,7 +209,15 @@ export default function ReportSummary() {
         <div className="tablewrap">
           <table>
             <thead>
-              <tr><th>Tag</th><th>Plant and family</th><th>Conservation</th><th>Record</th><th>Last recorded</th><th>Height</th><th>Zone</th><th>Location</th></tr>
+              <tr>
+                {COLUMNS.map((c) => (
+                  <th key={c.key} scope="col" aria-sort={c.key === sortCol.key ? (dir > 0 ? "ascending" : "descending") : undefined}>
+                    <button type="button" className="sortbtn" onClick={() => sortBy(c)} title={`Sort by ${c.label.toLowerCase()}`}>
+                      {c.label}{c.key === sortCol.key && <span aria-hidden="true">{dir > 0 ? " ▲" : " ▼"}</span>}
+                    </button>
+                  </th>
+                ))}
+              </tr>
             </thead>
             <tbody>
               {slice.map((p) => (

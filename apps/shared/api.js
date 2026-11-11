@@ -688,7 +688,13 @@ export const assignAlertApi = (id, assigned_to, { token } = {}) => send("POST", 
 export const acknowledgeAlertApi = (id, { token } = {}) => send("POST", `/alerts/${enc(id)}/acknowledge`, undefined, token);
 export const resolveAlertApi = (id, outcome, { token } = {}) => send("POST", `/alerts/${enc(id)}/resolve`, { outcome }, token);
 export const addAlertNoteApi = (id, note, { token } = {}) => send("POST", `/alerts/${enc(id)}/notes`, { note }, token);
-export const getNodeTelemetryApi = (nodeId, hours = 24, { token } = {}) => send("GET", `/sensor-nodes/${enc(nodeId)}/telemetry?hours=${enc(hours)}`, undefined, token);
+// `range` is a number of hours back from now, or { from, to } (ISO dates) for a chosen range.
+export const getNodeTelemetryApi = (nodeId, range = 24, { token } = {}) => {
+  const q = typeof range === "object" ? `from=${enc(range.from)}${range.to ? `&to=${enc(range.to)}` : ""}` : `hours=${enc(range)}`;
+  return send("GET", `/sensor-nodes/${enc(nodeId)}/telemetry?${q}`, undefined, token);
+};
+// Newest webcam photos for a node, each with a short-lived view_url (CTIP-82).
+export const getNodeImagesApi = (nodeId, limit = 12, { token } = {}) => send("GET", `/sensor-nodes/${enc(nodeId)}/images?limit=${enc(limit)}`, undefined, token);
 export const setThresholdsApi = (nodeId, thresholds, { token } = {}) => send("PATCH", `/sensor-nodes/${enc(nodeId)}`, { thresholds }, token);
 
 // Notifications (the signed-in person's own)
