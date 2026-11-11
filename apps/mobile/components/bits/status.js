@@ -18,13 +18,14 @@ export function DotLabel({ status, tone, label, size = 13 }) {
   );
 }
 
-export function Chip({ status, tone, label }) {
+export function Chip({ status, tone, label, value, children }) {
   const { c } = useTheme();
-  const tn = tone || toneOf(status);
+  const text = label || value || children || (status ? statusText(status) : '');
+  const tn = tone || (status ? toneOf(status) : 'neutral');
   return (
-    <View style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 2, borderRadius: 999, backgroundColor: c[tn + 'Soft'], borderWidth: 1, borderColor: c[tn + 'Line'] }}>
-      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c[tn] }} />
-      <Text style={{ fontFamily: font('text', 700), fontSize: 12, color: c[tn] }}>{label || statusText(status)}</Text>
+    <View style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 8, backgroundColor: c[tn + 'Soft'] || c.bg, borderWidth: 1, borderColor: c[tn + 'Line'] || c.line }}>
+      {status ? <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: c[tn] || c.accent }} /> : null}
+      <Text style={{ fontFamily: font('text', 700), fontSize: 12, color: c[tn] || c.ink }}>{text}</Text>
     </View>
   );
 }
