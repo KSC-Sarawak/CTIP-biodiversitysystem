@@ -1,6 +1,7 @@
 // apps/web/src/pages/ReportSummary.jsx
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import PageHead from "../components/PageHead.jsx";
 import { Chip, Empty, Mono, Pills } from "../components/Bits.jsx";
 import { useStore } from "../../../shared/store.js";
 import { countPlants, visiblePlants } from "../../../shared/selectors.js";
@@ -124,22 +125,25 @@ export default function ReportSummary() {
 
   return (
     <Shell seg="reports">
-      <div className="row between wrap">
-        <h2>Reports</h2>
-        <div className="row">
-          <button className="btn ghost" onClick={() => window.print()}><Icon name="printer" size={18} /> Print</button>
-          <button className="btn" onClick={exportCsv}><Icon name="download" size={18} /> Export CSV</button>
-        </div>
-      </div>
+      <PageHead
+        overline="Counts and exports"
+        title="Reports"
+        lead={`${all.length} tagged ${all.length === 1 ? "plant" : "plants"}, ${count((p) => p.isPublic)} published. Select a bar below to list those plants.`}
+        tone="info"
+        actions={
+          <>
+            <button className="btn ghost" onClick={() => window.print()}><Icon name="printer" size={18} /> Print</button>
+            <button className="btn" onClick={exportCsv}><Icon name="download" size={18} /> Export CSV</button>
+          </>
+        }
+        stats={[
+          { label: "Tagged plants", value: all.length },
+          { label: "Published", value: count((p) => p.isPublic) },
+          { label: "Endangered", value: count((p) => p.endangered), tone: "bad" },
+          { label: "Waiting for review", value: count((p) => p.status === "synced"), tone: "warn", href: "#/review" },
+        ]}
+      />
 
-      <div className="summary">
-        <p><b>{all.length}</b> tagged plants</p>
-        <p><b>{count((p) => p.isPublic)}</b> published</p>
-        <p><b>{count((p) => p.endangered)}</b> endangered</p>
-        <p><b>{count((p) => p.status === "synced")}</b> waiting for review</p>
-      </div>
-
-      <p className="mute small noprint">Select a bar to list those plants in the table below.</p>
       <div className="reportcharts">
         <PickBars title="By conservation status" onPick={(r) => setQuery({ conservation: r.key, page: null })}
           rows={CONSERVATION.map((c) => ({ key: c, label: label(c), n: count((p) => p.conservation === c) })).filter((r) => r.n > 0)} />

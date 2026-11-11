@@ -1354,9 +1354,10 @@ mark.mention { padding: 0 2px; border-radius: var(--r-tag); background: var(--ac
 /* Tick-box drop-down for choosing people. */
 .sendto { position: relative; }
 .sendto .popover { width: 280px; max-width: 80vw; }
-/* On a phone the button can sit at the left edge, so the list would open off screen. */
+/* On a phone the button can sit at the left edge, so the list would open off screen.
+   It opens as a sheet just above the bottom bar instead, always in view. */
 @media (max-width: 640px) {
-  .sendto .popover { position: fixed; top: auto; left: var(--gutter); right: var(--gutter); width: auto; max-width: none; }
+  .sendto .popover { position: fixed; top: auto; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); left: var(--gutter); right: var(--gutter); z-index: 120; width: auto; max-width: none; max-height: 60vh; overflow-y: auto; }
 }
 .sendto ul { display: grid; gap: var(--s-1); max-height: 240px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
 .sendto li label { display: flex; align-items: center; gap: var(--s-2); margin: 0; font-weight: 400; }
@@ -1971,8 +1972,11 @@ kbd { padding: 0 6px; border: 1px solid var(--line); border-bottom-width: 2px; b
 .disc-av.role-officer { background: var(--info); }
 .disc-av.role-admin { background: var(--warn); }
 .disc-av.leafav { background: var(--acc-soft); color: var(--acc); }
-.site .topic { display: flex; align-items: center; gap: var(--s-4); padding: var(--s-4); border-radius: var(--r-card); }
-.topic-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+/* Avatar on the left, the text beside it, the arrow at the far right. */
+.site .record.topic { display: flex; flex-direction: row; align-items: center; justify-content: flex-start; gap: var(--s-4); padding: var(--s-4); border-radius: var(--r-card); text-align: left; }
+.topic-body { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
+.topic-body .topichead { justify-content: flex-start; }
+.topic > .icon { margin-left: auto; }
 .topic > .icon { flex: none; color: var(--ink3); }
 .topic:hover > .icon { color: var(--acc); }
 .topic.unread .topichead b::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--acc); vertical-align: 2px; }
@@ -2022,3 +2026,57 @@ kbd { padding: 0 6px; border: 1px solid var(--line); border-bottom-width: 2px; b
   .topic { transition: transform var(--m-base) var(--ease), box-shadow var(--m-base) var(--ease), border-color var(--m-base) var(--ease-io); }
   .topic:hover > .icon { transform: translateX(3px); transition: transform var(--m-base) var(--ease); }
 }
+
+/* ---------- 15. Daun v2: staff page header (PageHead.jsx) and easier tables ---------- */
+/* Read top to bottom in one second: page name, one sentence on what needs doing, the numbers. */
+.phead { display: flex; flex-direction: column; gap: var(--s-4); margin-bottom: var(--s-5); }
+.phead-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--s-3) var(--s-5); }
+.phead-text { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; flex: 1 1 380px; }
+.phead-text > * { margin: 0 !important; }
+.site .phead h1 { font-size: clamp(28px, 3.2vw, 38px); line-height: 1.12; letter-spacing: -0.015em; }
+.phead-lead { display: flex; align-items: flex-start; gap: var(--s-2); max-width: 64ch; font-size: var(--t-bodyLg-size); line-height: var(--t-bodyLg-line); font-weight: 500; color: var(--ink); }
+.phead-mark { display: grid; place-items: center; flex: none; width: 26px; height: 26px; margin-top: 2px; border-radius: 50%; background: var(--info-soft); color: var(--info); }
+.phead-lead.tone-ok .phead-mark { background: var(--ok-soft); color: var(--ok); }
+.phead-lead.tone-warn .phead-mark { background: var(--warn-soft); color: var(--warn); }
+.phead-lead.tone-bad .phead-mark { background: var(--bad-soft); color: var(--bad); }
+.phead-acts { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.phead-acts label.inline { margin: 0; }
+.phead > p { margin: 0; }
+.phead-hint { margin: calc(-1 * var(--s-3)) 0 var(--s-3) !important; }
+/* Number tiles. A pressable one filters the list below and stays pressed while in use. */
+.phead-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: var(--s-2); }
+.site .pstat {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; padding: var(--s-3) var(--s-4);
+  border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); color: var(--ink); font: inherit; text-align: left;
+}
+.pstat b { font-family: var(--f-display); font-weight: 600; font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.pstat span { color: var(--ink2); font-size: var(--t-small-size); line-height: var(--t-small-line); overflow-wrap: anywhere; }
+.site button.pstat, .site a.pstat { cursor: pointer; }
+.site button.pstat:hover, .site a.pstat:hover { border-color: var(--acc); box-shadow: var(--shadow); }
+.site .pstat.on { border-color: var(--acc); background: var(--acc-soft); box-shadow: 0 0 0 1px var(--acc) inset; }
+.site .pstat.on span { color: var(--ink); font-weight: 600; }
+/* A number that asks for action is coloured; zero stays plain. */
+.site .pstat.tone-warn { border-color: var(--warn-line); background: var(--warn-soft); }
+.pstat.tone-warn b { color: var(--warn); }
+.site .pstat.tone-bad { border-color: var(--bad-line); background: var(--bad-soft); }
+.pstat.tone-bad b { color: var(--bad); }
+.site .pstat.tone-info b { color: var(--info); }
+.site .pstat.on.tone-warn, .site .pstat.on.tone-bad { box-shadow: 0 0 0 2px var(--acc) inset; }
+/* Tables: taller rows and numbers that line up. */
+.site td { padding: 14px var(--s-3); }
+.site td.num, .site th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.site .tablecard tbody tr { transition: background-color var(--m-fast) var(--ease-io); }
+@media (max-width: 640px) {
+  .phead-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pstat b { font-size: 24px; }
+  .phead-lead { font-size: var(--t-body-size); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .phead-text > *, .phead-stats { animation: rise var(--m-enter) var(--ease) backwards; }
+  .phead-text > :nth-child(2) { animation-delay: 60ms; }
+  .phead-text > :nth-child(3) { animation-delay: 120ms; }
+  .phead-stats { animation-delay: 180ms; }
+  .pstat { transition: transform var(--m-base) var(--ease), box-shadow var(--m-base) var(--ease), border-color var(--m-base) var(--ease-io), background-color var(--m-base) var(--ease-io); }
+  button.pstat:hover, a.pstat:hover { transform: translateY(-2px); }
+}
+@media print { .phead-stats, .phead-acts { break-inside: avoid; } }

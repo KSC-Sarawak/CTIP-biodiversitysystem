@@ -2,6 +2,7 @@
 import { useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import PageHead from "../components/PageHead.jsx";
 import Img from "../components/Img.jsx";
 import SendTo from "../components/SendTo.jsx";
 import { Chip, Empty, Sci } from "../components/Bits.jsx";
@@ -28,6 +29,9 @@ const VIEWS = [
   { key: "endangered", name: "Endangered species", hint: "Their locations are hidden from visitors.", test: (r) => r.endangered },
   { key: "sensor", name: "Has a sensor node", hint: "Plants protected by an IoT node.", test: (r) => r.hasNode },
 ];
+
+// Views whose count means "someone should act": their tile turns gold.
+const ATTN_VIEWS = { review: "warn", returned: "warn", stale: "info", nophotos: "info" };
 
 const COLUMNS = [
   ["qr_id", "Tag"],
@@ -90,6 +94,16 @@ function TaggedTable() {
   const speciesOptions = [...new Map(rows.filter((r) => r.species).map((r) => [r.species_id, r.name])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const people = [...new Map(rows.map((r) => [r.registered_by, r.by])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
 
+  // One sentence for the top of the page: the most urgent thing in this list.
+  const n = (k) => views.find((v) => v.key === k)?.count || 0;
+  const plantsWord = (k) => (k === 1 ? "plant is" : "plants are");
+  const lead = all
+    ? n("review") ? { tone: "warn", text: `${n("review")} ${plantsWord(n("review"))} waiting for review.` }
+      : n("returned") ? { tone: "info", text: `${n("returned")} ${plantsWord(n("returned"))} back with a botanist for changes.` }
+      : { tone: "ok", text: `Nothing is waiting. All ${rows.length} tagged plants are up to date.` }
+    : n("returned") ? { tone: "warn", text: `${n("returned")} of your plants ${n("returned") === 1 ? "needs" : "need"} a small fix.` }
+      : { tone: "ok", text: rows.length ? `You have tagged ${rows.length} ${rows.length === 1 ? "plant" : "plants"}. Nothing needs fixing.` : "You have not tagged a plant yet." };
+
   const exportCsv = () =>
     download(
       `tagged-plants-${cur.key}.csv`,
@@ -99,30 +113,25 @@ function TaggedTable() {
   return (
     <Shell seg="dashboard/all" plain>
       <section className="tablemain">
-          <nav className="views" aria-label="Saved views">
-            {views.map((v) => (
-              <button key={v.key} className={"pill" + (v.key === cur.key ? " on" : "")} aria-pressed={v.key === cur.key} onClick={() => pick(v.key)}>
-                {v.name} <b>{v.count}</b>
-              </button>
-            ))}
-          </nav>
-
-          <div className="pagehead">
-            <div>
-              <p className="overline">{DASHBOARD_LABEL[role]}</p>
-              <h1>{cur.name}</h1>
-              <p className="mute">{cur.hint}</p>
-            </div>
-            <div className="row wrap">
-              {cur.key === "review" && cur.count > 0 && <a className="btn" href="#/review"><Icon name="clipboard" size={18} /> Open review queue</a>}
-              {role === "botanist" && <a className="btn" href="#/add"><Icon name="plus" size={18} /> Add plant</a>}
-              <button className="btn ghost" onClick={exportCsv} disabled={!shown.length}><Icon name="download" size={16} /> Export CSV</button>
-              <SendTo
-                subject={`Daun Sense: ${cur.name}`}
-                body={`Please take a look at this list. Sign in to see it.\n\n${window.location.origin}${window.location.pathname}#/dashboard/all`}
-              />
-            </div>
-          </div>
+          <PageHead
+            overline={DASHBOARD_LABEL[role]}
+            title={cur.name}
+            lead={lead.text}
+            tone={lead.tone}
+            stats={views.map((v) => ({ label: v.name, value: v.count, on: v.key === cur.key, onClick: () => pick(v.key), tone: ATTN_VIEWS[v.key] }))}
+            actions={
+              <>
+                {cur.key === "review" && cur.count > 0 && <a className="btn" href="#/review"><Icon name="clipboard" size={18} /> Open review queue</a>}
+                {role === "botanist" && <a className="btn" href="#/add"><Icon name="plus" size={18} /> Add plant</a>}
+                <button className="btn ghost" onClick={exportCsv} disabled={!shown.length}><Icon name="download" size={16} /> Export CSV</button>
+                <SendTo
+                  subject={`Daun Sense: ${cur.name}`}
+                  body={`Please take a look at this list. Sign in to see it.\n\n${window.location.origin}${window.location.pathname}#/dashboard/all`}
+                />
+              </>
+            }
+          />
+          <p className="mute small phead-hint">{cur.hint}</p>
 
           <div className="toolbar">
             <label className="search grow">

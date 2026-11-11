@@ -2,12 +2,13 @@
 import { useCallback, useEffect, useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import PageHead from "../components/PageHead.jsx";
 import BackButton from "../components/BackButton.jsx";
 import Img from "../components/Img.jsx";
 import MiniMap from "../components/MiniMap.jsx";
 import NewSpeciesButton from "../components/NewSpeciesButton.jsx";
 import SendTo from "../components/SendTo.jsx";
-import { Chip, Empty, Mono, Pills, Sci } from "../components/Bits.jsx";
+import { Chip, Empty, Mono, Sci } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { decisionPrompt } from "../decisionPrompt.jsx";
 import { useStore } from "../../../shared/store.js";
@@ -17,6 +18,15 @@ import { HIDE_LOCATION_LABEL, hideLocationRule } from "../../../shared/data.js";
 
 // Which records each filter pill shows. Only "Needs review" records can be decided on;
 // the others are shown so officers can look back at what they returned or decided.
+// How long something has waited, e.g. "3 days".
+function waitedFor(iso) {
+  if (!iso) return "";
+  const hours = Math.round((Date.now() - new Date(iso)) / 3600000);
+  if (hours < 1) return "under an hour";
+  if (hours < 48) return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  return `${Math.round(hours / 24)} days`;
+}
+
 const FILTERS = [
   { key: "synced", label: "Needs review", test: (o) => o.status === "synced" },
   { key: "returned", label: "Returned", test: (o) => o.status === "returned" },
@@ -71,6 +81,9 @@ export default function Review() {
     });
   const obs = list.find((o) => o.id === picked) || list[0];
   const waiting = counts.synced;
+  // How long the oldest waiting record has waited, e.g. "3 days".
+  const oldestIso = known.filter((o) => o.status === "synced").map((o) => o.last_synced_at || o.observed_at).filter(Boolean).sort()[0];
+  const oldestWait = waitedFor(oldestIso);
 
   // Stay on the record being read: new records arrive at the top of the list, and
   // jumping to one would throw away a half-written note.
@@ -78,18 +91,17 @@ export default function Review() {
 
   return (
     <Shell seg="review" plain>
-      <div className="pagehead">
-        <div>
-          <h1>Review queue</h1>
-          <p className="mute">
-            {waiting ? `${waiting} field ${waiting === 1 ? "record is" : "records are"} waiting for a decision.` : "Nothing is waiting for a decision."}
-          </p>
-          {apiStatus !== "offline" && <p className="livenote mute small"><i aria-hidden="true" /> Live: new records from the field appear here by themselves.</p>}
-        </div>
-        <div className="row wrap" style={{ alignItems: "center", gap: 16 }}>
-          <Pills label="Show" value={filter} onChange={(k) => { setFilter(k); setPicked(null); }}
-          items={FILTERS.map((f) => ({ key: f.key, label: f.label, count: f.key === "all" ? undefined : counts[f.key] }))} />
-          <label className="inline" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <PageHead
+        overline="Officer dashboard"
+        title="Review queue"
+        lead={waiting ? `${waiting} field ${waiting === 1 ? "record is" : "records are"} waiting for a decision${oldestWait ? `. The oldest has waited ${oldestWait}.` : "."}` : "Nothing is waiting for a decision. You are all caught up."}
+        tone={waiting ? "warn" : "ok"}
+        stats={FILTERS.map((f) => ({
+          label: f.label, value: f.key === "all" ? known.filter(f.test).length : counts[f.key], tone: f.key === "synced" ? "warn" : undefined,
+          on: f.key === filter, onClick: () => { setFilter(f.key); setPicked(null); },
+        }))}
+        actions={
+          <label className="inline">
             <span>Sort</span>
             <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort review records">
               <option value="newest">Newest first</option>
@@ -99,8 +111,10 @@ export default function Review() {
               <option value="tag">Tag ID</option>
             </select>
           </label>
-        </div>
-      </div>
+        }
+      >
+        {apiStatus !== "offline" && <p className="livenote mute small"><i aria-hidden="true" /> Live: new records from the field appear here by themselves.</p>}
+      </PageHead>
 
       {done && (
         <section className="reviewdone" role="status">
