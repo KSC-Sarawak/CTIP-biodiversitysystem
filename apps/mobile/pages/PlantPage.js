@@ -15,18 +15,12 @@ import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import LeafletMap from '../components/LeafletMap.js';
 import {
-  Txt, Sci, Mono, Chip, Section, TextLink, Row, Thumb, MiniMap, KV, Button, Empty, Header, IconButton, Screen, Notice, Check,
+  Txt, Sci, Mono, Chip, Section, TextLink, Row, Thumb, KV, Button, Empty, Header, IconButton, Screen, Notice, Check,
 } from '../components/Bits.js';
 import PhotoNote from '../components/PhotoNote.js';
 import { longDate, coords } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { usePullRefresh } from '../hooks/usePullRefresh.js';
-
-// Where a plant sits on the little map (0..1 inside the park bounds).
-export const mapPoint = ({ lat, lng }) => ({
-  x: (lng - MAP_BOUNDS.minLng) / (MAP_BOUNDS.maxLng - MAP_BOUNDS.minLng),
-  y: 1 - (lat - MAP_BOUNDS.minLat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat),
-});
 
 // Big photo at the top with a round back button and a photo counter. Swipe for more.
 function Hero({ photos, height = 260, onBack }) {
@@ -49,7 +43,8 @@ function Hero({ photos, height = 260, onBack }) {
           </View>
         )}
         <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack}
-          style={{ position: 'absolute', left: 12, top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface }}>
+          hitSlop={4}
+          style={({ pressed }) => ({ position: 'absolute', left: 12, top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, opacity: pressed ? 0.7 : 1 })}>
           <Icon name="chevL" size={22} color={c.ink} />
         </Pressable>
         {photos.length > 1 ? (
@@ -103,7 +98,7 @@ export function SpeciesProfile({ nav, params }) {
     seenKeys.add(k);
     return true;
   }).slice(0, 6);
-  const dots = plants.map((p) => shownCoords(p, role)).filter(Boolean).map((pt, i) => ({ ...mapPoint(pt), selected: i === 0 }));
+  const onMap = plants.some((p) => shownCoords(p, role)); // at least one plant whose spot this role may see
 
   return (
     <Page hero={<Hero photos={photos} onBack={nav.back} />}>
@@ -118,8 +113,8 @@ export function SpeciesProfile({ nav, params }) {
       {sp.cultural_significance ? (
         <Section title="Cultural significance"><Txt v="body" style={{ lineHeight: 25 }}>{sp.cultural_significance}</Txt></Section>
       ) : null}
-      <Section title="Where it grows" right={dots.length ? <TextLink label="Open map" size={14} onPress={() => nav.go('map', { species: sp.id })} /> : null}>
-        {dots.length ? (
+      <Section title="Where it grows" right={onMap ? <TextLink label="Open map" size={14} onPress={() => nav.go('map', { species: sp.id })} /> : null}>
+        {onMap ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Open map"
@@ -293,7 +288,7 @@ export function TaggedPlant({ nav, params }) {
         ) : null}
         {role === 'officer' && (obs.find((o) => o.status === 'synced') || lastObs) ? (
           <Button
-            label={obs.find((o) => o.status === 'synced') ? "Review record (Action needed)" : "Review decisions"}
+            label={obs.find((o) => o.status === 'synced') ? 'Review this record' : 'See the decision'}
             icon="clipboard"
             onPress={() => nav.go('reviewItem', { id: (obs.find((o) => o.status === 'synced') || lastObs).id })}
           />

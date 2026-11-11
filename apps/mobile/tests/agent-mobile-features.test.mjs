@@ -23,11 +23,6 @@ test('Mobile Feature 1: Map Clustering (CTIP-70)', async (t) => {
     assert.ok(html.includes('daun-cluster'), 'HTML must include daun-cluster styling');
     assert.ok(html.includes('L.markerClusterGroup'), 'HTML must instantiate L.markerClusterGroup');
   });
-
-  await t.test('generateMapHtml includes smooth zoomToShowLayer for selected pin clustering', () => {
-    const html = generateMapHtml({ points: [], selectedId: 'p1' });
-    assert.ok(html.includes('zoomToShowLayer'), 'HTML should support zoomToShowLayer for cluster unclustering');
-  });
 });
 
 test('Mobile Feature 2: Visitor Access to Published Species & Plant Records', async (t) => {

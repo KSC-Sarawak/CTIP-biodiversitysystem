@@ -5,7 +5,6 @@ import { View, Linking } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { visiblePlants, speciesCatalogue } from '../../shared/selectors.js';
-import { fuzzyMatch } from '../../shared/fuzzy.js';
 import { getAboutContent, getContactContent, getHomeContent } from '../../shared/publicContent.js';
 import { SITE, PARK } from '../../shared/site.js';
 import { useTheme } from '../components/Theme.js';
@@ -13,7 +12,7 @@ import Icon from '../components/Icon.js';
 import { LogoMark, AppearanceSection, VersionLine } from '../components/Chrome.js';
 import {
   Screen, Header, TitleBlock, SearchField, Section, Row, Thumb, Sci, DotLabel, TextLink, Txt,
-  MenuRow, Button, KV, IconTile, IconButton, Empty,
+  MenuRow, Button, KV, IconTile, IconButton, Empty, EmptyState,
 } from '../components/Bits.js';
 
 // Newest published plants first (the date an officer approved them), or published species
@@ -56,16 +55,18 @@ export function Home({ nav }) {
       top={4}
     >
       <TitleBlock title="Plants of Niah" sub={`Verified records from ${PARK}`} size={34} />
+      {/* The search opens the Plants list on the keyboard's search key, so the
+          screen does not change under the person while they are still typing. */}
       <SearchField
         value={q}
-        onChangeText={(text) => {
-          setQ(text);
-          if (text.length > 1) nav.go('plants', { q: text });
+        onChangeText={setQ}
+        onSubmitEditing={() => {
+          if (q.trim()) nav.go('plants', { q: q.trim() });
         }}
         placeholder="Search plants or tag ID"
       />
       <Section title={home.recentSectionTitle} top={false} gap={0} right={<TextLink label="See all" size={14} onPress={() => nav.tab('plants')} />}>
-        {recent.length === 0 ? <Empty>No published plants or species yet.</Empty> : null}
+        <EmptyState count={recent.length}>No published plants or species yet.</EmptyState>
         {recent.map((p, i) => (
           <Row
             key={p.id}
@@ -88,7 +89,7 @@ export function Home({ nav }) {
       </Section>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Icon name="lock" size={16} color={c.ink2} />
-        <Txt v="caption" color={c.ink2} style={{ flex: 1, fontWeight: undefined }}>Endangered plants never show an exact location.</Txt>
+        <Txt v="caption" color={c.ink2} style={{ flex: 1 }}>Endangered plants never show an exact location.</Txt>
       </View>
     </Screen>
   );

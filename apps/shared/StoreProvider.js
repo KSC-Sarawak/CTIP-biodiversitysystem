@@ -1178,12 +1178,17 @@ function collectionMatches(a = [], b = []) {
     return { ok: true, points, source: "local" };
   }, [authToken, db, role]);
 
+  // Answers true once the comment is saved, so a page can keep the text when it was not.
   const addComment = async (id, body) => {
-    if (!body || !body.trim()) return;
+    if (!body || !body.trim()) return false;
     const res = await callApi(addCommentApi, id, body.trim());
-    if (!res.ok) return notify(`Failed to add comment: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to add comment: ${res.message}`);
+      return false;
+    }
     notify("Comment posted");
     await loadFromApi(true);
+    return true;
   };
 
   /* ---------- discussion board ---------- */
@@ -1486,18 +1491,28 @@ function collectionMatches(a = [], b = []) {
   };
 
   /* ---------- monitoring ---------- */
+  // ackAlert, resolveAlert and addAlertNote answer true once the change is saved
+  // (false when it was not), so a page can stay open on a failure.
   const ackAlert = async (id) => {
     const res = await callApi(acknowledgeAlertApi, id);
-    if (!res.ok) return notify(`Failed to acknowledge alert: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to acknowledge alert: ${res.message}`);
+      return false;
+    }
     notify("Alert acknowledged");
     await loadFromApi(true);
+    return true;
   };
 
   const resolveAlert = async (id, outcome) => {
     const res = await callApi(resolveAlertApi, id, outcome || "");
-    if (!res.ok) return notify(`Failed to resolve alert: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to resolve alert: ${res.message}`);
+      return false;
+    }
     notify("Alert resolved");
     await loadFromApi(true);
+    return true;
   };
 
   const assignAlert = async (id, assignee) => {
@@ -1508,11 +1523,15 @@ function collectionMatches(a = [], b = []) {
   };
 
   const addAlertNote = async (id, note) => {
-    if (!note || !note.trim()) return;
+    if (!note || !note.trim()) return false;
     const res = await callApi(addAlertNoteApi, id, note.trim());
-    if (!res.ok) return notify(`Failed to add alert note: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to add alert note: ${res.message}`);
+      return false;
+    }
     notify("Note added to alert");
     await loadFromApi(true);
+    return true;
   };
 
   const setThresholds = async (nodeId, thresholds) => {

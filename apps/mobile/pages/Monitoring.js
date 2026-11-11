@@ -6,10 +6,10 @@ import { View, Text, Pressable } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { plantView, nameOf } from '../../shared/selectors.js';
-import { useTheme, font } from '../components/Theme.js';
+import { useTheme, font, statusText } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
-  Screen, Bar, TitleBlock, Section, Row, Thumb, Mono, Txt, DotLabel, Chip, Spark, Button, Area, Empty, Pills,
+  Screen, Bar, TitleBlock, Section, Row, Thumb, Mono, Txt, DotLabel, Chip, Spark, Button, Area, Empty, EmptyState, Pills,
 } from '../components/Bits.js';
 import { dateTime } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
@@ -20,15 +20,16 @@ function AlertCard({ a, node, onPress }) {
   const { c } = useTheme();
   const tone = a.status === 'open' ? 'danger' : 'warning';
   const r = a.reading || {};
-  const what = r.temperature != null ? `${r.temperature}°C, limit ${node?.thresholds?.temp_max}°C` : r.motion ? 'Movement detected near the plant' : 'Unusual reading';
+  const limit = node?.thresholds?.temp_max;
+  const what = r.temperature != null ? `${r.temperature}°C${limit != null ? `, limit ${limit}°C` : ''}` : r.motion ? 'Movement detected near the plant' : 'Unusual reading';
   return (
     <Pressable accessibilityRole="button" onPress={onPress}
-      style={{ flexDirection: 'row', gap: 14, padding: 16, borderRadius: 14, backgroundColor: c[tone + 'Soft'], borderWidth: 1, borderColor: c[tone + 'Line'] }}>
+      style={({ pressed }) => ({ flexDirection: 'row', gap: 14, padding: 16, borderRadius: 14, backgroundColor: c[tone + 'Soft'], borderWidth: 1, borderColor: c[tone + 'Line'], opacity: pressed ? 0.7 : 1 })}>
       <Icon name={r.temperature != null ? 'thermo' : 'activity'} size={24} color={c[tone]} />
       <View style={{ flex: 1, gap: 3 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
           <Txt v="label" style={{ fontSize: 16, flex: 1 }}>{a.type}</Txt>
-          <DotLabel status={a.severity} label={a.severity.charAt(0).toUpperCase() + a.severity.slice(1)} />
+          <DotLabel status={a.severity} label={statusText(a.severity || 'unknown')} />
         </View>
         <Txt v="body" style={{ fontSize: 15 }}>{node?.name} · {what}</Txt>
         <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 600) }}>{dateTime(a.created_at)} · {a.status === 'open' ? 'open' : 'acknowledged'}</Txt>
@@ -42,13 +43,17 @@ export function Monitor({ nav }) {
   usePolling(5000);
   const { db } = useStore();
   const { c } = useTheme();
-  const [nodeId, setNodeId] = useState(db.nodes.find((n) => n.status === 'active')?.id || db.nodes[0]?.id);
+  // The node on the chart: the one picked, else the first active one. Worked out
+  // on every render, because the nodes can arrive after this screen opens.
+  const [picked, setPicked] = useState(null);
+  const nodeId = db.nodes.some((n) => n.id === picked) ? picked : db.nodes.find((n) => n.status === 'active')?.id || db.nodes[0]?.id;
   const active = db.alerts.filter((a) => a.status !== 'resolved').sort((a, b) => (a.status === 'open' ? -1 : 1) - (b.status === 'open' ? -1 : 1));
   const openCount = db.alerts.filter((a) => a.status === 'open').length;
   const offline = db.nodes.filter((n) => n.status !== 'active').length;
   const node = db.nodes.find((n) => n.id === nodeId);
   const readings = db.telemetry[nodeId] || [];
   const now = latest(readings);
+  const limit = node?.thresholds?.temp_max; // a node may have no limit set
 
   return (
     <Screen gap={20}>
@@ -56,16 +61,16 @@ export function Monitor({ nav }) {
       {active.map((a) => <AlertCard key={a.id} a={a} node={db.nodes.find((n) => n.id === a.node_id)} onPress={() => nav.go('alert', { id: a.id })} />)}
 
       <Section title="Last 24 hours" gap={10}>
-        <Pills value={nodeId} onChange={setNodeId} items={db.nodes.map((n) => ({ key: n.id, label: n.name }))} />
+        <Pills value={nodeId} onChange={setPicked} items={db.nodes.map((n) => ({ key: n.id, label: n.name }))} />
         {now ? (
           <>
             <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10 }}>
-              <Text style={{ fontFamily: font('display', 700), fontSize: 34, color: now.temperature > node.thresholds.temp_max ? c.danger : c.ink }}>{now.temperature}°C</Text>
-              <Txt v="small" color={c.ink2}>limit {node.thresholds.temp_max}°C</Txt>
+              <Text style={{ fontFamily: font('display', 700), fontSize: 34, color: limit != null && now.temperature > limit ? c.danger : c.ink }}>{now.temperature}°C</Text>
+              {limit != null ? <Txt v="small" color={c.ink2}>limit {limit}°C</Txt> : null}
             </View>
-            <Spark values={readings.map((r) => r.temperature)} limit={node.thresholds.temp_max} />
+            <Spark values={readings.map((r) => r.temperature)} limit={limit} />
           </>
-        ) : <Empty icon="activity">No readings yet.</Empty>}
+        ) : <EmptyState count={0} icon="activity" rows={2}>No readings yet.</EmptyState>}
       </Section>
 
       <Section title="Nodes" gap={0}>
@@ -97,9 +102,10 @@ export function Monitor({ nav }) {
 
 export function AlertDetail({ nav, params = {} }) {
   usePolling(5000);
-  const { db, ackAlert, resolveAlert, addAlertNote, notify } = useStore();
+  const { db, ackAlert, resolveAlert, addAlertNote } = useStore();
   const { c } = useTheme();
   const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
   const a = db.alerts.find((x) => x.id === params.id);
   if (!a) return <Screen header={<Bar title="Alert" onBack={nav.back} />}><Empty>This alert no longer exists.</Empty></Screen>;
   const node = db.nodes.find((n) => n.id === a.node_id);
@@ -108,9 +114,22 @@ export function AlertDetail({ nav, params = {} }) {
   const r = a.reading || {};
   const notes = db.alertNotes.filter((n) => n.alert_id === a.id);
 
-  const saveNote = () => note.trim() && addAlertNote(a.id, note.trim());
-  const ack = () => { saveNote(); ackAlert(a.id); notify('Alert acknowledged'); nav.back(); };
-  const resolve = () => { saveNote(); resolveAlert(a.id, note.trim() || 'Resolved'); notify('Alert resolved'); nav.back(); };
+  const limits = node?.thresholds || {}; // a node may have no limits set
+
+  // The screen closes only once the change is saved. The store says what
+  // happened, for success and for failure, so nothing is said here.
+  const act = async (change) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (note.trim()) await addAlertNote(a.id, note.trim());
+      if (await change()) nav.back();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const ack = () => act(() => ackAlert(a.id));
+  const resolve = () => act(() => resolveAlert(a.id, note.trim() || 'Resolved'));
 
   return (
     <Screen
@@ -119,21 +138,21 @@ export function AlertDetail({ nav, params = {} }) {
       gap={18}
       footer={a.status === 'resolved' ? null : (
         <>
-          <Button label="Resolve" kind={a.status === 'open' ? 'secondary' : 'primary'} flex={1} onPress={resolve} />
-          {a.status === 'open' ? <Button label="Acknowledge" icon="check" flex={1.4} onPress={ack} /> : null}
+          <Button label="Resolve" kind={a.status === 'open' ? 'secondary' : 'primary'} flex={1} disabled={busy} onPress={resolve} />
+          {a.status === 'open' ? <Button label="Acknowledge" icon="check" flex={1.4} disabled={busy} onPress={ack} /> : null}
         </>
       )}
     >
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Chip status={a.severity} label={a.severity.charAt(0).toUpperCase() + a.severity.slice(1)} />
+        <Chip status={a.severity} label={statusText(a.severity || 'unknown')} />
         <Chip status={a.status} />
       </View>
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        {r.temperature != null ? <Reading label="Temperature" value={`${r.temperature}°C`} sub={`limit ${node?.thresholds?.temp_max}°C`} bad={r.temperature > node?.thresholds?.temp_max} /> : null}
-        {r.soil_moisture != null ? <Reading label="Soil moisture" value={`${r.soil_moisture}%`} sub={`minimum ${node?.thresholds?.moisture_min}%`} bad={r.soil_moisture < node?.thresholds?.moisture_min} /> : null}
+        {r.temperature != null ? <Reading label="Temperature" value={`${r.temperature}°C`} sub={limits.temp_max != null ? `limit ${limits.temp_max}°C` : 'no limit set'} bad={limits.temp_max != null && r.temperature > limits.temp_max} /> : null}
+        {r.soil_moisture != null ? <Reading label="Soil moisture" value={`${r.soil_moisture}%`} sub={limits.moisture_min != null ? `minimum ${limits.moisture_min}%` : 'no minimum set'} bad={limits.moisture_min != null && r.soil_moisture < limits.moisture_min} /> : null}
         {r.motion ? <Reading label="Movement" value="Yes" sub="near the plant" bad /> : null}
       </View>
-      {readings.length ? <Section title="Last 24 hours" gap={10}><Spark values={readings.map((x) => x.temperature)} limit={node?.thresholds?.temp_max} height={80} /></Section> : null}
+      {readings.length ? <Section title="Last 24 hours" gap={10}><Spark values={readings.map((x) => x.temperature)} limit={limits.temp_max} height={80} /></Section> : null}
       {plant ? (
         <Section title="Protected plant" gap={0}>
           <Row left={<Thumb uri={plant.photos[0]?.url} size={48} />} title={plant.name}

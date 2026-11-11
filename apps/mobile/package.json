@@ -47,7 +47,7 @@
     "app-version": "node ../../scripts/version.mjs",
     "build:apk": "node scripts/build-apk.mjs",
     "build:apk:local": "node scripts/build-apk.mjs --local",
-    "test": "node --test tests/agent-*.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "test:agent": "node --test tests/agent-*.test.mjs",
     "test:agent:ui": "node tests/helpers/mobileUiServer.mjs",
     "test:agent:watch": "node --test --watch tests/agent-*.test.mjs"

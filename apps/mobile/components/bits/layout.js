@@ -1,6 +1,6 @@
 // apps/mobile/components/bits/layout.js
 // Structural layout components: full-screen container, navigation headers, bars, sections, and sheets.
-import React from 'react';
+import React, { useRef } from 'react';
 import { View, Text, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, font } from '../Theme.js';
@@ -13,17 +13,26 @@ import { usePullRefresh } from '../../hooks/usePullRefresh.js';
 // Uses synchronous insets from useSafeAreaInsets() to prevent layout shifting on transitions.
 // Pull down to refresh (usePullRefresh). Forms pass refresh={false} so a pull
 // while filling one in does nothing.
-export function Screen({ header, children, footer, scroll = true, refresh = true, bg, pad = 20, gap = 24, top = 16, bottom = 40, safeTop = true }) {
+// `stickToEnd`: open at the bottom and follow new content down (a message thread).
+export function Screen({ header, children, footer, scroll = true, refresh = true, bg, pad = 20, gap = 24, top = 16, bottom = 40, safeTop = true, stickToEnd = false }) {
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const refreshControl = usePullRefresh();
+  const scroller = useRef(null);
   const content = { paddingHorizontal: pad, paddingTop: top, paddingBottom: bottom, gap };
 
   return (
     <View style={{ flex: 1, backgroundColor: bg || c.surface, paddingTop: safeTop ? insets.top : 0 }}>
       {header}
       {scroll ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={content} keyboardShouldPersistTaps="handled" refreshControl={refresh ? refreshControl : undefined}>
+        <ScrollView
+          ref={scroller}
+          style={{ flex: 1 }}
+          contentContainerStyle={content}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={refresh ? refreshControl : undefined}
+          onContentSizeChange={stickToEnd ? () => scroller.current?.scrollToEnd({ animated: false }) : undefined}
+        >
           {children}
         </ScrollView>
       ) : (

@@ -6,6 +6,8 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useTheme } from '../Theme.js';
 import { Txt } from './text.js';
 import { IconTile } from './lists.js';
+import { useStore } from '../../../shared/store.js';
+import { emptyKind, OFFLINE_EMPTY } from '../listState.js';
 
 export function SkeletonRow() {
   const { c } = useTheme();
@@ -40,6 +42,25 @@ export function Spinner({ size = 20 }) {
       <Path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke={c.accent} strokeWidth="3" strokeLinecap="round" />
     </Svg>
   );
+}
+
+// What a list shows in place of its rows. Nothing when it has rows; grey rows
+// while the app's first answer from the API is still on its way; "no connection"
+// when there is none; and only then the screen's own "nothing here" words.
+// `filtered`: a search or filter is on, so no rows means "no match" at once.
+export function EmptyState({ count, icon, filtered = false, rows = 4, children }) {
+  const { apiStatus } = useStore();
+  const kind = emptyKind(count, apiStatus, filtered);
+  if (kind === 'none') return null;
+  if (kind === 'loading') {
+    return (
+      <View accessibilityRole="progressbar" accessibilityLabel="Loading">
+        {Array.from({ length: rows }, (_, i) => <SkeletonRow key={i} />)}
+      </View>
+    );
+  }
+  if (kind === 'offline') return <Empty icon="info">{OFFLINE_EMPTY}</Empty>;
+  return <Empty icon={icon}>{children}</Empty>;
 }
 
 export function Empty({ icon = 'leaf', children }) {

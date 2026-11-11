@@ -72,7 +72,7 @@ export default function SpeciesPicker({ value, onChange, onPick, picked, error, 
       {searching && search.error ? (
         <View style={{ gap: 8 }}>
           <Notice tone="warning" icon="info" title="Species search unavailable" body={search.error} />
-          <Button label="Try again" kind="secondary" height={44} size={15} onPress={search.retry} />
+          <Button label="Try again" kind="secondary" height={48} size={15} onPress={search.retry} />
         </View>
       ) : null}
       {searching && !search.loading && !search.error && !offlineEmpty && results.length === 0 ? (
