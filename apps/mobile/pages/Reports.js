@@ -8,7 +8,7 @@ import { useStore } from '../../shared/store.js';
 import { countPlants, visiblePlants } from '../../shared/selectors.js';
 import { label } from '../../shared/utils.js';
 import { useTheme } from '../components/Theme.js';
-import { Screen, Header, IconButton, TitleBlock, Stat, Section, Txt, Mono, Sci, Row, Thumb, Notice, Button } from '../components/Bits.js';
+import { Screen, Header, IconButton, TitleBlock, Stat, Section, Txt, Mono, Sci, Row, Thumb, Notice } from '../components/Bits.js';
 
 function Bar({ label, n, max, tone = 'accent', onPress, on }) {
   const { c } = useTheme();
@@ -25,22 +25,38 @@ function Bar({ label, n, max, tone = 'accent', onPress, on }) {
   );
   if (!onPress) return <View style={{ gap: 6, paddingVertical: 4 }}>{body}</View>;
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{ selected: !!on }} accessibilityLabel={`${label}: ${n} ${n === 1 ? 'plant' : 'plants'}. Show them.`}
-      onPress={onPress} style={{ gap: 6, paddingVertical: 4, minHeight: 44 }}>
+    <Pressable accessibilityRole="button" accessibilityState={{ expanded: !!on }} accessibilityLabel={`${label}: ${n} ${n === 1 ? 'plant' : 'plants'}. ${on ? 'Hide them.' : 'Show them.'}`}
+      onPress={onPress} style={({ pressed }) => ({ gap: 6, paddingVertical: 4, minHeight: 48, justifyContent: 'center', opacity: pressed ? 0.7 : 1 })}>
       {body}
     </Pressable>
   );
 }
 
-function Bars({ title, rows, picked, onPick }) {
+// One group of bars. The bar that was tapped lists its plants right under
+// itself, where the person is looking; tapping it again closes the list.
+function Bars({ title, rows, picked, onPick, onOpen }) {
+  const { c } = useTheme();
   if (!rows.length) return null;
   const max = Math.max(...rows.map((r) => r.n));
   return (
     <Section title={title} gap={10}>
       {rows.map((r) => {
         const id = `${title}:${r.label}`;
-        return <Bar key={r.label} label={r.label} n={r.n} max={max} on={picked?.id === id}
-          onPress={() => onPick(picked?.id === id ? null : { id, label: r.label, plants: r.plants })} />;
+        const on = picked === id;
+        return (
+          <View key={r.label}>
+            <Bar label={r.label} n={r.n} max={max} on={on} onPress={() => onPick(on ? null : id)} />
+            {on ? (
+              <View style={{ marginTop: 4, marginBottom: 8, paddingLeft: 12, borderLeftWidth: 2, borderLeftColor: c.line }}>
+                {r.plants.map((p, i) => (
+                  <Row key={p.id} serif={false} left={<Thumb uri={p.photos[0]?.url} size={48} />} title={p.name}
+                    sub={<>{p.scientific ? <Sci size={14}>{p.scientific}</Sci> : null}<Mono size={13}>{p.qr_id}</Mono></>}
+                    onPress={() => onOpen(p)} last={i === r.plants.length - 1} />
+                ))}
+              </View>
+            ) : null}
+          </View>
+        );
       })}
     </Section>
   );
@@ -49,7 +65,8 @@ function Bars({ title, rows, picked, onPick }) {
 export default function Reports({ nav }) {
   const { db, role } = useStore();
   const { c } = useTheme();
-  const [picked, setPicked] = useState(null);
+  const [picked, setPicked] = useState(null); // the bar whose plants are listed: "<group>:<label>"
+  const open = (p) => nav.go('tag', { qr: p.qr_id });
   const plants = visiblePlants(db, role);
   const count = (s) => plants.filter((p) => p.status === s).length;
   const species = db.species.filter((s) => !s.is_deleted).length;
@@ -71,20 +88,10 @@ export default function Reports({ nav }) {
         <Bar label="Needs review" n={count('synced')} max={plants.length} tone="info" />
         <Bar label="Returned" n={count('returned')} max={plants.length} tone="warning" />
       </Section>
-      <Txt v="caption" color={c.ink2}>Tap a bar below to list those plants.</Txt>
-      <Bars title="By conservation status" rows={countPlants(plants, (p) => (p.conservation === 'unknown' ? null : label(p.conservation)))} picked={picked} onPick={setPicked} />
-      <Bars title="By family" rows={countPlants(plants, (p) => p.species?.family)} picked={picked} onPick={setPicked} />
-      <Bars title="By species" rows={countPlants(plants, (p) => p.scientific || null)} picked={picked} onPick={setPicked} />
-      {picked ? (
-        <Section title={`${picked.label} (${picked.plants.length})`} gap={0}
-          right={<Button label="Close" kind="text" height={36} size={14} onPress={() => setPicked(null)} />}>
-          {picked.plants.map((p, i) => (
-            <Row key={p.id} serif={false} left={<Thumb uri={p.photos[0]?.url} size={48} />} title={p.name}
-              sub={<>{p.scientific ? <Sci size={14}>{p.scientific}</Sci> : null}<Mono size={13}>{p.qr_id}</Mono></>}
-              onPress={() => nav.go('tag', { qr: p.qr_id })} last={i === picked.plants.length - 1} />
-          ))}
-        </Section>
-      ) : null}
+      <Txt v="caption" color={c.ink2}>Tap a bar to list its plants.</Txt>
+      <Bars title="By conservation status" rows={countPlants(plants, (p) => (p.conservation === 'unknown' ? null : label(p.conservation)))} picked={picked} onPick={setPicked} onOpen={open} />
+      <Bars title="By family" rows={countPlants(plants, (p) => p.species?.family)} picked={picked} onPick={setPicked} onOpen={open} />
+      <Bars title="By species" rows={countPlants(plants, (p) => p.scientific || null)} picked={picked} onPick={setPicked} onOpen={open} />
       <Notice tone="info" title="Need a file?" body="Download CSV or PDF reports from the Reports page on the website." />
     </Screen>
   );

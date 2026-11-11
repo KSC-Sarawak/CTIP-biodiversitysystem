@@ -22,13 +22,19 @@ import * as ImagePicker from 'expo-image-picker';
 import { useStore } from '../../shared/store.js';
 import { extractTag } from '../../shared/selectors.js';
 import { lookupTagOffline, outboxTagsFrom } from '../../shared/offline/tags.js';
+import { palettes, alpha } from '../../shared/tokens.js';
 import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import { Sheet, Button, Txt, Mono, Sci, DotLabel, Thumb, IconButton } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
+import { useIsFocused } from '../navigation/focus.js';
 
-const CAMERA_TEXT = '#eef4e4';
-const CAMERA_MUTED = '#b4c9ab';
+// The camera screen is dark in both themes, so it reads the dark palette directly.
+const DARK = palettes.dark;
+const CAMERA_TEXT = DARK.ink;
+const CAMERA_MUTED = DARK.ink2;
+const CAMERA_PILL = alpha(DARK.ink, 0.12); // the faint buttons over the camera picture
+const pill = ({ pressed }) => ({ height: 48, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, borderRadius: 999, backgroundColor: CAMERA_PILL, opacity: pressed ? 0.7 : 1 });
 
 export default function Scan({ nav, params = {} }) {
   const { db, me, role, apiStatus, outboxItems = [], cachedTags = [], changeRecordTag } = useStore();
@@ -36,6 +42,7 @@ export default function Scan({ nav, params = {} }) {
   const picking = useRef(false); // one tag change per scan, however many times the camera reads it
   const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
+  const focused = useIsFocused(); // the camera runs only while this screen is the one on show
   const [torch, setTorch] = useState(false);
   // "checking" counts as offline too: at start-up without signal the API has not answered yet.
   const lookup = (raw) => lookupTagOffline(db, extractTag(raw), {
@@ -105,8 +112,8 @@ export default function Scan({ nav, params = {} }) {
   const granted = permission?.granted;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#06110b' }}>
-      {granted && !result ? (
+    <View style={{ flex: 1, backgroundColor: DARK.camera }}>
+      {granted && !result && focused ? (
         <CameraView
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0 }}
           facing="back"
@@ -119,7 +126,7 @@ export default function Scan({ nav, params = {} }) {
       <View style={{ flex: 1, paddingTop: insets.top, paddingBottom: insets.bottom }}>
         <View style={{ height: 56, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 4 }}>
           <IconButton name="x" label="Close scanner" color={CAMERA_TEXT} onPress={close} />
-          {granted && !result ? <IconButton name="torch" label={torch ? 'Turn off torch' : 'Turn on torch'} color={torch ? '#e8bd5c' : CAMERA_TEXT} size={22} onPress={() => setTorch(!torch)} /> : null}
+          {granted && !result ? <IconButton name="torch" label={torch ? 'Turn off torch' : 'Turn on torch'} color={torch ? DARK.warning : CAMERA_TEXT} size={22} onPress={() => setTorch(!torch)} /> : null}
         </View>
 
         {result ? (
@@ -141,20 +148,18 @@ export default function Scan({ nav, params = {} }) {
             </View>
             <View style={{ alignItems: 'center', paddingBottom: 20, gap: 10 }}>
               <View style={{ flexDirection: 'row', gap: 10 }}>
-                <Pressable accessibilityRole="button" onPress={pickFromGallery}
-                  style={{ height: 46, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, borderRadius: 999, backgroundColor: 'rgba(238, 244, 228, 0.12)' }}>
-                  <Icon name="plus" size={18} color={CAMERA_TEXT} />
+                <Pressable accessibilityRole="button" onPress={pickFromGallery} style={pill}>
+                  <Icon name="image" size={18} color={CAMERA_TEXT} />
                   <Text style={{ fontFamily: font('text', 700), fontSize: 14, color: CAMERA_TEXT }}>From gallery</Text>
                 </Pressable>
-                <Pressable accessibilityRole="button" onPress={() => setTyping(true)}
-                  style={{ height: 46, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, borderRadius: 999, backgroundColor: 'rgba(238, 244, 228, 0.12)' }}>
+                <Pressable accessibilityRole="button" onPress={() => setTyping(true)} style={pill}>
                   <Icon name="keyboard" size={18} color={CAMERA_TEXT} />
                   <Text style={{ fontFamily: font('text', 700), fontSize: 14, color: CAMERA_TEXT }}>Type ID</Text>
                 </Pressable>
               </View>
               {role === 'botanist' && !pickFor ? (
                 <Pressable accessibilityRole="button" onPress={() => nav.replace('add', { make: true })} hitSlop={8}
-                  style={{ height: 44, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 }}>
+                  style={({ pressed }) => ({ height: 48, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, opacity: pressed ? 0.7 : 1 })}>
                   <Icon name="qr" size={18} color={CAMERA_TEXT} />
                   <Text style={{ fontFamily: font('text', 700), fontSize: 14, color: CAMERA_TEXT, textDecorationLine: 'underline' }}>No tag? Make a new one</Text>
                 </Pressable>
@@ -168,7 +173,7 @@ export default function Scan({ nav, params = {} }) {
 }
 
 function Viewfinder() {
-  const corner = { position: 'absolute', width: 44, height: 44, borderColor: '#9bcf6a' };
+  const corner = { position: 'absolute', width: 44, height: 44, borderColor: DARK.accent };
   return (
     <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={{ width: 250, height: 250 }}>
       <View style={[corner, { left: 0, top: 0, borderLeftWidth: 4, borderTopWidth: 4, borderTopLeftRadius: 20 }]} />
@@ -341,7 +346,7 @@ function Result({ result, role, nav, onAgain }) {
           <Txt v="title2" style={{ fontSize: 26, lineHeight: 32 }}>This tag is already on a plant</Txt>
         </View>
         {canOpen ? (
-          <Pressable accessibilityRole="button" onPress={() => nav.replace('tag', { qr: result.id })} style={rowStyle}>
+          <Pressable accessibilityRole="button" onPress={() => nav.replace('tag', { qr: result.id })} style={({ pressed }) => [rowStyle, { opacity: pressed ? 0.7 : 1 }]}>
             {summary}
             <Icon name="chevR" size={20} color={c.ink3} />
           </Pressable>

@@ -8,8 +8,9 @@
 //   mode     'device' | 'light' | 'dark'  (what the person picked in More > Appearance)
 //   scheme   'light' | 'dark'             (what is actually showing)
 //   setMode  change the theme
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useColorScheme } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 // One import per weight, so only these nine font files are bundled into the app.
 import { Fraunces_500Medium } from '@expo-google-fonts/fraunces/500Medium';
 import { Fraunces_500Medium_Italic } from '@expo-google-fonts/fraunces/500Medium_Italic';
@@ -65,16 +66,38 @@ function textStyles(c) {
 
 const ThemeContext = createContext(null);
 
+// The theme picked in More > Appearance is kept on the phone (it is a display
+// choice, not a secret, so plain storage is enough) and used again at the next start.
+const MODE_KEY = 'daun.themeMode';
+const MODES = ['device', 'light', 'dark'];
+
 export function ThemeProvider({ children }) {
   const device = useColorScheme(); // follows the phone's dark mode setting
-  const [mode, setMode] = useState('device');
-  const scheme = mode === 'device' ? (device === 'light' ? 'light' : 'dark') : mode;
+  const [mode, setModeState] = useState(null); // null until the saved choice has been read
+  const scheme = mode === 'light' || mode === 'dark' ? mode : device === 'light' ? 'light' : 'dark';
+
+  // Read the saved choice once. Nothing is drawn until it is known (the splash
+  // screen is still up), so the app never opens in one theme and jumps to the other.
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(MODE_KEY)
+      .then((saved) => { if (active) setModeState(MODES.includes(saved) ? saved : 'device'); })
+      .catch(() => { if (active) setModeState('device'); });
+    return () => { active = false; };
+  }, []);
+
+  const setMode = useCallback((next) => {
+    if (!MODES.includes(next)) return;
+    setModeState(next);
+    AsyncStorage.setItem(MODE_KEY, next).catch(() => {}); // not saved: the theme still changes for now
+  }, []);
 
   const value = useMemo(() => {
     const c = colors(scheme);
-    return { c, t: textStyles(c), mode, scheme, setMode, space, radius };
-  }, [scheme, mode]);
+    return { c, t: textStyles(c), mode: mode || 'device', scheme, setMode, space, radius };
+  }, [scheme, mode, setMode]);
 
+  if (mode === null) return null;
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
