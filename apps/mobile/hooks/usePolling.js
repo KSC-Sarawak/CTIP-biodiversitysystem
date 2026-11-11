@@ -7,9 +7,13 @@
 import { useEffect, useRef } from 'react';
 import { AppState } from 'react-native';
 import { useStore } from '../../shared/store.js';
+import { useIsFocused } from '../navigation/focus.js';
 
-export function usePolling(intervalMs = 5000, enabled = true) {
+// A screen kept under another one (navigation/focus.js) does not poll. It polls
+// once the moment it is shown again, so it never shows old data for long.
+export function usePolling(intervalMs = 5000, wanted = true) {
   const { pollFromBackend, loadFromApi, nextPollDelay, authToken } = useStore();
+  const enabled = useIsFocused() && wanted;
   // The store hands out new functions on every update. Keeping them in a ref
   // stops each update from restarting the timer and polling again at once.
   const fns = useRef({});

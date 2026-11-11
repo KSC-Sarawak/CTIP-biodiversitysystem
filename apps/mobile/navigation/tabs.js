@@ -17,17 +17,18 @@ export const TABS = {
     { key: 'alerts', label: 'Alerts', icon: 'bell', badge: 'unread' },
     { key: 'staffMore', label: 'More', icon: 'more' },
   ],
+  // Officers and admins scan tags to open plants; only botanists add them.
   officer: [
     { key: 'review', label: 'Review', icon: 'clipboard', badge: 'pendingReview' },
     { key: 'tagged', label: 'Plants', icon: 'leaf' },
-    { key: 'scan', label: 'Add plant', icon: 'scan', main: true },
+    { key: 'scan', label: 'Scan', icon: 'scan', main: true },
     { key: 'alerts', label: 'Alerts', icon: 'bell', badge: 'unread' },
     { key: 'staffMore', label: 'More', icon: 'more' },
   ],
   admin: [
     { key: 'users', label: 'Users', icon: 'users' },
     { key: 'tagged', label: 'Plants', icon: 'leaf' },
-    { key: 'scan', label: 'Add plant', icon: 'scan', main: true },
+    { key: 'scan', label: 'Scan', icon: 'scan', main: true },
     { key: 'alerts', label: 'Alerts', icon: 'bell', badge: 'unread' },
     { key: 'staffMore', label: 'More', icon: 'more' },
   ],
@@ -48,6 +49,12 @@ export function badgeCounts(db, me, outboxItems = []) {
     openAlerts: (db.alerts || []).filter((a) => a.status === 'open').length,
     pendingReview: (db.observations || []).filter((o) => o.status === 'synced').length,
   };
+}
+
+// The number on a tab's badge: nothing for none, and "99+" past 99 so it always fits.
+export function badgeText(count) {
+  if (!(count > 0)) return '';
+  return count > 99 ? '99+' : String(count);
 }
 
 export function getRoleTabs(role) {

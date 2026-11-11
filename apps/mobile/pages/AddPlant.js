@@ -26,6 +26,7 @@ import { revisitTarget, outboxTagsFrom, isReservedForOther } from '../../shared/
 import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation, photoPreview } from '../../shared/offline/records.js';
 import { deleteCameraFiles } from '../offline/photoFiles.js';
+import { useBackHandler } from '../navigation/focus.js';
 
 const MAX_PHOTOS = 6;
 
@@ -157,8 +158,8 @@ function PhotoDetails({ photo, index, onChange }) {
           {PHOTO_TRAITS.map((t) => {
             const on = traits.includes(t);
             return (
-              <Pressable key={t} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={t} hitSlop={4} onPress={() => toggle(t)}
-                style={{ height: 36, paddingHorizontal: 12, borderRadius: 999, justifyContent: 'center', backgroundColor: on ? c.accent : c.bg }}>
+              <Pressable key={t} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={t} hitSlop={6} onPress={() => toggle(t)}
+                style={({ pressed }) => ({ height: 36, paddingHorizontal: 12, borderRadius: 999, justifyContent: 'center', backgroundColor: on ? c.accent : c.bg, opacity: pressed ? 0.7 : 1 })}>
                 <Text style={{ fontFamily: font('text', 600), fontSize: 13, color: on ? c.onAccent : c.ink }}>{t}</Text>
               </Pressable>
             );
@@ -172,22 +173,21 @@ function PhotoDetails({ photo, index, onChange }) {
 function PhotoStrip({ photos, onAddCamera, onAddGallery, onRemove, onEdit, highlightAdd }) {
   const { c } = useTheme();
 
-  const promptChoice = () => {
-    Alert.alert('Add Photo', 'Take a new photo with camera or choose from gallery', [
-      { text: 'Take photo', onPress: onAddCamera },
-      { text: 'Choose from gallery', onPress: onAddGallery },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
   return (
     <View style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         {photos.map((p, i) => (
-          <Pressable key={p.url + i} accessibilityRole="button" accessibilityLabel={`Photo ${i + 1}${i === 0 ? ', cover' : ''}. Hold to remove.`} onLongPress={() => onRemove(i)}
-            style={i === 0 ? { borderRadius: 12, borderWidth: 2, borderColor: c.accent, padding: 2 } : { padding: 4 }}>
-            <Image source={{ uri: p.url }} style={{ width: 72, height: 72, borderRadius: 9, backgroundColor: c.accentSoft }} />
-          </Pressable>
+          <View key={p.url + i}>
+            <Pressable accessibilityRole="image" accessibilityLabel={`Photo ${i + 1}${i === 0 ? ', cover' : ''}`} onLongPress={() => onRemove(i)}
+              style={i === 0 ? { borderRadius: 12, borderWidth: 2, borderColor: c.accent, padding: 2 } : { padding: 4 }}>
+              <Image source={{ uri: p.url }} style={{ width: 72, height: 72, borderRadius: 9, backgroundColor: c.accentSoft }} />
+            </Pressable>
+            {/* Inside the photo's corner, not hanging over it: Android ignores taps outside a parent's box. */}
+            <Pressable accessibilityRole="button" accessibilityLabel={`Remove photo ${i + 1}`} hitSlop={12} onPress={() => onRemove(i)}
+              style={({ pressed }) => ({ position: 'absolute', top: 0, right: 0, width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, opacity: pressed ? 0.7 : 1 })}>
+              <Icon name="x" size={14} color={c.ink} strokeWidth={2} />
+            </Pressable>
+          </View>
         ))}
         {photos.length < MAX_PHOTOS ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Add photo" onPress={onAddCamera}
@@ -204,16 +204,16 @@ function PhotoStrip({ photos, onAddCamera, onAddGallery, onRemove, onEdit, highl
             label="Take photo"
             icon="camera"
             kind="secondary"
-            height={40}
+            height={48}
             size={14}
             flex={1}
             onPress={onAddCamera}
           />
           <Button
             label="From gallery"
-            icon="plus"
+            icon="image"
             kind="secondary"
-            height={40}
+            height={48}
             size={14}
             flex={1}
             onPress={onAddGallery}
@@ -321,7 +321,7 @@ const TAGS_OFF = 'Offline tags are turned off. Connect to the internet, or scan 
 const KEEP_HINT = 'Keeps 3 tag IDs for you, so you can make a tag with no connection. Write the ID on a spare tag only if you run out of printed ones.';
 
 export function AddPlant({ nav, params = {} }) {
-  const { db, me, addPlant, generateTags, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag } = useStore();
+  const { db, me, addPlant, generateTags, notify, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag } = useStore();
   const { c } = useTheme();
   const [qr, setQr] = useState(params.qr || '');
   // A tag a record on this phone already uses is taken, though the server does not know yet.
@@ -388,7 +388,7 @@ export function AddPlant({ nav, params = {} }) {
       const ids = await generateTags(1, 'field');
       if (ids && ids.length > 0) showNewTag(ids[0]);
     } catch (err) {
-      Alert.alert('Tag Generation Failed', err?.message || 'Could not generate QR tag.');
+      Alert.alert("Couldn't make a tag", err?.message || 'Try again in a moment.');
     } finally {
       setGenerating(false);
     }
@@ -425,11 +425,11 @@ export function AddPlant({ nav, params = {} }) {
         );
         if (existingPlant) {
           Alert.alert(
-            'Tag Already In Use',
+            'Tag already in use',
             `Tag ${tagCandidate} is already on plant "${existingPlant.species?.common_name || existingPlant.proposed_species || 'Recorded plant'}". Would you like to record a revisit instead?`,
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Record Revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
+              { text: 'Record a revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
             ]
           );
           return;
@@ -437,25 +437,25 @@ export function AddPlant({ nav, params = {} }) {
         // A plant saved on this phone and not sent yet already has this tag.
         if (onPhone.has(tagCandidate)) {
           Alert.alert(
-            'Tag Already In Use',
+            'Tag already in use',
             `Tag ${tagCandidate} is already on a plant saved on this phone and not sent yet. Would you like to record a revisit instead?`,
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Record Revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
+              { text: 'Record a revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
             ]
           );
           return;
         }
         setQr(tagCandidate);
-        Alert.alert('QR Tag Bound', `Loaded tag: ${tagCandidate}`);
+        notify(`Tag ${tagCandidate} selected`);
       } else {
         Alert.alert(
-          'No QR Code Detected',
+          'No QR code found',
           'Could not detect a plant QR tag in the selected image. You can scan with camera, generate a new QR tag, or pick an unused tag.'
         );
       }
     } catch (err) {
-      Alert.alert('Gallery Error', err?.message || 'Could not load photo from gallery.');
+      Alert.alert("Couldn't open the photo", err?.message || 'Try another photo.');
     }
   };
 
@@ -486,6 +486,28 @@ export function AddPlant({ nav, params = {} }) {
     }
   }, [qr, me?.id, sp, picked, looks, height, notes, photos, gps]);
 
+  // Leaving the form: ask first when something was entered.
+  const leave = () => {
+    if (!photos.length && !looks && !sp) return nav.back();
+    Alert.alert('Discard this record?', 'What you entered will be lost.', [
+      { text: 'Keep editing', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          await clearDraft(qr);
+          nav.back();
+        },
+      },
+    ]);
+  };
+  // Android's back button asks the same question as the X, once a tag is chosen
+  // and the form is showing (the QR view has its own back handler).
+  useBackHandler(() => {
+    leave();
+    return true;
+  }, !!qr && !showQr);
+
   if (showQr && qr) {
     return <TagQrView qr={qr} onBack={() => setShowQr(false)} />;
   }
@@ -507,7 +529,7 @@ export function AddPlant({ nav, params = {} }) {
         <View style={{ gap: 12 }}>
           {params.make ? null : <Button label="Scan tag with camera" icon="camera" onPress={() => nav.replace('scan')} />}
           <Button
-            label={generating ? "Generating QR tag..." : "Generate new QR tag"}
+            label={generating ? 'Making a tag…' : 'Generate new QR tag'}
             icon="qr"
             kind={params.make ? 'primary' : 'secondary'}
             disabled={generating || noKeptLeft}
@@ -515,7 +537,7 @@ export function AddPlant({ nav, params = {} }) {
           />
           {noKeptLeft ? <Txt v="caption" color={c.ink2}>{keepOffline ? NO_KEPT_TAGS : TAGS_OFF}</Txt> : null}
           {params.make ? <Button label="Scan tag with camera" icon="camera" kind="secondary" onPress={() => nav.replace('scan')} /> : null}
-          <Button label="Choose QR from gallery" icon="plus" kind="secondary" onPress={pickQrFromGallery} />
+          <Button label="Choose QR from gallery" icon="image" kind="secondary" onPress={pickQrFromGallery} />
         </View>
 
         {unusedTags.length > 0 && (
@@ -527,14 +549,16 @@ export function AddPlant({ nav, params = {} }) {
                   accessibilityRole="button"
                   accessibilityLabel={`Pick unused tag ${t.qr_id}`}
                   onPress={() => setQr(t.qr_id)}
-                  style={{
-                    paddingVertical: 10,
+                  style={({ pressed }) => ({
+                    minHeight: 48,
+                    justifyContent: 'center',
                     paddingHorizontal: 16,
                     borderRadius: 10,
                     backgroundColor: c.bg,
                     borderWidth: 1,
                     borderColor: c.line,
-                  }}
+                    opacity: pressed ? 0.7 : 1,
+                  })}
                 >
                   <Mono size={15} color={c.ink}>{t.qr_id}</Mono>
                 </Pressable>
@@ -621,26 +645,11 @@ export function AddPlant({ nav, params = {} }) {
         failed: res.state === 'failed', // saved, but the first send was refused
       });
     } catch (err) {
-      Alert.alert('Submission Error', err?.message || 'Failed to submit observation. Draft has been saved safely.');
+      Alert.alert("Couldn't submit", err?.message || 'Your draft is saved on this phone. Try again in a moment.');
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
     }
-  };
-
-  const leave = () => {
-    if (!photos.length && !looks && !sp) return nav.back();
-    Alert.alert('Discard this record?', 'What you entered will be lost.', [
-      { text: 'Keep editing', style: 'cancel' },
-      {
-        text: 'Discard',
-        style: 'destructive',
-        onPress: async () => {
-          await clearDraft(qr);
-          nav.back();
-        },
-      },
-    ]);
   };
 
   return (
@@ -648,7 +657,7 @@ export function AddPlant({ nav, params = {} }) {
       header={<Header left={<IconButton name="x" label="Close" onPress={leave} />} />}
       top={0}
       gap={20}
-      footer={<View style={{ flex: 1 }}><Button label={submitting ? "Submitting..." : "Submit for review"} disabled={submitting} onPress={submit} /></View>}
+      footer={<View style={{ flex: 1 }}><Button label={submitting ? 'Submitting…' : 'Submit for review'} disabled={submitting} onPress={submit} /></View>}
     >
       <View style={{ gap: 6 }}>
         <Txt v="title1">New plant</Txt>
@@ -671,7 +680,7 @@ export function AddPlant({ nav, params = {} }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, padding: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: c.accentSoft }}>
             <Icon name="check" size={16} color={c.accent} />
             <Txt v="caption" color={c.accent} style={{ fontFamily: font('text', 700), flex: 1 }}>
-              Restored in-progress draft from previous session
+              Draft restored from your last session
             </Txt>
             <IconButton name="x" label="Dismiss" size={14} color={c.accent} onPress={() => setRestoredDraft(false)} />
           </View>
@@ -787,6 +796,19 @@ export function Revisit({ nav, params = {} }) {
     fetchGps();
   }, []);
 
+  // Leaving the form, by the X or Android's back button: ask first when something was entered.
+  const leave = () => {
+    if (!photos.length && !changes.trim() && !height) return nav.back();
+    Alert.alert('Discard this revisit?', 'What you entered will be lost.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => nav.back() },
+    ]);
+  };
+  useBackHandler(() => {
+    leave();
+    return true;
+  });
+
   if (!target) {
     return (
       <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
@@ -858,7 +880,7 @@ export function Revisit({ nav, params = {} }) {
 
   return (
     <Screen refresh={false}
-      header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}
+      header={<Header left={<IconButton name="x" label="Close" onPress={leave} />} />}
       top={0}
       gap={20}
       footer={<View style={{ flex: 1 }}><Button label={submitting ? 'Saving…' : 'Submit revisit'} disabled={!ok || submitting} onPress={submit} /></View>}

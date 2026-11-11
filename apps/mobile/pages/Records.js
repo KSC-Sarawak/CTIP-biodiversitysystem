@@ -11,10 +11,11 @@ import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import PlantSpotMap from '../components/PlantSpotMap.js';
 import {
-  Screen, Bar, TitleBlock, Pills, SortBar, SearchField, Section, Row, Thumb, Mono, Txt, Sci, DotLabel, Notice, KV, Button, Area, Avatar, Empty, Field,
+  Screen, Bar, TitleBlock, Pills, SortBar, SearchField, Section, Row, Thumb, Mono, Txt, Sci, DotLabel, Notice, KV, Button, Area, Avatar, Empty, EmptyState, Field,
 } from '../components/Bits.js';
 import { shortDate, dateTime, coords, accuracy } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
+import { useIsFocused } from '../navigation/focus.js';
 import { listDraftsFor } from '../draftStore.js';
 import { withoutOutboxTwins, OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 import { OnThisPhone } from './PhoneRecords.js';
@@ -42,6 +43,7 @@ export function MyRecords({ nav }) {
   const [sort, setSort] = useState('newest');
   const [q, setQ] = useState('');
   const [localDrafts, setLocalDrafts] = useState([]);
+  const focused = useIsFocused();
 
   useEffect(() => {
     let active = true;
@@ -49,7 +51,7 @@ export function MyRecords({ nav }) {
       if (active) setLocalDrafts(items || []);
     }).catch(() => {});
     return () => { active = false; };
-  }, [db, me?.id]);
+  }, [db, me?.id, focused]); // read again on coming back: Add plant may have saved or cleared a draft
 
   // A record still on the phone may already be on the server too (made, not yet
   // sent for review): it is listed once, under "On this phone" (withoutOutboxTwins).
@@ -160,7 +162,7 @@ export function MyRecords({ nav }) {
                   label="Finish and send"
                   icon="send"
                   size={14}
-                  height={42}
+                  height={48}
                   onPress={() => nav.go('add', { qr: p.qr_id })}
                 />
               </View>
@@ -169,7 +171,7 @@ export function MyRecords({ nav }) {
         </View>
       ) : null}
       {filteredMine.length === 0 && filteredUnfinished.length === 0 && !onPhone ? (
-        <Empty icon="file">{q.trim() ? `No records match "${q.trim()}".` : 'No records yet. Scan an unused tag to add your first plant.'}</Empty>
+        <EmptyState count={0} icon="file" filtered={!!q.trim()}>{q.trim() ? `No records match "${q.trim()}".` : 'No records yet. Scan an unused tag to add your first plant.'}</EmptyState>
       ) : null}
       {groups.map((g, gi) => {
         const rows = filteredMine.filter((o) => g.statuses.includes(o.status));
@@ -249,6 +251,11 @@ export function RecordDetail({ nav, params = {} }) {
 
   const send = async () => {
     if (sending || !fix) return; // no form yet: its empty fields would clear the record's values
+    // The API's limit, as on the other record forms.
+    if (!heightOk(fix.height_cm)) {
+      Alert.alert('Height not valid', HEIGHT_PROBLEM);
+      return;
+    }
     setSending(true);
     const r = await resubmit(o.id, message.trim(), fix); // shows its own success or error message
     setSending(false);
@@ -325,19 +332,15 @@ export function RecordDetail({ nav, params = {} }) {
       <Section title="Photos" right={<Txt v="caption" color={c.ink3}>{photos.length} of 6</Txt>} gap={12}>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
           {photos.map((p, i) => <Thumb key={p.id ? `${p.id}-${i}` : i} uri={p.url} size={76} />)}
-          {returned ? (
-            <View accessibilityLabel="Add the missing photo when you edit this record" style={{ width: 76, height: 76, borderRadius: 10, borderWidth: 2, borderStyle: 'dashed', borderColor: c.warning, alignItems: 'center', justifyContent: 'center' }}>
-              <Icon name="camera" size={22} color={c.warning} />
-            </View>
-          ) : null}
         </View>
+        {photos.length === 0 ? <Txt v="small" color={c.ink2}>No photos.</Txt> : null}
       </Section>
 
       {returned ? (
         <Section title="Fix the record" gap={12}>
-          <Area label="Appearance" value={fixForm.morphology} onChangeText={(t) => setFix({ ...fixForm, morphology: t })} />
-          <Field label="Height (cm)" value={fixForm.height_cm} onChangeText={(t) => setFix({ ...fixForm, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} />
-          <Area label="Field notes" optional value={fixForm.notes} onChangeText={(t) => setFix({ ...fixForm, notes: t })} rows={2} />
+          <Area label="Appearance" value={fixForm.morphology} onChangeText={(t) => setFix({ ...fixForm, morphology: t })} maxLength={LIMITS.text} />
+          <Field label="Height (cm)" value={fixForm.height_cm} onChangeText={(t) => setFix({ ...fixForm, height_cm: t.replace(/[^\d.]/g, '') })} keyboardType="decimal-pad" width={140} error={heightOk(fixForm.height_cm) ? undefined : HEIGHT_PROBLEM} />
+          <Area label="Field notes" optional value={fixForm.notes} onChangeText={(t) => setFix({ ...fixForm, notes: t })} rows={2} maxLength={LIMITS.text} />
         </Section>
       ) : null}
 
@@ -365,7 +368,7 @@ export function RecordDetail({ nav, params = {} }) {
 
       {returned ? <Area label="Reply to the officer" optional value={message} onChangeText={setMessage} placeholder="What did you change?" rows={2} /> : null}
       {o.status === 'approved' ? <Button label="Open plant page" kind="secondary" onPress={() => nav.go('tag', { qr: plant.qr_id })} /> : null}
-      {returned ? <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}><Icon name="info" size={18} color={c.ink3} /><Txt v="caption" color={c.ink2} style={{ flex: 1, fontFamily: font('text', 600) }}>Add the missing photo on your next visit with "Record a revisit".</Txt></View> : null}
+      {returned ? <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}><Icon name="info" size={18} color={c.ink3} /><Txt v="caption" color={c.ink2} style={{ flex: 1, fontFamily: font('text', 600) }}>Photos can't be changed on a returned record. To add one, use "Record a revisit" on the plant's page.</Txt></View> : null}
     </Screen>
   );
 }

@@ -1,7 +1,7 @@
 // apps/mobile/pages/Account.js
 // Staff profile and account settings for mobile (counterpart to web Account.jsx).
 import React, { useState } from 'react';
-import { View, Text } from 'react-native';
+import { View } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { ROLE_LABEL } from '../../shared/permissions.js';

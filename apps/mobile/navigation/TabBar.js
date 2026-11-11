@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
-import { getRoleTabs } from './tabs.js';
+import { getRoleTabs, badgeText } from './tabs.js';
 
 export default function TabBar({ role, current, onTab, badges = {} }) {
   const { c } = useTheme();
@@ -38,7 +38,8 @@ export default function TabBar({ role, current, onTab, badges = {} }) {
             accessibilityState={{ selected: on }}
             accessibilityLabel={count ? `${tab.label}, ${count} new` : tab.label}
             onPress={() => onTab(tab.key)}
-            style={{ flex: 1, alignItems: 'center', gap: 4 }}
+            // As tall as the bar, so the whole slot takes the tap, with the icon and label at its foot.
+            style={({ pressed }) => ({ flex: 1, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'flex-end', gap: 4, opacity: pressed ? 0.7 : 1 })}
           >
             {tab.main ? (
               <View
@@ -75,7 +76,7 @@ export default function TabBar({ role, current, onTab, badges = {} }) {
                     }}
                   >
                     <Text style={{ fontFamily: font('text', 800), fontSize: 11, color: c.onDanger }}>
-                      {count}
+                      {badgeText(count)}
                     </Text>
                   </View>
                 ) : null}

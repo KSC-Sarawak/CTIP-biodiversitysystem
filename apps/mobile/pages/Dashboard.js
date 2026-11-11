@@ -2,7 +2,7 @@
 // The Plants tab: the species catalogue (everyone) and the tagged plants (staff).
 // Both load in pages as you scroll (infinite scroll) and show a small loading line
 // while the next page arrives.
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Text, FlatList, Pressable, Animated } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -12,7 +12,7 @@ import { isThreatened } from '../../shared/data.js';
 import { useTheme, font } from '../components/Theme.js';
 import {
   TitleBlock, SearchField, Pills, Segmented, SortBar, Row, Thumb, Sci, Mono, DotLabel, Txt, IconButton,
-  SkeletonRow, LoadingMore, Empty, Notice, Button,
+  SkeletonRow, LoadingMore, Empty, EmptyState, Notice, Button,
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
 import { OfflineCaption, OFFLINE_EMPTY_TEXT, speciesPhoto } from '../components/OfflineSpecies.js';
@@ -31,24 +31,21 @@ const RAIL_SPACE = 16; // room kept right of the rows for the rail
 const LIST_BOTTOM = 40; // clears the raised Add plant / Scan button in the tab bar
 
 // Pages through `items` already in the store: page 1, 2, 3… of PAGE_SIZE.
+// The rows are in memory, so each page shows at once: there is nothing to wait
+// for (`loading` is always false; it is kept so both lists read the same way).
 // A botanist or visitor typing a species name searches the API instead
-// (useSpeciesSearch, CTIP-26; see SpeciesList).
+// (useSpeciesSearch, CTIP-26; see SpeciesList), and that search does load.
 function usePaged(items, resetKey) {
-  const [page, setPage] = useState({ key: resetKey, count: 0, loading: true });
+  const [page, setPage] = useState({ key: resetKey, count: PAGE_SIZE });
   // A new search or filter starts again from page 1.
-  if (page.key !== resetKey) setPage({ key: resetKey, count: 0, loading: true });
-
-  useEffect(() => {
-    if (!page.loading) return undefined;
-    const timer = setTimeout(() => setPage((p) => ({ ...p, count: p.count + PAGE_SIZE, loading: false })), 450);
-    return () => clearTimeout(timer);
-  }, [page.loading, page.key]);
+  const count = page.key === resetKey ? page.count : PAGE_SIZE;
+  if (page.key !== resetKey) setPage({ key: resetKey, count: PAGE_SIZE });
 
   const loadMore = () => {
-    if (!page.loading && page.count < items.length) setPage((p) => ({ ...p, loading: true }));
+    if (count < items.length) setPage({ key: resetKey, count: count + PAGE_SIZE });
   };
 
-  return { shown: items.slice(0, page.count), loading: page.loading, loadMore, total: items.length, done: page.count >= items.length };
+  return { shown: items.slice(0, count), loading: false, loadMore, total: items.length, done: count >= items.length };
 }
 
 function ListHeader({ children }) {
@@ -203,7 +200,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
         {apiMode && search.error ? (
           <View style={{ gap: 8 }}>
             <Notice tone="warning" icon="info" title="Species search unavailable" body={search.error} />
-            <Button label="Try again" kind="secondary" height={44} size={15} onPress={search.retry} />
+            <Button label="Try again" kind="secondary" height={48} size={15} onPress={search.retry} />
           </View>
         ) : null}
       </PlantsHeader>
@@ -238,7 +235,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
         ListEmptyComponent={
           loading || (apiMode && search.error) ? null
           : apiMode && search.offline && search.cachedCount === 0 ? <Empty icon="search">{OFFLINE_EMPTY_TEXT}</Empty>
-          : <Empty icon="search">No species match. Try another name or family.</Empty>
+          : <EmptyState count={0} icon="search" filtered={!!needle || family !== 'all'}>{needle || family !== 'all' ? 'No species match. Try another name or family.' : 'No species yet.'}</EmptyState>
         }
         ListFooterComponent={
           loading ? (
@@ -380,7 +377,7 @@ function TaggedList({ nav, onView }) {
             last={index === shown.length - 1 && !loading}
           />
         )}
-        ListEmptyComponent={loading ? null : <Empty icon="search">No tagged plants match.</Empty>}
+        ListEmptyComponent={loading ? null : <EmptyState count={0} icon="search" filtered={!!needle || filter !== 'all'}>{needle || filter !== 'all' ? 'No tagged plants match.' : 'No tagged plants yet.'}</EmptyState>}
         ListFooterComponent={loading ? <View>{shown.length === 0 ? [0, 1, 2, 3].map((i) => <SkeletonRow key={i} />) : null}<LoadingMore /></View> : null}
       />
     </View>

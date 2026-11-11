@@ -4,7 +4,7 @@
 // their authenticator app. The first time, the app is set up here: the phone
 // cannot scan its own screen, so it opens the authenticator app with the
 // set-up link, or the person copies the set-up key into it by hand.
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { View, Linking } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 
@@ -27,39 +27,52 @@ export default function SignIn({ nav }) {
   const [setup, setSetup] = useState(null); // { secret, uri } while setting up
   const [busy, setBusy] = useState(false);
   const staff = getStaffPageContent(PARK);
+  const passwordInput = useRef(null);
 
+  // `busy` stays on from the first tap until the next step shows (or an error
+  // does), and always comes off again, whatever goes wrong on the way.
   const submit = async () => {
+    if (busy || !email || !password) return;
     setBusy(true);
-    const res = await login(email, password);
-    setBusy(false);
-    if (!res.ok) return setError(res.message);
-    if (res.mfa === 'setup') {
-      setBusy(true);
-      const en = await mfaEnroll();
-      setBusy(false);
-      if (!en.ok) {
-        await mfaCancel();
-        return setError(en.message);
+    try {
+      const res = await login(email, password);
+      if (!res.ok) return setError(res.message);
+      if (res.mfa === 'setup') {
+        const en = await mfaEnroll();
+        if (!en.ok) {
+          await mfaCancel();
+          return setError(en.message);
+        }
+        setSetup({ secret: en.secret, uri: en.uri });
+        setCode('');
+        return setStep('setup');
       }
-      setSetup({ secret: en.secret, uri: en.uri });
-      setCode('');
-      return setStep('setup');
+      if (res.mfa === 'verify') {
+        setCode('');
+        return setStep('code');
+      }
+      signIn(res.id); // the app then opens this person's first tab
+    } catch {
+      setError('Sign in failed. Try again in a moment.');
+    } finally {
+      setBusy(false);
     }
-    if (res.mfa === 'verify') {
-      setCode('');
-      return setStep('code');
-    }
-    signIn(res.id); // the app then opens this person's first tab
   };
 
   const submitCode = async () => {
+    if (busy || code.length !== 6) return;
     setBusy(true);
-    const res = await mfaVerify(code);
-    setBusy(false);
-    if (!res.ok) return setError(res.message);
-    if (step === 'setup') notify('Two-step sign-in is set up');
-    setSetup(null);
-    signIn(res.id);
+    try {
+      const res = await mfaVerify(code);
+      if (!res.ok) return setError(res.message);
+      if (step === 'setup') notify('Two-step sign-in is set up');
+      setSetup(null);
+      signIn(res.id);
+    } catch {
+      setError('The code could not be checked. Try again in a moment.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const openAuthenticator = async () => {
@@ -93,9 +106,9 @@ export default function SignIn({ nav }) {
         <Txt v="mono" selectable style={{ fontSize: 16, lineHeight: 22 }}>{setup.secret.replace(/(.{4})/g, '$1 ').trim()}</Txt>
         <Button label="Copy set-up key" kind="quiet" onPress={copyKey} />
         <Field label="6-digit code" value={code} onChangeText={(v) => { setCode(v.replace(/\D/g, '').slice(0, 6)); setError(''); }}
-          placeholder="123456" keyboardType="number-pad" error={error || undefined} />
+          placeholder="123456" keyboardType="number-pad" autoComplete="one-time-code" returnKeyType="done" onSubmitEditing={submitCode} maxLength={6} error={error || undefined} />
         <View style={{ paddingTop: 4 }}>
-          <Button label={busy ? 'Checking...' : 'Finish set-up'} disabled={busy || code.length !== 6} onPress={submitCode} />
+          <Button label={busy ? 'Checking…' : 'Finish set-up'} disabled={busy || code.length !== 6} onPress={submitCode} />
         </View>
       </Screen>
     );
@@ -107,9 +120,9 @@ export default function SignIn({ nav }) {
         <TitleBlock title="Enter your code" />
         <Txt v="body" color={c.ink2}>Open your authenticator app and type the 6-digit code for Daun Sense.</Txt>
         <Field label="6-digit code" value={code} onChangeText={(v) => { setCode(v.replace(/\D/g, '').slice(0, 6)); setError(''); }}
-          placeholder="123456" keyboardType="number-pad" error={error || undefined} />
+          placeholder="123456" keyboardType="number-pad" autoFocus autoComplete="one-time-code" returnKeyType="done" onSubmitEditing={submitCode} maxLength={6} error={error || undefined} />
         <View style={{ paddingTop: 4 }}>
-          <Button label={busy ? 'Checking...' : 'Verify'} disabled={busy || code.length !== 6} onPress={submitCode} />
+          <Button label={busy ? 'Checking…' : 'Verify'} disabled={busy || code.length !== 6} onPress={submitCode} />
         </View>
         <Txt v="small" color={c.ink2} style={{ fontSize: 14 }}>Lost your phone? Ask an admin to reset your two-step sign-in.</Txt>
       </Screen>
@@ -123,11 +136,13 @@ export default function SignIn({ nav }) {
       </View>
       <TitleBlock title="Staff sign in" />
       <Txt v="body" color={c.ink2}>For Sarawak Forestry Corporation botanists, conservation officers and admins.</Txt>
-      <Field label="Email" value={email} onChangeText={(v) => { setEmail(v); setError(''); }} placeholder="name@sfc.my" keyboardType="email-address" />
+      <Field label="Email" value={email} onChangeText={(v) => { setEmail(v); setError(''); }} placeholder="name@sfc.my" keyboardType="email-address"
+        autoComplete="email" returnKeyType="next" onSubmitEditing={() => passwordInput.current?.focus()} />
       <Field label="Password" value={password} onChangeText={(v) => { setPassword(v); setError(''); }} secure={!show}
-        rightIcon={show ? 'eyeOff' : 'eye'} onRightPress={() => setShow(!show)} error={error || undefined} />
+        inputRef={passwordInput} autoComplete="current-password" returnKeyType="go" onSubmitEditing={submit}
+        rightIcon={show ? 'eyeOff' : 'eye'} rightLabel={show ? 'Hide password' : 'Show password'} onRightPress={() => setShow(!show)} error={error || undefined} />
       <View style={{ paddingTop: 4 }}>
-        <Button label={busy ? 'Signing in...' : 'Sign in'} disabled={busy || !email || !password} onPress={submit} />
+        <Button label={busy ? 'Signing in…' : 'Sign in'} disabled={busy || !email || !password} onPress={submit} />
       </View>
       <Txt v="small" color={c.ink2} style={{ fontSize: 14 }}>{staff.description.split('. ').pop()} {staff.visitorHint}</Txt>
     </Screen>
