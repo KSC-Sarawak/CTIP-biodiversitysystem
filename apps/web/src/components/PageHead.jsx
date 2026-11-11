@@ -36,7 +36,7 @@ export default function PageHead({ overline, title, lead, tone = "info", actions
             );
             const cls = "pstat" + (s.tone && s.value ? " tone-" + s.tone : "") + (s.on ? " on" : "");
             if (s.onClick) {
-              return <button key={s.label} type="button" className={cls} onClick={s.onClick} aria-pressed={!!s.on}>{body}</button>;
+              return <button key={s.label} type="button" className={cls} onClick={s.onClick} aria-pressed={s.on === undefined ? undefined : !!s.on}>{body}</button>;
             }
             if (s.href) return <a key={s.label} className={cls} href={s.href}>{body}</a>;
             return <div key={s.label} className={cls}>{body}</div>;

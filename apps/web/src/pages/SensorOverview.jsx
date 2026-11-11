@@ -149,7 +149,7 @@ export default function SensorOverview() {
         }
         tone={open.length ? "bad" : nodes.length - online ? "warn" : nodes.length ? "ok" : "info"}
         stats={[
-          { label: "Open alerts", value: open.length, tone: "bad", href: "#attn" },
+          { label: "Open alerts", value: open.length, tone: "bad", onClick: () => document.getElementById("attn")?.scrollIntoView({ behavior: "smooth", block: "start" }) },
           { label: `Nodes online of ${nodes.length}`, value: online },
           { label: "Offline or faulty", value: nodes.length - online, tone: "warn" },
           { label: "Outside alert limits", value: outOfLimits, tone: "warn" },
@@ -163,7 +163,7 @@ export default function SensorOverview() {
         <section className="glass pad" aria-labelledby="nodemap">
           <h2 id="nodemap">Node map</h2>
           <p className="mute small">Select a pin to see that node's readings and photos.</p>
-          <NodeMap nodes={nodes} whereOf={whereOf} openByNode={openByNode} onSelect={setNodeId} />
+          <NodeMap nodes={nodes} whereOf={whereOf} plantOf={plantOf} openByNode={openByNode} selectedId={node?.id} onSelect={setNodeId} />
         </section>
 
         <section aria-labelledby="attn-h" id="attn">

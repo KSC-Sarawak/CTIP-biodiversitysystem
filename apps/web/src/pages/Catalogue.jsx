@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import Icon from "../components/Icon.jsx";
 import PlantCard from "../components/PlantCard.jsx";
-import ForestScene from "../components/ForestScene.jsx";
+import JungleArt from "../components/JungleArt.jsx";
 import { Chip, Empty, Pills } from "../components/Bits.jsx";
 import { useStore } from "../../../shared/store.js";
 import { can } from "../../../shared/permissions.js";
@@ -111,10 +111,10 @@ export default function Catalogue() {
   return (
     <div className="catpage">
       <section className="cathero">
-        <ForestScene className="cathero-art" />
+        <JungleArt />
         <div className="cathero-text">
           <p className="overline">Plant library · Niah National Park</p>
-          <h1>Plants of <span className="hl">Niah</span></h1>
+          <h1>Plants of <span className="cathero-accent">Niah</span></h1>
           <form className="bigsearch" role="search" onSubmit={(e) => { e.preventDefault(); resultsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }); }}>
             <label className="search">
               <Icon name="search" size={20} />
