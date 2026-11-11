@@ -4,6 +4,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "../../../shared/store.js";
 import { go, useRoute } from "../useRoute.js";
 import Icon from "../components/Icon.jsx";
+import ForestScene from "../components/ForestScene.jsx";
 import { PasswordInput } from "../components/Bits.jsx";
 import { getStaffPageContent } from "../../../shared/publicContent.js";
 import { PARK } from "../../../shared/site.js";
@@ -137,9 +138,19 @@ export default function Login() {
   );
 
   return (
-    <section className="glass pad narrow">
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 16 }}>
-        <img src="/logo.svg" alt="Daun Sense" style={{ width: 56, height: 56, borderRadius: 14 }} />
+    <div className="auth">
+    {/* Welcome panel: the illustrated forest, a greeting, and what signing in is for. */}
+    <aside className="auth-art">
+      <ForestScene />
+      <div className="auth-welcome">
+        <p className="overline">{PARK}</p>
+        <p className="auth-title">Welcome back to <span className="hl">the forest.</span></p>
+        <p>Every record you send helps protect a plant.</p>
+      </div>
+    </aside>
+    <section className="glass pad auth-card">
+      <div className="auth-logo">
+        <img src="/logo.svg" alt="Daun Sense" />
       </div>
       {mode === "signin" && (
         <>
@@ -249,5 +260,6 @@ export default function Login() {
         </form>
       )}
     </section>
+    </div>
   );
 }

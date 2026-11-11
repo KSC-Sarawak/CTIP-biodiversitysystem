@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import BackButton from "../components/BackButton.jsx";
 import Img from "../components/Img.jsx";
 import MiniMap from "../components/MiniMap.jsx";
 import NewSpeciesButton from "../components/NewSpeciesButton.jsx";
@@ -32,6 +33,7 @@ export default function Review() {
   const [queue, setQueue] = useState(null); // null while loading
   const [error, setError] = useState(null);
   const [sort, setSort] = useState("newest");
+  const [done, setDone] = useState(null); // { decision, qr } of the record just decided
 
   const reload = useCallback(() => loadReviewQueue().then((r) => {
     setError(r.ok ? null : r.message);
@@ -100,6 +102,20 @@ export default function Review() {
         </div>
       </div>
 
+      {done && (
+        <section className="reviewdone" role="status">
+          <span className="reviewdone-ic"><Icon name={done.decision === "approve" ? "check" : done.decision === "return" ? "undo" : "x"} size={22} /></span>
+          <div className="grow">
+            <b>{done.qr} {done.decision === "approve" ? "approved and published" : done.decision === "return" ? "returned to the botanist" : "rejected"}</b>
+            <p className="mute small">{waiting ? `${waiting} more ${waiting === 1 ? "record is" : "records are"} waiting below.` : "That was the last one waiting."}</p>
+          </div>
+          <div className="row wrap">
+            <BackButton label="Back to previous page" className="btn" />
+            <button type="button" className="ic" onClick={() => setDone(null)} aria-label="Close message"><Icon name="x" size={18} /></button>
+          </div>
+        </section>
+      )}
+
       {error && <p className="mute small" role="alert">Could not load the review queue from the API: {error}</p>}
 
       {queue === null ? (
@@ -125,7 +141,7 @@ export default function Review() {
               );
             })}
           </div>
-          <ReviewDetail key={obs.id} obs={obs} onDecided={reload} />
+          <ReviewDetail key={obs.id} obs={obs} onDecided={(decision, qr) => { if (decision) setDone({ decision, qr }); reload(); }} />
         </div>
       )}
     </Shell>
@@ -173,7 +189,8 @@ function ReviewDetail({ obs, onDecided }) {
     }
     const r = await reviewObservation(obs.id, decision, comment.trim()); // shows its own message
     setDeciding(false);
-    if (r?.ok || r?.error === "WRONG_STATUS") onDecided(); // reload: decided, or decided by someone else
+    if (r?.ok) onDecided(decision, plant.qr_id);
+    else if (r?.error === "WRONG_STATUS") onDecided(); // reload: decided by someone else
   };
 
   return (
