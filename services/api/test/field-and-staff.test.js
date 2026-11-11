@@ -75,6 +75,7 @@ async function fakeSupabase(input, init = {}) {
     if (op === 'eq') return `${row[k]}` === want;
     if (op === 'neq') return `${row[k]}` !== want;
     if (op === 'gte') return `${row[k]}` >= want; // ISO timestamps compare as text
+    if (op === 'lte') return `${row[k]}` <= want;
     if (op === 'ilike') return `${row[k]}`.toLowerCase() === want.toLowerCase();
     if (op === 'in') return want.replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/"/g, '')).includes(`${row[k]}`);
     if (op === 'is' && want === 'null') return row[k] == null;
@@ -121,7 +122,7 @@ async function fakeSupabase(input, init = {}) {
 beforeEach((t) => {
   db = {
     qr_tags: [], specimens: [], observations: [], observation_photos: [], observation_comments: [],
-    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], telemetry: [],
+    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], telemetry: [], sensor_images: [],
     notifications: [], audit_logs: [], profiles: [], zones: [],
     discussions: [], discussion_audience: [], discussion_posts: [], 'rpc/discussion_directory': [],
   };
@@ -498,6 +499,47 @@ test('sensor node telemetry: readings in the asked range, oldest first; bad inpu
   assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=abc`).set(as('officer'))).status, 400);
   assert.equal((await request(app).get('/v1/sensor-nodes/not-a-uuid/telemetry').set(as('officer'))).status, 404);
   assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry`).set(as('botanist'))).status, 403);
+});
+
+test('sensor node telemetry: a chosen date range (from and to)', async () => {
+  const node = crypto.randomUUID();
+  db.telemetry.push(
+    { id: 'before', node_id: node, ts: '2026-11-01T10:00:00.000Z' },
+    { id: 'in1', node_id: node, ts: '2026-11-02T10:00:00.000Z' },
+    { id: 'in2', node_id: node, ts: '2026-11-03T10:00:00.000Z' },
+    { id: 'after', node_id: node, ts: '2026-11-05T10:00:00.000Z' },
+  );
+  const get = (q) => request(app).get(`/v1/sensor-nodes/${node}/telemetry?${q}`).set(as('officer'));
+  const res = await get('from=2026-11-02T00:00:00Z&to=2026-11-04T00:00:00Z');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.map((r) => r.id).sort(), ['in1', 'in2']);
+  assert.equal((await get('from=2026-11-04&to=2026-11-02')).status, 400); // backwards
+  assert.equal((await get('from=2026-01-01&to=2026-11-01')).status, 400); // longer than 30 days
+  assert.equal((await get('from=yesterday')).status, 400);
+  assert.equal((await get('to=2026-11-04')).status, 400); // to without from
+  assert.equal((await get('hours=24&from=2026-11-02')).status, 400); // both kinds
+});
+
+test('sensor node images: newest photos with signed links, officers and admins only', async () => {
+  const node = crypto.randomUUID();
+  db.sensor_images.push(
+    { id: 'p1', node_id: node, captured_at: '2026-11-10T10:00:00.000Z', s3_bucket: 'sensor-images', s3_key: `${node}/p1.jpg` },
+    { id: 'p0', node_id: node, captured_at: '2026-11-01T10:00:00.000Z', s3_bucket: 'sensor-images', s3_key: `${node}/p0.jpg` },
+    { id: 'p2', node_id: crypto.randomUUID(), captured_at: '2026-11-10T11:00:00.000Z', s3_key: 'other/p2.jpg' },
+  );
+  const get = (q = '', role = 'officer') => request(app).get(`/v1/sensor-nodes/${node}/images${q}`).set(as(role));
+  const res = await get('', 'admin');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data.map((r) => r.id).sort(), ['p0', 'p1']);
+  assert.match(res.body.data[0].view_url, /token=t/);
+  assert.equal(res.body.meta.total, 2);
+  const recent = await get('?from=2026-11-05');
+  assert.deepEqual(recent.body.data.map((r) => r.id), ['p1']);
+  assert.equal((await get('?limit=0')).status, 400);
+  assert.equal((await get('?limit=500')).status, 400);
+  assert.equal((await get('?from=soon')).status, 400);
+  assert.equal((await request(app).get('/v1/sensor-nodes/nope/images').set(as('officer'))).status, 404);
+  assert.equal((await get('', 'botanist')).status, 403);
 });
 
 test('workspace: a side list that fails comes back empty and named; a core list fails the request', async () => {

@@ -7,7 +7,7 @@ import NewSpeciesButton from "../components/NewSpeciesButton.jsx";
 import PhotoGallery from "../components/PhotoGallery.jsx";
 import PhotoEditor from "../components/PhotoEditor.jsx";
 import PublicPlant from "./PublicPlant.jsx";
-import { Chip, Empty, Mono, Sci } from "../components/Bits.jsx";
+import { Chip, Empty, Modal, Mono, Sci } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { decisionPrompt } from "../decisionPrompt.jsx";
 import { useStore } from "../../../shared/store.js";
@@ -27,6 +27,7 @@ export default function Specimen({ qr }) {
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState(false);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [qrBig, setQrBig] = useState(false); // QR code enlarged for scanning
   const [ask, confirmDialog] = useConfirm();
 
   const plant = visiblePlants(db, role).find((p) => p.qr_id === qr);
@@ -224,7 +225,7 @@ export default function Specimen({ qr }) {
             <h2>Location</h2>
             {coords ? (
               <>
-                <MiniMap points={[{ p: plant, c: coords }]} height={150} highlight={plant.qr_id} label={`Location of ${plant.qr_id}`} />
+                <MiniMap points={[{ p: plant, c: coords }]} height={150} highlight={plant.qr_id} label={`Location of ${plant.qr_id}`} expandable mapHref={"#/map/" + plant.qr_id} />
                 <p className="gap-top-s"><Mono>{coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</Mono></p>
                 {plant.location_reduced
                   ? <p className="mute small">{REDUCED_LOCATION_NOTE}</p>
@@ -253,9 +254,17 @@ export default function Specimen({ qr }) {
             <section className="glass pad">
               <h2>QR tag</h2>
               <div className="qrbox">
-                <div className="qrwhite"><QRCodeSVG value={tagUrl(plant.qr_id)} size={76} /></div>
-                <p className="mute small">Scanning this tag opens this page.</p>
+                <button type="button" className="qrwhite qrbtn" onClick={() => setQrBig(true)} aria-label={`Enlarge QR code for ${plant.qr_id}`} title="Enlarge to scan">
+                  <QRCodeSVG value={tagUrl(plant.qr_id)} size={76} />
+                </button>
+                <p className="mute small">Scanning this tag opens this page. Select the code to enlarge it.</p>
               </div>
+              {qrBig && (
+                <Modal title={`QR tag ${plant.qr_id}`} onClose={() => setQrBig(false)}>
+                  <div className="qrwhite qrlarge"><QRCodeSVG value={tagUrl(plant.qr_id)} size={512} /></div>
+                  <p className="mute small gap-top-s" style={{ textAlign: "center" }}>Point a phone camera at the code to open this page.</p>
+                </Modal>
+              )}
             </section>
           )}
           {plant.species && (

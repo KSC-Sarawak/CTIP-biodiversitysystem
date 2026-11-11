@@ -375,7 +375,9 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 /* Password box with a show/hide eye button sitting inside its right edge. */
 .pwfield { position: relative; display: block; }
 .site .pwfield input { padding-right: 48px; margin-top: 0 !important; }
-.pwfield .ic { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); color: var(--ink2); }
+/* Centred with top/bottom + auto margins, not a transform: the press-in effect
+   (.ic:active { transform: scale(...) }) would replace the transform and drop the button. */
+.pwfield .ic { position: absolute; right: 2px; top: 0; bottom: 0; margin: auto 0; color: var(--ink2); }
 /* Forms laid out in a row (QR tags, alert limits, add user): buttons line up with the input boxes, not the labels. */
 .site form.row:has(> label:not(.btn)), .site form .row:has(> label:not(.btn)) { align-items: flex-end; }
 .site form.row > label, .site form .row > label { margin: 0; }
@@ -612,6 +614,11 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 
 /* QR codes stay black on white in both themes so phone cameras can read them. */
 .qrwhite { background: #fff; padding: var(--s-2); border-radius: var(--r-control); line-height: 0; }
+/* QR code as a button: select it to enlarge for scanning. */
+.qrbtn { border: 0; cursor: zoom-in; flex: none; }
+.qrbtn:hover { box-shadow: 0 0 0 2px var(--acc); }
+.qrlarge { display: block; width: min(100%, 420px); margin-inline: auto; padding: var(--s-4); }
+.qrlarge svg { width: 100%; height: auto; }
 .qrbox { display: flex; align-items: center; gap: 14px; margin-top: var(--s-4); padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); }
 
 /* Photo editor popup */
@@ -843,6 +850,10 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 .speciesinfo dl { margin-top: var(--s-2) !important; }
 .sciname { font-size: 19px; }
 .minimap { margin-top: 10px; }
+/* A map preview that opens a large map: the whole map is the button. */
+.minimap .enlarge { position: absolute; inset: 0; z-index: 500; display: flex; align-items: flex-end; justify-content: flex-end; padding: var(--s-2); border: 0; background: none; cursor: zoom-in; }
+.minimap .enlarge-hint { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--r-control); background: var(--surface); color: var(--ink); font-size: var(--t-caption-size); font-weight: 700; box-shadow: var(--shadow); }
+.minimap .enlarge:hover .enlarge-hint, .minimap .enlarge:focus-visible .enlarge-hint { background: var(--acc); color: #fff; }
 .minimap .plantdot { display: block; }
 .taggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--s-3); }
 .tagcard { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3); }
@@ -881,7 +892,7 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 .views { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: 20px; }
 .tablecard { margin-top: 0; padding: 0; }
 .tablecard table { min-width: 700px; }
-.tablecard th { padding: 0; }
+.tablecard th, .site th:has(> .sortbtn) { padding: 0; }
 .sortbtn { width: 100%; padding: 10px 14px; border: 0; background: none; color: var(--ink2); font: 700 var(--t-caption-size) var(--f-text); text-align: inherit; cursor: pointer; }
 .sortbtn:hover, .tablecard th[aria-sort] .sortbtn { color: var(--ink); }
 .tablecard td:first-child, .tablecard th:first-child .sortbtn { padding-left: var(--s-4); }
@@ -951,6 +962,55 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 .dotstatus.up::before { background: var(--ok); }
 .dotstatus.off { color: var(--warn); }
 .dotstatus.off::before { border: 2px solid var(--warn); width: 5px; height: 5px; }
+.dotstatus.online { color: var(--ok); }
+.dotstatus.online::before { background: var(--ok); }
+.dotstatus.alert { color: var(--bad); }
+.dotstatus.alert::before { background: var(--bad); }
+.dotstatus.offline { color: var(--ink2); }
+.dotstatus.offline::before { border: 2px solid var(--ink2); width: 5px; height: 5px; }
+.nodecard.alerting { border-color: var(--bad-line, var(--bad)); }
+/* The top of a node card picks the node; the rest is its latest readings. */
+.nodepick { display: flex; flex-direction: column; gap: var(--s-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.nodecard > .textlink { align-self: flex-start; padding: 0; border: 0; background: none; font: inherit; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.site dl.readings { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: var(--s-1) var(--s-3); margin: var(--s-1) 0; border: 0; border-radius: 0; background: none; overflow: visible; }
+.site dl.readings dt { padding: 0; background: none; border: 0; font-size: var(--t-caption-size); font-weight: 600; color: var(--ink2); }
+.site dl.readings dd { padding: 0; border: 0; font-weight: 600; }
+.site dl.readings .warntext dt { color: inherit; }
+
+/* Map and open alerts side by side on wide screens */
+.monitor-top { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: var(--s-4); align-items: start; }
+.monitor-top > section > h2 { margin-top: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); margin: var(--s-2) 0 0; font-size: var(--t-caption-size); }
+.legend li { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.livedot { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 50%; background: var(--ok); vertical-align: middle; }
+
+/* Readings over time */
+.tchart { margin: 0; padding: var(--s-3) 14px var(--s-2); border-radius: var(--r-card); background: var(--raised); border: 1px solid var(--line); min-width: 0; }
+.tchart figcaption { margin-bottom: 6px; color: var(--ink2); }
+.tchart figcaption b { font-family: var(--f-mono); font-weight: 500; color: var(--ink); }
+.tchart-plot { position: relative; height: 140px; touch-action: pan-y; cursor: crosshair; }
+.tchart-plot svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.tchart-grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.tchart-y { position: absolute; left: 0; padding: 0 4px; font: 500 11px var(--f-mono); color: var(--ink2); background: var(--raised); border-radius: 4px; pointer-events: none; }
+.tchart-y.top { top: 0; }
+.tchart-y.bottom { bottom: 0; }
+.tchart-cursor { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--ink2); opacity: .5; pointer-events: none; }
+.tchart-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; background: var(--acc); box-shadow: 0 0 0 2px var(--raised); pointer-events: none; }
+.tchart-tip { position: absolute; top: 4px; margin-left: 8px; padding: 2px 8px; white-space: nowrap; font-size: var(--t-caption-size); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-control); box-shadow: var(--shadow); pointer-events: none; }
+.tchart-tip.flip { transform: translateX(calc(-100% - 16px)); }
+.tchart-tip b { font-family: var(--f-mono); font-weight: 500; }
+.tchart-x { position: relative; height: 18px; margin-top: 4px; font: 500 11px var(--f-mono); color: var(--ink2); }
+.tchart-x span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
+.tchart-x span:first-child { transform: none; }
+.tchart-x span:last-child { transform: translateX(-100%); }
+
+/* Webcam photos per node */
+.shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s-3); margin-top: var(--s-2); }
+.shot { display: grid; place-items: center; width: 100%; aspect-ratio: 4 / 3; padding: 0; overflow: hidden; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--raised); cursor: zoom-in; }
+.shot:disabled { cursor: default; }
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-big { display: block; width: 100%; max-height: 75vh; object-fit: contain; border-radius: var(--r-control); background: #000; }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: var(--s-4); }
 .spark { margin: 0; padding: var(--s-3) 14px; border-radius: var(--r-card); background: var(--raised); border: 1px solid var(--line); }
 .spark figcaption { margin-bottom: 6px; color: var(--ink2); }
@@ -1326,6 +1386,7 @@ mark.mention { padding: 0 2px; border-radius: var(--r-tag); background: var(--ac
   .speciesinfo h1 { font-size: 30px; line-height: 36px; }
   .row > input { min-width: 0; }
   .charts, .two { grid-template-columns: 1fr; }
+  .monitor-top { grid-template-columns: 1fr; }
   .bars li { grid-template-columns: 100px 1fr 24px; }
   .reportcharts .bars li { grid-template-columns: minmax(0, 45%) 1fr 24px; }
   .site dl { grid-template-columns: 110px minmax(0, 1fr); }

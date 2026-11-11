@@ -1560,23 +1560,37 @@ paths:
     get:
       tags: [Sensors]
       operationId: getNodeTelemetry
-      summary: Readings for one node over a time range
+      summary: Readings for one node over a time range (officer/admin)
+      description: |
+        Pick the range with either `hours` (back from now), or `from` and `to`
+        (CTIP-81), not both. A range is at most 30 days, and `from` at most
+        366 days ago. At most 5000 readings come back: the newest ones when
+        the range holds more.
       parameters:
         - $ref: '#/components/parameters/Id'
+        - name: hours
+          in: query
+          description: How far back from now. Default 24 when neither from nor to is given.
+          schema: { type: number, minimum: 1, maximum: 720, default: 24 }
         - name: from
           in: query
+          description: Start of the range. Needed when `to` is given.
           schema: { type: string, format: date-time }
         - name: to
           in: query
+          description: End of the range. Defaults to now.
           schema: { type: string, format: date-time }
       responses:
         '200':
-          description: Readings, newest first
+          description: Readings, oldest first
           content:
             application/json:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/TelemetryReading' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /telemetry:
     post:

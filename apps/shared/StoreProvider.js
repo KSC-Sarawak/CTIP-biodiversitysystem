@@ -67,6 +67,7 @@ import {
   addAlertNoteApi,
   setThresholdsApi,
   getNodeTelemetryApi,
+  getNodeImagesApi,
   markReadApi,
   markAllReadApi,
 } from "./api.js";
@@ -385,6 +386,8 @@ function collectionMatches(a = [], b = []) {
       status: n.status,
       thresholds: n.thresholds,
       last_seen: n.last_seen,
+      lat: n.lat ?? null, // where the node was installed, if recorded
+      lng: n.lng ?? null,
     }));
 
     // Readings per node, oldest first (the API sends the newest first).
@@ -1521,9 +1524,15 @@ function collectionMatches(a = [], b = []) {
 
   // One node's readings over a longer range than the workspace's last 24 hours.
   // Returns { ok, rows } (oldest first) and never changes db.
-  const loadNodeTelemetry = async (nodeId, hours = 24) => {
-    const res = await callApi(getNodeTelemetryApi, nodeId, hours);
+  // `range`: hours back from now, or { from, to } for a chosen date range.
+  const loadNodeTelemetry = async (nodeId, range = 24) => {
+    const res = await callApi(getNodeTelemetryApi, nodeId, range);
     return res.ok ? { ok: true, rows: Array.isArray(res.data) ? res.data : [] } : { ok: false, message: res.message };
+  };
+
+  const loadNodeImages = async (nodeId, limit = 12) => {
+    const res = await callApi(getNodeImagesApi, nodeId, limit);
+    return res.ok ? { ok: true, images: Array.isArray(res.data) ? res.data : [] } : { ok: false, message: res.message };
   };
 
   /* ---------- notifications and tags ---------- */
@@ -1588,7 +1597,7 @@ function collectionMatches(a = [], b = []) {
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
-    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, loadNodeTelemetry,
+    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, loadNodeTelemetry, loadNodeImages,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,
