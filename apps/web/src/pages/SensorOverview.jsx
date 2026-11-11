@@ -2,21 +2,29 @@
 import { useEffect, useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
-import { Chip, Empty, Mono, Pills, Sparkline } from "../components/Bits.jsx";
+import { Chip, Empty, Mono, Pills } from "../components/Bits.jsx";
+import { NodeImages, NodeMap, TimeChart } from "../components/SensorParts.jsx";
+import { NODE_STATE, has, nodeState } from "../sensorState.js";
 import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
-import { nameOf, plantView } from "../../../shared/selectors.js";
+import { nameOf, plantView, shownCoords } from "../../../shared/selectors.js";
+import { isExactProtected } from "../../../shared/mapConfig.js";
 import { fmtDateTime, label } from "../../../shared/utils.js";
 
 const latest = (rows) => rows?.[rows.length - 1];
-const has = (v) => v != null && Number.isFinite(Number(v));
 // "21.4" not "21.400000001"; "-" when the sensor sent nothing.
 const num = (v, digits = 1) => (has(v) ? String(Number(Number(v).toFixed(digits))) : "-");
+const motionText = (v) => (v == null ? "-" : v ? "Movement" : "None");
+const HOUR = 3600e3;
+const DAY = 24 * HOUR;
+const MAX_RANGE_DAYS = 30; // the API's limit for one request
 const RANGES = [
   { key: 24, label: "24 hours" },
   { key: 24 * 7, label: "7 days" },
   { key: 24 * 30, label: "30 days" },
+  { key: "custom", label: "Choose dates" },
 ];
+const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 // Is a reading outside the node's alert limits?
 const tooHot = (r, t) => has(r?.temperature) && has(t?.temp_max) && Number(r.temperature) > Number(t.temp_max);
@@ -28,44 +36,86 @@ function stats(rows, key) {
   return { min: Math.min(...vals), max: Math.max(...vals), avg: vals.reduce((a, b) => a + b, 0) / vals.length };
 }
 
-// Sensor nodes, their readings (telemetry table), and the alerts they raise (officers and admins).
-// Order on the page: summary, open alerts, nodes, readings for the chosen node, alert history.
+// The chosen custom dates as a time range (whole local days), or { error }.
+function customRange({ from, to }) {
+  if (!from || !to) return { error: "Pick both dates." };
+  const start = new Date(`${from}T00:00:00`);
+  const end = new Date(`${to}T23:59:59.999`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return { error: "Pick both dates." };
+  if (start > end) return { error: "The first date must be on or before the second." };
+  if (end - start > MAX_RANGE_DAYS * DAY) return { error: `Pick at most ${MAX_RANGE_DAYS} days.` };
+  return { start: start.getTime(), end: end.getTime() };
+}
+
+// IoT dashboard for officers and admins (the API refuses everyone else):
+// - CTIP-39 map of every node with its state, and the open alerts with their handling (CTIP-78)
+// - CTIP-79 each node's latest readings, kept current by the workspace poll (no page refresh)
+// - CTIP-81 charts of one node's readings over a chosen time range
+// - CTIP-82 the latest webcam photos for that node
 export default function SensorOverview() {
   const { db, role, setThresholds, notify, loadNodeTelemetry } = useStore();
   const [nodeId, setNodeId] = useState(db.nodes?.[0]?.id || null);
   const [tab, setTab] = useState("acknowledged");
-  const [hours, setHours] = useState(24);
+  const [range, setRange] = useState(24);
+  const [dates, setDates] = useState(() => ({ from: ymd(new Date(Date.now() - 6 * DAY)), to: ymd(new Date()) }));
   const [longRange, setLongRange] = useState({ key: null, rows: [], error: null });
   const [ask, confirmDialog] = useConfirm();
+  // "Now" for the rolling ranges, moved on every minute so the charts keep sliding.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   const nodes = db.nodes || [];
   const telemetry = db.telemetry || {};
   const node = nodes.find((n) => n.id === nodeId) || nodes[0] || null;
 
-  // The last 24 hours come with the live workspace load; longer ranges are asked for per node.
-  const rangeKey = node ? `${node.id}:${hours}` : null;
+  // Which time span the charts cover. The last 24 hours come live with the workspace
+  // load; longer or chosen ranges are asked for per node.
+  const custom = range === "custom" ? customRange(dates) : null;
+  const span = custom && !custom.error ? custom : { start: now - (custom ? 24 : range) * HOUR, end: now };
+  const rangeKey = !node || range === 24 || custom?.error ? null : `${node.id}:${range}:${custom ? `${custom.start}-${custom.end}` : ""}`;
   useEffect(() => {
-    if (!node || hours === 24 || !loadNodeTelemetry) return;
+    if (!rangeKey || !loadNodeTelemetry) return;
     let stale = false; // loading shows while longRange.key is not this range's key
-    loadNodeTelemetry(node.id, hours).then((res) => {
+    const want = custom ? { from: new Date(custom.start).toISOString(), to: new Date(custom.end).toISOString() } : range;
+    loadNodeTelemetry(node.id, want).then((res) => {
       if (stale) return;
       setLongRange({ key: rangeKey, rows: res.ok ? res.rows : [], error: res.ok ? null : res.message });
     });
     return () => { stale = true; };
   }, [rangeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = !node ? [] : hours === 24 ? telemetry[node.id] || [] : longRange.key === rangeKey ? longRange.rows : [];
-  const loading = hours !== 24 && longRange.key !== rangeKey;
+  const data = !node || custom?.error ? [] : range === 24 ? telemetry[node.id] || [] : longRange.key === rangeKey ? longRange.rows : [];
+  const loading = !!rangeKey && longRange.key !== rangeKey;
+  const loadError = rangeKey && longRange.key === rangeKey ? longRange.error : null;
 
   // A node can be unassigned, or its plant not visible to this role: show a placeholder, never crash.
-  const plantOf = (n) => plantView(db, db.plants.find((p) => p.id === n.specimen_id)) || { name: "No plant assigned", qr_id: "-" };
+  const plantRow = (n) => db.plants.find((p) => p.id === n.specimen_id);
+  const plantOf = (n) => plantView(db, plantRow(n)) || { name: "No plant assigned", qr_id: "-" };
+  // Where a node is: its own installed location, else the plant it watches.
+  const whereOf = (n) => {
+    const p = plantRow(n);
+    if (has(n.lat) && has(n.lng)) return { lat: Number(n.lat), lng: Number(n.lng), protect: p ? isExactProtected(p) : false };
+    const c = p && shownCoords(p, role);
+    return c ? { ...c, protect: isExactProtected(p) } : null;
+  };
   const byNewest = (a, b) => b.created_at.localeCompare(a.created_at);
   const open = db.alerts.filter((a) => a.status === "open").sort(byNewest);
+  const openByNode = {};
+  for (const a of open) openByNode[a.node_id] = (openByNode[a.node_id] || 0) + 1;
   const history = db.alerts.filter((a) => a.status !== "open" && (tab === "all" || a.status === tab)).sort(byNewest);
   const online = nodes.filter((n) => n.status === "active").length;
   const readings24h = Object.values(telemetry).reduce((sum, rows) => sum + rows.length, 0);
   const newestTs = Object.values(telemetry).map((rows) => latest(rows)?.ts).filter(Boolean).sort().at(-1) || null;
   const outOfLimits = nodes.filter((n) => { const r = latest(telemetry[n.id]); return tooHot(r, n.thresholds) || tooDry(r, n.thresholds); }).length;
+
+  // Open the node and bring its first open alert into view.
+  const showAlerts = (n) => {
+    const first = open.find((a) => a.node_id === n.id);
+    document.getElementById(first ? `alert-${first.id}` : "attn")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   const saveLimits = async (e) => {
     e.preventDefault();
@@ -76,13 +126,13 @@ export default function SensorOverview() {
     notify("Limits saved");
   };
 
-  const now = latest(data);
+  const live = node ? latest(telemetry[node.id]) : null; // newest reading, always from the live load
   const temp = stats(data, "temperature");
   const soil = stats(data, "soil_moisture");
   const humid = stats(data, "humidity");
   const motionCount = data.filter((r) => r.motion_detected === true).length;
   const breaches = node ? data.filter((r) => tooHot(r, node.thresholds) || tooDry(r, node.thresholds)).length : 0;
-  const rangeLabel = RANGES.find((r) => r.key === hours)?.label || "24 hours";
+  const rangeLabel = custom && !custom.error ? `${fmtDateTime(new Date(span.start).toISOString())} to ${fmtDateTime(new Date(span.end).toISOString())}` : `the last ${RANGES.find((r) => r.key === range)?.label}`;
 
   return (
     <Shell seg="monitoring" plain>
@@ -90,7 +140,7 @@ export default function SensorOverview() {
       <div className="pagehead">
         <div>
           <h1>Monitoring</h1>
-          <p className="mute">Sensor nodes protecting tagged plants · live readings from the last 24 hours{newestTs ? ` · newest ${fmtDateTime(newestTs)}` : ""}</p>
+          <p className="mute"><span className="livedot" aria-hidden="true" /> Live: readings update on their own every few seconds{newestTs ? ` · newest ${fmtDateTime(newestTs)}` : ""}</p>
         </div>
       </div>
 
@@ -102,14 +152,22 @@ export default function SensorOverview() {
         <div className="glass tile"><span className="mute">Readings, last 24 h</span><b>{readings24h}</b></div>
       </div>
 
-      <section className="gap-section-s" aria-labelledby="attn">
-        <h2 id="attn">Needs attention</h2>
-        {open.length === 0 ? (
-          <div className="glass pad"><Empty icon="shield">No open alerts. All quiet.</Empty></div>
-        ) : (
-          open.map((a) => <AlertCard key={a.id} alert={a} />)
-        )}
-      </section>
+      <div className="monitor-top gap-section-s">
+        <section className="glass pad" aria-labelledby="nodemap">
+          <h2 id="nodemap">Node map</h2>
+          <p className="mute small">Select a pin to see that node's readings and photos.</p>
+          <NodeMap nodes={nodes} whereOf={whereOf} openByNode={openByNode} onSelect={setNodeId} />
+        </section>
+
+        <section aria-labelledby="attn-h" id="attn">
+          <h2 id="attn-h">Needs attention</h2>
+          {open.length === 0 ? (
+            <div className="glass pad"><Empty icon="shield">No open alerts. All quiet.</Empty></div>
+          ) : (
+            open.map((a) => <AlertCard key={a.id} alert={a} />)
+          )}
+        </section>
+      </div>
 
       <section className="gap-section-s" aria-labelledby="nodes">
         <h2 id="nodes">Sensor nodes</h2>
@@ -119,24 +177,32 @@ export default function SensorOverview() {
           <div className="grid g3">
             {nodes.map((n) => {
               const last = latest(telemetry[n.id]);
-              const up = n.status === "active";
+              const state = nodeState(n, openByNode[n.id] || 0);
               const seen = last?.ts || n.last_seen;
               return (
-                <button key={n.id} className={"glass nodecard" + (n.id === node?.id ? " on" : "") + (up ? "" : " down")} aria-pressed={n.id === node?.id} onClick={() => setNodeId(n.id)}>
-                  <span className="row between"><b>{n.name}</b><span className={"dotstatus " + (up ? "up" : "off")}>{up ? "Online" : label(n.status)}</span></span>
-                  <small className="mute">{plantOf(n).name} · <Mono>{plantOf(n).qr_id}</Mono></small>
+                <article key={n.id} className={"glass nodecard" + (n.id === node?.id ? " on" : "") + (state === "offline" ? " down" : "") + (state === "alert" ? " alerting" : "")}>
+                  <button type="button" className="nodepick" aria-pressed={n.id === node?.id} onClick={() => setNodeId(n.id)}>
+                    <span className="row between"><b>{n.name}</b><span className={"dotstatus " + state}>{state === "offline" ? label(n.status) : NODE_STATE[state].text}</span></span>
+                    <small className="mute">{plantOf(n).name} · <Mono>{plantOf(n).qr_id}</Mono></small>
+                  </button>
                   {last ? (
-                    <span className="row wrap">
-                      <span className={tooHot(last, n.thresholds) ? "warntext" : ""}><Mono>{num(last.temperature)}°C</Mono> temp</span>
-                      <span className={tooDry(last, n.thresholds) ? "warntext" : ""}><Mono>{num(last.soil_moisture, 0)}%</Mono> soil</span>
-                      {has(last.humidity) && <span><Mono>{num(last.humidity, 0)}%</Mono> humidity</span>}
-                      {last.motion_detected && <span className="warntext">Movement</span>}
-                    </span>
+                    <dl className="readings">
+                      <div className={tooHot(last, n.thresholds) ? "warntext" : ""}><dt>Temp</dt><dd><Mono>{num(last.temperature)}°C</Mono></dd></div>
+                      <div><dt>Humidity</dt><dd><Mono>{num(last.humidity, 0)}%</Mono></dd></div>
+                      <div className={tooDry(last, n.thresholds) ? "warntext" : ""}><dt>Soil</dt><dd><Mono>{num(last.soil_moisture, 0)}%</Mono></dd></div>
+                      <div><dt>Distance</dt><dd><Mono>{num(last.distance_cm)} cm</Mono></dd></div>
+                      <div className={last.motion_detected ? "warntext" : ""}><dt>Motion</dt><dd>{motionText(last.motion_detected)}</dd></div>
+                    </dl>
                   ) : (
                     <span className="warntext"><b>{n.last_seen ? `No readings since ${fmtDateTime(n.last_seen)}` : "No readings yet"}</b></span>
                   )}
-                  <small className="mute">{!up ? "Check the node's battery or Wi-Fi" : seen ? `Updated ${fmtDateTime(seen)}` : "Waiting for the first reading"}</small>
-                </button>
+                  <small className="mute">{n.status !== "active" ? "Check the node's battery or Wi-Fi" : seen ? `Updated ${fmtDateTime(seen)}` : "Waiting for the first reading"}</small>
+                  {openByNode[n.id] > 0 && (
+                    <button type="button" className="textlink warntext" onClick={() => showAlerts(n)}>
+                      {openByNode[n.id]} open alert{openByNode[n.id] === 1 ? "" : "s"} <Icon name="arrowR" size={14} />
+                    </button>
+                  )}
+                </article>
               );
             })}
           </div>
@@ -145,23 +211,56 @@ export default function SensorOverview() {
 
       {node && (
         <section className="glass pad gap-section-s" aria-labelledby="readings">
-          <div className="row between wrap">
-            <h2 id="readings">{node.name} readings</h2>
-            <Pills label="Time range" value={hours} onChange={setHours} items={RANGES} />
+          <h2 id="readings">{node.name}</h2>
+          <p className="mute small">{plantOf(node).name} · <Mono>{plantOf(node).qr_id}</Mono></p>
+
+          <h3 className="sub">Right now</h3>
+          {live ? (
+            <>
+              <div className="tiles" aria-live="polite">
+                <div className={"glass tile" + (tooHot(live, node.thresholds) ? " tile-warn" : "")}><span className="mute">Temperature</span><b>{num(live.temperature)}°C</b></div>
+                <div className="glass tile"><span className="mute">Humidity</span><b>{num(live.humidity, 0)}%</b></div>
+                <div className={"glass tile" + (tooDry(live, node.thresholds) ? " tile-warn" : "")}><span className="mute">Soil moisture</span><b>{num(live.soil_moisture, 0)}%</b></div>
+                <div className="glass tile"><span className="mute">Distance</span><b>{num(live.distance_cm)} cm</b></div>
+                <div className={"glass tile" + (live.motion_detected ? " tile-warn" : "")}><span className="mute">Motion</span><b>{motionText(live.motion_detected)}</b></div>
+              </div>
+              <p className="mute small">Reading from {fmtDateTime(live.ts)}. This updates without refreshing the page.</p>
+            </>
+          ) : (
+            <p className="mute">No readings from {node.name} in the last 24 hours.</p>
+          )}
+
+          <div className="row between wrap gap-top">
+            <h3 className="sub">Over time</h3>
+            <Pills label="Time range" value={range} onChange={setRange} items={RANGES} />
           </div>
+          {range === "custom" && (
+            <div className="row wrap gap-top-s">
+              <label className="inline">From
+                <input type="date" value={dates.from} max={dates.to || ymd(new Date())} onChange={(e) => setDates((d) => ({ ...d, from: e.target.value }))} />
+              </label>
+              <label className="inline">to
+                <input type="date" value={dates.to} min={dates.from || undefined} max={ymd(new Date())} onChange={(e) => setDates((d) => ({ ...d, to: e.target.value }))} />
+              </label>
+              <span className="mute small">Up to {MAX_RANGE_DAYS} days.</span>
+            </div>
+          )}
           <p className="mute small">
-            {loading ? "Loading readings…" : longRange.error && hours !== 24 && longRange.key === rangeKey
-              ? `Could not load readings: ${longRange.error}`
-              : `${data.length} reading${data.length === 1 ? "" : "s"} in the last ${rangeLabel}${now ? ` · latest ${fmtDateTime(now.ts)}` : ""}`}
+            {custom?.error ? <span className="warntext">{custom.error}</span>
+              : loading ? "Loading readings…"
+              : loadError ? `Could not load readings: ${loadError}`
+              : `${data.length} reading${data.length === 1 ? "" : "s"} from ${rangeLabel}`}
             {" · "}<svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" className="spark-limit" /></svg> alert limit
           </p>
 
-          <div className="charts">
-            <Sparkline title="Temperature" unit="°C" values={data.map((d) => d.temperature)} limit={node.thresholds?.temp_max} />
-            <Sparkline title="Soil moisture" unit="%" values={data.map((d) => d.soil_moisture)} limit={node.thresholds?.moisture_min} />
-            <Sparkline title="Air humidity" unit="%" values={data.map((d) => d.humidity)} />
-            <Sparkline title="Distance to nearest object" unit=" cm" values={data.map((d) => d.distance_cm)} />
-          </div>
+          {!custom?.error && !loading && (
+            <div className="charts">
+              <TimeChart title="Temperature" unit="°C" rows={data} field="temperature" limit={node.thresholds?.temp_max} start={span.start} end={span.end} />
+              <TimeChart title="Air humidity" unit="%" rows={data} field="humidity" digits={0} start={span.start} end={span.end} />
+              <TimeChart title="Soil moisture" unit="%" rows={data} field="soil_moisture" digits={0} limit={node.thresholds?.moisture_min} start={span.start} end={span.end} />
+              <TimeChart title="Distance to nearest object" unit=" cm" rows={data} field="distance_cm" start={span.start} end={span.end} />
+            </div>
+          )}
 
           {data.length > 0 && (
             <div className="tiles gap-top-s">
@@ -174,7 +273,7 @@ export default function SensorOverview() {
 
           {data.length > 0 && (
             <details className="limits">
-              <summary>Latest {Math.min(data.length, 20)} readings</summary>
+              <summary>Latest {Math.min(data.length, 20)} readings in this range</summary>
               <div className="tablewrap">
                 <table>
                   <thead><tr><th>Time</th><th>Temp (°C)</th><th>Soil (%)</th><th>Humidity (%)</th><th>Distance (cm)</th><th>Movement</th></tr></thead>
@@ -205,6 +304,10 @@ export default function SensorOverview() {
               </form>) : <p className="mute small">Only an admin can change these limits.</p>}
             </details>
           )}
+
+          <div className="gap-top">
+            <NodeImages node={node} alerts={db.alerts} />
+          </div>
         </section>
       )}
 
@@ -245,7 +348,7 @@ function AlertCard({ alert }) {
   const officers = db.profiles.filter((p) => p.role === "officer" && p.is_active);
 
   return (
-    <article className={"glass record sev-" + alert.severity}>
+    <article id={`alert-${alert.id}`} className={"glass record sev-" + alert.severity}>
       {confirmDialog}
       <header>
         <div>
