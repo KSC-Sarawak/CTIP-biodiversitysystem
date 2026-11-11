@@ -21,7 +21,7 @@ export default function AlertsNotice() {
     else if (n.type === "comment_reply") go("/discussion/" + n.related_id);
     else if (role === "botanist") go("/records");
     else if (role === "officer") go("/review");
-    else go("/dashboard"); // admins see the "Needs review" card there; they have no review queue
+    else go("/dashboard/all"); // admins see the "Needs review" tile on the full table; they have no review queue
   };
 
   return (

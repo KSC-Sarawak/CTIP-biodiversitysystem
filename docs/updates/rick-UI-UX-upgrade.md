@@ -254,9 +254,8 @@ After the merge, `eslint src` is clean and `vite build` passes.
 1. **`#/dashboard` now goes to the home page, not the table.** Old links, bookmarks and emails
    that expect the table should use `#/dashboard/all`. The Send-to email on the table page
    already uses the new link.
-2. **The plant page breadcrumb still says "Tagged plants" but links to `#/dashboard`**, which is
-   now the home page (`Specimen.jsx`, line 85). It should probably link to `#/dashboard/all`.
-   Not fixed yet.
+2. **Fixed:** the plant page breadcrumb "Tagged plants" (`Specimen.jsx`, line 85) linked to
+   `#/dashboard`, which is now the home page. It now links to `#/dashboard/all`.
 3. **The Back button can leave the site in one case:** open a page directly, move to another
    page, press Back, then press Back again. Once you have moved, `BackButton` always calls
    `history.back()`. It does not know whether the previous entry is inside the site.
@@ -280,6 +279,37 @@ After the merge, `eslint src` is clean and `vite build` passes.
    8 Nov are fine.
 10. **Mobile:** the merge from `main` changed `apps/mobile/package.json`. Run `npm install` in
     `apps/mobile` before running the field app.
+11. **Fixed:** opening a review notification as an admin (`AlertsNotice.jsx`, line 24) went
+    to `#/dashboard` to show the "Needs review" card, which is now on the table page. It now
+    goes to `#/dashboard/all`. The links after sign-in and on the public pages ("Go to
+    dashboard") still go to the home page, which is what they should do.
+12. **Browser support:** the new CSS uses `color-mix()` 32 times, and `main` uses it nowhere.
+    It needs Chrome/Edge 111, Safari 16.2 or Firefox 113 (all from 2023). On older browsers,
+    those colours are dropped. `backdrop-filter` (blur) and `animation-timeline`
+    (scroll-in animation) are behind `@supports`, so older browsers just skip the effect.
+    Agree on a minimum browser version with the team before the demo.
+
+## Test results
+
+Run on 11 Nov 2026 after the merge: `npx playwright test` gives **130 passed, 36 failed,
+10 skipped**. The 36 failures are 18 tests, each failing at desktop and phone size.
+
+**The same 18 tests also fail on a clean copy of `main`** (checked with the same command), so
+this branch does not break any test that was passing. They fail for reasons that are already
+on `main`:
+
+- `role-pages.spec.js` (5 tests) waits for a `.roleswitch` demo role switcher. The web app no
+  longer has one, on `main` or on this branch.
+- Most `agent-*.spec.js` failures are elements not found or empty tables, and the run logged
+  `loadFromApi: Failed to fetch`. The cause looks like missing role switching or missing data,
+  but it was not checked one test at a time.
+- `agent-jira-traceability.spec.js` CTIP-34/43 expects old sign-in wording ("administrator
+  invitation only").
+
+Some of these tests also look for page parts this branch removed, so they will still fail
+after the sign-in problems are fixed: `.summary` (Reports), `.tile` (Monitoring), the
+plants table at `#/dashboard`, and the family pills in the catalogue. Update them to use
+`.phead-stats .pstat` and `#/dashboard/all`.
 
 ## How to check it
 
@@ -287,7 +317,7 @@ After the merge, `eslint src` is clean and `vite build` passes.
 cd apps/web
 npx eslint src          # clean after the merge
 npx vite build          # passes after the merge
-npx playwright test     # web tests
+npx playwright test     # 18 tests fail here and on main too, see Test results
 ```
 
 By hand, as each role (botanist, officer, admin) and as a visitor:

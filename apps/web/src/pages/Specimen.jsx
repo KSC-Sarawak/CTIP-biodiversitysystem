@@ -82,7 +82,7 @@ export default function Specimen({ qr }) {
       {confirmDialog}
       {staff && <BackButton fallback="/dashboard/all" />}
       <nav className="crumbs" aria-label="Breadcrumb">
-        <a href={staff ? "#/dashboard" : "#/plants"}>{staff ? "Tagged plants" : "Plants"}</a> <span aria-hidden="true">›</span>{" "}
+        <a href={staff ? "#/dashboard/all" : "#/plants"}>{staff ? "Tagged plants" : "Plants"}</a> <span aria-hidden="true">›</span>{" "}
         {plant.species ? <a href={"#/plants/" + plant.species.id}>{plant.name}</a> : <span>{plant.name}</span>} <span aria-hidden="true">›</span>{" "}
         <Mono><span aria-current="page">{plant.qr_id}</span></Mono>
       </nav>
