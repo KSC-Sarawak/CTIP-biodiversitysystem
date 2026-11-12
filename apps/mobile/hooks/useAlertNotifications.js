@@ -30,7 +30,7 @@ export function useAlertNotifications(db, me, nav) {
   const seenAlertsRef = useRef(null);
   const seenNotifsRef = useRef(null);
 
-  // Initialize permissions & notification channels
+  // Initialize permissions & notification channels, and register push token
   useEffect(() => {
     if (!Notifications) return;
 
@@ -77,14 +77,16 @@ export function useAlertNotifications(db, me, nav) {
             });
 
             if (tokenData?.data) {
-              await registerPushTokenApi({
+              console.log('[PUSH] Got push token:', tokenData.data);
+              const res = await registerPushTokenApi({
                 token: tokenData.data,
                 platform: Platform.OS,
                 deviceName: Constants.deviceName || `${Platform.OS}-device`,
               });
+              console.log('[PUSH] Token register result:', res);
             }
           } catch (tokenErr) {
-            // Push token registration can silently fail on simulators without Play Services
+            console.warn('[PUSH] Push token registration warning:', tokenErr?.message || tokenErr);
           }
         }
 
@@ -103,14 +105,16 @@ export function useAlertNotifications(db, me, nav) {
             }
           });
         }
-      } catch {}
+      } catch (err) {
+        console.warn('[PUSH] Setup error:', err?.message || err);
+      }
     }
 
     setup();
     return () => {
       if (sub && sub.remove) sub.remove();
     };
-  }, [nav]);
+  }, [nav, me?.id]);
 
   // Monitor incoming alerts in db.alerts
   useEffect(() => {
