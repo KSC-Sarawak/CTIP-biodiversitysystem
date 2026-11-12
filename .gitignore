@@ -163,7 +163,6 @@ __pycache__/
 *.pyc
 
 # Secrets
-bridge_secrets.py
 infra/mosquitto/certs/
 *.pem
 *.key
