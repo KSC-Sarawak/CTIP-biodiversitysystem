@@ -128,12 +128,27 @@ export const discussionHandlers = {
     // Send push notification to target audience & mentioned users
     try {
       const recipientIds = new Set();
+      const rolesToExpand = new Set();
       (created.data.audience || []).forEach((a) => {
         if (a.user_id && a.user_id !== req.user.id) recipientIds.add(a.user_id);
+        if (a.role) rolesToExpand.add(a.role);
       });
       (b.mentions || []).forEach((m) => {
         if (m !== req.user.id) recipientIds.add(m);
       });
+
+      // Expand role-targeted audiences (e.g. botanist, officer) to active user IDs
+      if (rolesToExpand.size > 0) {
+        const { data: roleUsers } = await db
+          .from('profiles')
+          .select('id')
+          .in('role', [...rolesToExpand])
+          .eq('is_active', true);
+        (roleUsers || []).forEach((u) => {
+          if (u.id !== req.user.id) recipientIds.add(u.id);
+        });
+      }
+
       if (recipientIds.size > 0) {
         sendPushToUsers({
           userIds: [...recipientIds],
@@ -226,11 +241,13 @@ export const discussionHandlers = {
       const fullThread = await loadThread(db, req.params.id);
       if (fullThread.data) {
         const recipients = new Set();
+        const rolesToExpand = new Set();
         if (fullThread.data.owner_id && fullThread.data.owner_id !== req.user.id) {
           recipients.add(fullThread.data.owner_id);
         }
         (fullThread.data.audience || []).forEach((a) => {
           if (a.user_id && a.user_id !== req.user.id) recipients.add(a.user_id);
+          if (a.role) rolesToExpand.add(a.role);
         });
         (fullThread.data.posts || []).forEach((p) => {
           if (p.author_id && p.author_id !== req.user.id) recipients.add(p.author_id);
@@ -238,6 +255,17 @@ export const discussionHandlers = {
         (b.mentions || []).forEach((m) => {
           if (m !== req.user.id) recipients.add(m);
         });
+
+        if (rolesToExpand.size > 0) {
+          const { data: roleUsers } = await db
+            .from('profiles')
+            .select('id')
+            .in('role', [...rolesToExpand])
+            .eq('is_active', true);
+          (roleUsers || []).forEach((u) => {
+            if (u.id !== req.user.id) recipients.add(u.id);
+          });
+        }
 
         if (recipients.size > 0) {
           sendPushToUsers({

@@ -38,3 +38,20 @@ create policy "push_tokens: delete own"
   using (user_id = auth.uid());
 
 grant select, insert, update, delete on table public.user_push_tokens to authenticated;
+
+-- Function for backend/service dispatch to safely fetch recipient push tokens
+-- without exposing all tokens or hitting RLS cross-user select restrictions.
+create or replace function public.get_user_push_tokens(p_user_ids uuid[])
+returns table (token text, user_id uuid)
+language plpgsql security definer
+set search_path = ''
+as $$
+begin
+  return query
+  select upt.token, upt.user_id
+  from public.user_push_tokens upt
+  where upt.user_id = any(p_user_ids);
+end;
+$$;
+
+grant execute on function public.get_user_push_tokens(uuid[]) to authenticated, anon;

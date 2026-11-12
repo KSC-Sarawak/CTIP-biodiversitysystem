@@ -7,6 +7,7 @@ import {
   ClipboardCheck, Droplet, Ellipsis, Eye, EyeOff, FileText, Flashlight, House, Image, Info, Keyboard, Leaf,
   Lock, LogOut, Mail, Map, MapPin, MessageSquare, Plus, QrCode, RefreshCw, ScanLine, Search, Send,
   Share2, Shield, Thermometer, Undo2, Users, X, Compass, Layers, Locate, User, BookOpen, Trash2, CloudRain, Wind,
+  Pencil, LayoutDashboard, Printer, Download, Globe,
 } from 'lucide-react-native';
 
 const ICONS = {
@@ -17,6 +18,7 @@ const ICONS = {
   chat: MessageSquare, plus: Plus, qr: QrCode, refresh: RefreshCw, scan: ScanLine, search: Search,
   send: Send, share: Share2, shield: Shield, sort: ArrowUpDown, thermo: Thermometer, undo: Undo2, users: Users, user: User, x: X,
   compass: Compass, layers: Layers, locate: Locate, trash: Trash2, humidity: CloudRain, wind: Wind,
+  pencil: Pencil, dashboard: LayoutDashboard, printer: Printer, download: Download, globe: Globe,
 };
 
 export default function Icon({ name, size = 24, color, strokeWidth = 1.75 }) {

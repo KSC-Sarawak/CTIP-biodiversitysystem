@@ -30,14 +30,22 @@ export async function sendPushToUsers({ userIds, title, body, data = {}, channel
   if (!targetIds.length) return;
 
   try {
-    // Query tokens using admin client so we can reach target users' registered tokens
+    // Query tokens using SECURITY DEFINER RPC so we can reach target users' registered tokens
+    // without hitting RLS cross-user select restrictions or anon table grant limits.
     const db = supabaseFresh();
-    const { data: rows, error } = await db
-      .from('user_push_tokens')
-      .select('token, user_id')
-      .in('user_id', targetIds);
+    const rpcRes = await db.rpc('get_user_push_tokens', { p_user_ids: targetIds });
 
-    if (error || !rows?.length) return;
+    let rows = rpcRes.data;
+    if (rpcRes.error || !rows) {
+      // Fallback direct query in case RPC has not been applied yet
+      const direct = await db
+        .from('user_push_tokens')
+        .select('token, user_id')
+        .in('user_id', targetIds);
+      rows = direct.data;
+    }
+
+    if (!rows?.length) return;
 
     const messages = [];
     for (const row of rows) {

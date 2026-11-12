@@ -21,7 +21,6 @@ import TabBar from './TabBar.js';
 import Toast from '../components/Toast.js';
 import OfflineStrip, { OFFLINE_STRIP_HEIGHT } from '../components/OfflineStrip.js';
 import { useAlertNotifications } from '../hooks/useAlertNotifications.js';
-import { usePolling } from '../hooks/usePolling.js';
 
 const FAR_AWAY = 30000; // a hidden screen is moved this far down, out of sight
 
@@ -73,8 +72,6 @@ export default function AppNavigator() {
 
   const { stack, route, nav, currentTab } = useAppNavigation(role);
   useAlertNotifications(db, me, nav);
-  // Poll notifications and live updates every 5s across all screens
-  usePolling(5000);
 
   const showTabs = !isFullScreen(route.name);
   const camera = route.name === 'scan';
