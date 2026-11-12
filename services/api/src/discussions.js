@@ -151,6 +151,7 @@ export const discussionHandlers = {
 
       if (recipientIds.size > 0) {
         sendPushToUsers({
+          db,
           userIds: [...recipientIds],
           title: `New discussion: ${b.title}`,
           body: b.body.slice(0, 150),
@@ -269,6 +270,7 @@ export const discussionHandlers = {
 
         if (recipients.size > 0) {
           sendPushToUsers({
+            db,
             userIds: [...recipients],
             title: `Reply in "${fullThread.data.title}"`,
             body: b.body.slice(0, 150),

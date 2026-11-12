@@ -155,6 +155,7 @@ async function updateAlert(req, res, changes) {
   // If assigned to a staff officer, trigger remote push notification
   if (changes.assigned_to && changes.assigned_to !== req.user.id) {
     sendPushToUsers({
+      db: supabaseAs(req.user),
       userIds: changes.assigned_to,
       title: 'Sensor Alert Assigned to You',
       body: `You have been assigned to handle a ${data.severity || 'high'} severity alert. Tap to inspect.`,

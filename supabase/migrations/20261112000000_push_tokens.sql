@@ -41,12 +41,20 @@ grant select, insert, update, delete on table public.user_push_tokens to authent
 
 -- Function for backend/service dispatch to safely fetch recipient push tokens
 -- without exposing all tokens or hitting RLS cross-user select restrictions.
+-- Only authenticated staff members (botanist, officer, admin) may execute.
 create or replace function public.get_user_push_tokens(p_user_ids uuid[])
 returns table (token text, user_id uuid)
 language plpgsql security definer
 set search_path = ''
 as $$
 begin
+  if not exists (
+    select 1 from public.profiles
+    where id = auth.uid() and is_active = true and role in ('botanist', 'officer', 'admin')
+  ) then
+    raise exception 'Unauthorized';
+  end if;
+
   return query
   select upt.token, upt.user_id
   from public.user_push_tokens upt
@@ -54,4 +62,5 @@ begin
 end;
 $$;
 
-grant execute on function public.get_user_push_tokens(uuid[]) to authenticated, anon;
+revoke execute on function public.get_user_push_tokens(uuid[]) from anon, public;
+grant execute on function public.get_user_push_tokens(uuid[]) to authenticated;

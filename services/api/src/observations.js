@@ -169,6 +169,7 @@ export const observationHandlers = {
           reject: 'Observation Rejected',
         };
         sendPushToUsers({
+          db: supabaseAs(req.user),
           userIds: obs.recorded_by,
           title: titleMap[body.decision] || 'Observation Reviewed',
           body: body.comment ? body.comment.slice(0, 150) : 'Your record review has been updated. Tap to view.',

@@ -10,13 +10,19 @@ const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
  * e.g., ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx] or ExpoPushToken[xxxxxxxxxxxxxxxxxxxxxx]
  */
 export function isExpoPushToken(token) {
-  return typeof token === 'string' && /^(ExponentPushToken|ExpoPushToken)\[[a-zA-Z0-9\-_]+\]$/.test(token.trim());
+  if (typeof token !== 'string') return false;
+  const t = token.trim();
+  return (
+    /^(ExponentPushToken|ExpoPushToken)\[.+\]$/.test(t) ||
+    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(t)
+  );
 }
 
 /**
  * Dispatch remote push notifications to one or more user IDs.
  *
  * @param {Object} options
+ * @param {Object} [options.db] - Authenticated supabase client (supabaseAs(req.user))
  * @param {string|string[]} options.userIds - Recipient user UUID(s)
  * @param {string} options.title - Notification title (no emojis)
  * @param {string} options.body - Notification message body
@@ -24,28 +30,19 @@ export function isExpoPushToken(token) {
  * @param {string} [options.channelId] - Android notification channel (default 'discussions')
  * @param {string} [options.sound] - Notification sound (default 'default')
  */
-export async function sendPushToUsers({ userIds, title, body, data = {}, channelId = 'discussions', sound = 'default' }) {
+export async function sendPushToUsers({ db: clientDb, userIds, title, body, data = {}, channelId = 'discussions', sound = 'default' }) {
   if (!userIds) return;
   const targetIds = Array.isArray(userIds) ? [...new Set(userIds.filter(Boolean))] : [userIds];
   if (!targetIds.length) return;
 
   try {
-    // Query tokens using SECURITY DEFINER RPC so we can reach target users' registered tokens
-    // without hitting RLS cross-user select restrictions or anon table grant limits.
-    const db = supabaseFresh();
+    // Query tokens using SECURITY DEFINER RPC. Uses authenticated caller's client if available,
+    // or falls back to supabaseFresh.
+    const db = clientDb || supabaseFresh();
     const rpcRes = await db.rpc('get_user_push_tokens', { p_user_ids: targetIds });
 
-    let rows = rpcRes.data;
-    if (rpcRes.error || !rows) {
-      // Fallback direct query in case RPC has not been applied yet
-      const direct = await db
-        .from('user_push_tokens')
-        .select('token, user_id')
-        .in('user_id', targetIds);
-      rows = direct.data;
-    }
-
-    if (!rows?.length) return;
+    const rows = rpcRes.data;
+    if (rpcRes.error || !rows?.length) return;
 
     const messages = [];
     for (const row of rows) {

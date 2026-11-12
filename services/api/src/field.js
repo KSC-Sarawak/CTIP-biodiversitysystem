@@ -524,6 +524,7 @@ export const fieldHandlers = {
     // Push notification to the observation owner
     if (obs.recorded_by && obs.recorded_by !== req.user.id) {
       sendPushToUsers({
+        db,
         userIds: obs.recorded_by,
         title: 'New comment on your observation',
         body: body.body.slice(0, 150),

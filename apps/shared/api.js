@@ -383,8 +383,14 @@ export async function mfaVerifyApi(code) {
 /** POST /v1/auth/sign-out with the current token, then forgets the session. Never fails. */
 export async function signOutApi() {
   const token = getAuthToken();
+  if (token) {
+    // Unregister device push token before discarding auth session
+    try {
+      await apiFetch("/me/push-token", { method: "DELETE", token, timeout: 2000 });
+    } catch {}
+    await apiFetch("/auth/sign-out", { method: "POST", token, timeout: 4000 });
+  }
   setSession(null);
-  if (token) await apiFetch("/auth/sign-out", { method: "POST", token, timeout: 4000 });
 }
 
 /** POST /v1/auth/password-reset: emails a link that opens the website signed in. */
