@@ -61,8 +61,8 @@ import paho.mqtt.client as mqtt
 import requests
 
 # ================================================================ Settings
-MODE = "supabase"        # telemetry: "supabase" now, "api" when POST /telemetry works
-IMAGE_MODE = "supabase"  # images:    "supabase" now, "api" when POST /sensor-nodes/{id}/images works
+MODE = "api"        # telemetry: "supabase" now, "api" when POST /telemetry works
+IMAGE_MODE = "api"  # images:    "supabase" now, "api" when POST /sensor-nodes/{id}/images works
 IMAGE_BUCKET = "sensor-images"
 
 # F-14 switch. False = old public broker (no TLS, no login) until the team broker is ready.
@@ -98,7 +98,8 @@ COOLDOWN_S = 5              # at most one photo per node every 5 s
 # Node IDs (sensor_nodes.id) this gateway accepts. Anything else is ignored.
 # Each node's MQTT username must be the same ID, so the broker ACL matches.
 REGISTERED_NODES = {
-    "0ac66bdc-db55-4a8e-a7c6-4c30daa8124b",   # put the real node UUID(s) here
+    "0ac66bdc-db55-4a8e-a7c6-4c30daa8124b", 
+      # put the real node UUID(s) here
 }
 ALLOWED_SOURCES = ("motion", "tripwire")   # trigger "source" values the node sends
 MAX_PHOTOS_PER_MINUTE = 6                  # for ALL nodes together (disk and bucket)
@@ -173,7 +174,6 @@ def utc_stamp():
 def supabase_headers():
     return {
         "apikey": SUPABASE_SERVICE_KEY,
-        "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
     }
@@ -358,7 +358,6 @@ def upload_to_supabase(path):
             "%s/storage/v1/object/%s/%s" % (SUPABASE_URL, IMAGE_BUCKET, key),
             data=data, timeout=UPLOAD_TIMEOUT_S,
             headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
                      "Content-Type": "image/jpeg",
                      "x-upsert": "false"})
     except requests.RequestException as e:
