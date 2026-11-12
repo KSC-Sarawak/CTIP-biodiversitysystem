@@ -211,7 +211,7 @@ export default function Reports({ nav }) {
         ]),
       ]);
 
-      const fileUri = `${FileSystem.cacheDirectory}plant-records-report.csv`;
+      const fileUri = `${FileSystem.cacheDirectory}plant-records-report-${Date.now()}.csv`;
       await FileSystem.writeAsStringAsync(fileUri, csvData, { encoding: FileSystem.EncodingType.UTF8 });
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Export Plant Records CSV' });
@@ -285,7 +285,7 @@ export default function Reports({ nav }) {
 </html>`;
 
       const printResult = await Print.printToFileAsync({ html: htmlContent, base64: true });
-      let targetUri = `${FileSystem.cacheDirectory}plant-records-report.pdf`;
+      let targetUri = `${FileSystem.cacheDirectory}plant-records-report-${Date.now()}.pdf`;
       if (printResult.base64) {
         await FileSystem.writeAsStringAsync(targetUri, printResult.base64, {
           encoding: FileSystem.EncodingType.Base64,

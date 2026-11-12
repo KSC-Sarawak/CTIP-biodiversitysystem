@@ -9,6 +9,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 import { useStore } from '../../shared/store.js';
+import SpeciesAdmin from './Species.js';
 import { visiblePlants, nameOf, speciesCatalogue, lastVisit } from '../../shared/selectors.js';
 import { isThreatened } from '../../shared/data.js';
 import { useTheme, font } from '../components/Theme.js';
@@ -75,7 +76,7 @@ function PlantsTab({ nav, params, route, start }) {
   const view = params.view || start;
   const onView = (v) => nav.replace(route, { ...params, view: v });
   return view === 'species'
-    ? <SpeciesCatalogue nav={nav} params={params} onView={onView} />
+    ? <SpeciesAdmin nav={nav} params={params} onView={onView} view="species" />
     : <TaggedList nav={nav} onView={onView} />;
 }
 

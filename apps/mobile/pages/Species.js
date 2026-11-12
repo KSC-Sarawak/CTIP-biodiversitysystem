@@ -10,11 +10,13 @@ import { useStore } from '../../shared/store.js';
 import { visiblePlants, speciesMedia } from '../../shared/selectors.js';
 import { fuzzyMatch } from '../../shared/fuzzy.js';
 import { isThreatened, BLANK_SPECIES, CONSERVATION } from '../../shared/data.js';
+import { can } from '../../shared/permissions.js';
 import { useTheme, font } from '../components/Theme.js';
+import { LogoMark } from '../components/Logo.js';
 import Icon from '../components/Icon.js';
 import {
   Screen, Header, IconButton, TitleBlock, SearchField, SortBar, Row, Thumb, Sci, DotLabel, Notice,
-  Empty, EmptyState, Button, Chip, Field, Segmented, Txt, Mono,
+  Empty, EmptyState, Button, Chip, Field, Segmented, Txt, Mono, Pills, TextLink,
 } from '../components/Bits.js';
 import { useShowMore } from '../hooks/useShowMore.js';
 
@@ -24,13 +26,15 @@ const SORT_SPECIES_ADMIN = [
   { key: 'family', label: 'Family' },
   { key: 'unpublished', label: 'Unpublished first' },
   { key: 'endangered', label: 'Endangered first' },
+  { key: 'plants', label: 'Most tagged' },
 ];
 
-export default function SpeciesAdmin({ nav }) {
+export default function SpeciesAdmin({ nav, params = {}, onView, view = 'species' }) {
   const { db, role, saveSpecies, togglePublish, deleteSpecies, restoreSpecies, setSpeciesMedia, notify } = useStore();
   const { c } = useTheme();
 
-  const [q, setQ] = useState('');
+  const [q, setQ] = useState(params.q || '');
+  const [family, setFamily] = useState('all');
   const [sort, setSort] = useState('name');
 
   // Species Form Modal
@@ -40,11 +44,19 @@ export default function SpeciesAdmin({ nav }) {
   const [photosOf, setPhotosOf] = useState(null); // null | species
 
   const plants = visiblePlants(db, role);
-  const allActive = (db.species || []).filter((s) => !s.is_deleted);
+  const canManage = can(role, 'species');
+
+  const allActive = role === 'visitor'
+    ? (db.species || []).filter((s) => !s.is_deleted && s.is_published)
+    : (db.species || []).filter((s) => !s.is_deleted);
   const deleted = (db.species || []).filter((s) => s.is_deleted);
 
+  const families = [...new Set(allActive.map((s) => s.family).filter(Boolean))].sort();
+
   const needle = q.trim().toLowerCase();
-  const rows = allActive.filter((s) => !needle || fuzzyMatch([s.common_name, s.scientific_name, s.family, s.genus].join(' '), needle));
+  const rows = allActive
+    .filter((s) => family === 'all' || s.family === family)
+    .filter((s) => !needle || fuzzyMatch([s.common_name, s.scientific_name, s.family, s.genus].join(' '), needle));
 
   const sorted = [...rows].sort((a, b) => {
     if (sort === 'scientific') return (a.scientific_name || '').localeCompare(b.scientific_name || '');
@@ -61,11 +73,17 @@ export default function SpeciesAdmin({ nav }) {
       if (eb !== ea) return eb - ea;
       return (a.common_name || a.scientific_name).localeCompare(b.common_name || b.scientific_name);
     }
+    if (sort === 'plants') {
+      const ca = plants.filter((p) => p.species_id === a.id).length;
+      const cb = plants.filter((p) => p.species_id === b.id).length;
+      if (cb !== ca) return cb - ca;
+      return (a.common_name || a.scientific_name).localeCompare(b.common_name || b.scientific_name);
+    }
     return (a.common_name || a.scientific_name).localeCompare(b.common_name || b.scientific_name);
   });
 
   const unpublishedCount = allActive.filter((s) => !s.is_published).length;
-  const { shown, left, showMore } = useShowMore(sorted, `${needle}|${sort}`);
+  const { shown, left, showMore } = useShowMore(sorted, `${needle}|${family}|${sort}`);
 
   const handleTogglePublish = (s) => {
     const action = s.is_published ? 'Unpublish' : 'Publish';
@@ -115,25 +133,71 @@ export default function SpeciesAdmin({ nav }) {
     notify(`${s.scientific_name} restored`);
   };
 
+  const countText = `${allActive.length} species${canManage && unpublishedCount ? ` · ${unpublishedCount} not published` : ''}`;
+
   return (
-    <Screen
-      header={
-        <Header
-          left={<IconButton name="chevL" label="Back" onPress={nav.back} />}
-          right={<Button label="New species" icon="plus" height={36} size={13} onPress={() => setFormSpecies({ ...BLANK_SPECIES })} />}
-        />
-      }
-      top={0}
-      gap={16}
-    >
-      <TitleBlock title="Species" sub={`${allActive.length} species · ${unpublishedCount} not published`} />
+    <Screen top={0} gap={16}>
+      {onView ? (
+        <View style={{ gap: 12, marginBottom: 4 }}>
+          {role === 'visitor' ? (
+            <View style={{ height: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingRight: 4, marginBottom: 4 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                {nav.canGoBack ? <IconButton name="chevL" label="Back" onPress={nav.back} /> : null}
+                <LogoMark />
+              </View>
+              <TextLink label="Sign in" onPress={() => nav.go('signin')} />
+            </View>
+          ) : nav.canGoBack ? (
+            <View style={{ marginLeft: -16, marginTop: -8 }}>
+              <IconButton name="chevL" label="Back" onPress={nav.back} />
+            </View>
+          ) : null}
+          <TitleBlock
+            title="Plants"
+            sub={countText}
+            right={
+              canManage ? (
+                <Button
+                  label="New species"
+                  icon="plus"
+                  height={38}
+                  size={13}
+                  onPress={() => setFormSpecies({ ...BLANK_SPECIES })}
+                />
+              ) : null
+            }
+          />
+          <Segmented
+            value={view}
+            onChange={(k) => k !== view && onView(k)}
+            items={[{ key: 'species', label: 'Species' }, { key: 'tagged', label: 'Tagged plants' }]}
+          />
+        </View>
+      ) : (
+        <View style={{ gap: 12, marginBottom: 4 }}>
+          <Header
+            left={<IconButton name="chevL" label="Back" onPress={nav.back} />}
+            right={canManage ? <Button label="New species" icon="plus" height={38} size={13} onPress={() => setFormSpecies({ ...BLANK_SPECIES })} /> : null}
+          />
+          <TitleBlock title="Species" sub={countText} />
+        </View>
+      )}
 
       <SearchField value={q} onChangeText={setQ} placeholder="Search species by name, family or genus" />
+
+      {families.length > 0 && (
+        <Pills
+          value={family}
+          onChange={setFamily}
+          items={[{ key: 'all', label: 'All families' }, ...families.map((f) => ({ key: f, label: f }))]}
+        />
+      )}
+
       <SortBar items={SORT_SPECIES_ADMIN} value={sort} onChange={setSort} />
 
       <View>
-        <EmptyState count={sorted.length} icon="search" filtered={!!needle}>
-          {needle ? 'No species match.' : 'No species yet.'}
+        <EmptyState count={sorted.length} icon="search" filtered={!!needle || family !== 'all'}>
+          {needle || family !== 'all' ? 'No species match.' : 'No species yet.'}
         </EmptyState>
         {shown.map((s, i) => {
           const media = speciesMedia(db, s.id);
@@ -151,22 +215,24 @@ export default function SpeciesAdmin({ nav }) {
                     <DotLabel status={s.conservation_status} />
                     {!s.is_published && <DotLabel tone="neutral" label="Not published" />}
                   </View>
-                  <View style={{ flexDirection: 'row', gap: 14, marginTop: 4 }}>
-                    <Pressable onPress={() => setFormSpecies(s)}>
-                      <Txt v="caption" color={c.accent} style={{ fontWeight: '700' }}>Edit</Txt>
-                    </Pressable>
-                    <Pressable onPress={() => setPhotosOf(s)}>
-                      <Txt v="caption" color={c.accent} style={{ fontWeight: '700' }}>Photos ({media.length})</Txt>
-                    </Pressable>
-                    <Pressable onPress={() => handleTogglePublish(s)}>
-                      <Txt v="caption" color={s.is_published ? c.warning : c.accent} style={{ fontWeight: '600' }}>
-                        {s.is_published ? 'Unpublish' : 'Publish'}
-                      </Txt>
-                    </Pressable>
-                    <Pressable onPress={() => handleDelete(s)}>
-                      <Txt v="caption" color={c.danger} style={{ fontWeight: '600' }}>Delete</Txt>
-                    </Pressable>
-                  </View>
+                  {canManage && (
+                    <View style={{ flexDirection: 'row', gap: 14, marginTop: 4 }}>
+                      <Pressable onPress={() => setFormSpecies(s)}>
+                        <Txt v="caption" color={c.accent} style={{ fontWeight: '700' }}>Edit</Txt>
+                      </Pressable>
+                      <Pressable onPress={() => setPhotosOf(s)}>
+                        <Txt v="caption" color={c.accent} style={{ fontWeight: '700' }}>Photos ({media.length})</Txt>
+                      </Pressable>
+                      <Pressable onPress={() => handleTogglePublish(s)}>
+                        <Txt v="caption" color={s.is_published ? c.warning : c.accent} style={{ fontWeight: '600' }}>
+                          {s.is_published ? 'Unpublish' : 'Publish'}
+                        </Txt>
+                      </Pressable>
+                      <Pressable onPress={() => handleDelete(s)}>
+                        <Txt v="caption" color={c.danger} style={{ fontWeight: '600' }}>Delete</Txt>
+                      </Pressable>
+                    </View>
+                  )}
                 </View>
               }
               onPress={() => nav.go('species', { id: s.id })}
@@ -178,7 +244,7 @@ export default function SpeciesAdmin({ nav }) {
       </View>
 
       {/* Recently Deleted Section */}
-      {deleted.length > 0 && (
+      {canManage && deleted.length > 0 && (
         <View style={{ marginTop: 16, padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 10 }}>
           <Txt v="label" style={{ fontSize: 16 }}>Recently deleted ({deleted.length})</Txt>
           <Txt v="caption" color={c.ink2}>These species are hidden. Tap Restore to make them active again.</Txt>
@@ -589,18 +655,18 @@ export function PhotoManagerModal({ species, initialPhotos, onClose, onSave }) {
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                       <Pressable onPress={() => setPrimary(idx)}>
                         <Txt v="caption" color={ph.is_primary ? c.accent : c.ink3} style={{ fontWeight: '700' }}>
-                          {ph.is_primary ? '★ Primary cover photo' : 'Set as primary'}
+                          {ph.is_primary ? 'Primary cover photo' : 'Set as primary'}
                         </Txt>
                       </Pressable>
-                      <View style={{ flexDirection: 'row', gap: 6 }}>
-                        <Pressable onPress={() => movePhoto(idx, -1)} disabled={idx === 0}>
-                          <Txt v="caption" color={idx === 0 ? c.ink3 : c.ink} style={{ fontWeight: '700', paddingHorizontal: 4 }}>▲</Txt>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Pressable onPress={() => movePhoto(idx, -1)} disabled={idx === 0} hitSlop={6} style={{ padding: 2, opacity: idx === 0 ? 0.3 : 1 }}>
+                          <Icon name="chevL" size={16} color={idx === 0 ? c.ink3 : c.ink} />
                         </Pressable>
-                        <Pressable onPress={() => movePhoto(idx, 1)} disabled={idx === photos.length - 1}>
-                          <Txt v="caption" color={idx === photos.length - 1 ? c.ink3 : c.ink} style={{ fontWeight: '700', paddingHorizontal: 4 }}>▼</Txt>
+                        <Pressable onPress={() => movePhoto(idx, 1)} disabled={idx === photos.length - 1} hitSlop={6} style={{ padding: 2, opacity: idx === photos.length - 1 ? 0.3 : 1 }}>
+                          <Icon name="chevR" size={16} color={idx === photos.length - 1 ? c.ink3 : c.ink} />
                         </Pressable>
-                        <Pressable onPress={() => removePhoto(idx)}>
-                          <Txt v="caption" color={c.danger} style={{ fontWeight: '700', paddingHorizontal: 4 }}>✕</Txt>
+                        <Pressable onPress={() => removePhoto(idx)} hitSlop={6} style={{ padding: 2 }}>
+                          <Icon name="x" size={16} color={c.danger} />
                         </Pressable>
                       </View>
                     </View>

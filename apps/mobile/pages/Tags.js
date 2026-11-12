@@ -181,7 +181,7 @@ export default function Tags({ nav }) {
                 </View>
               }
               right={<DotLabel status={t.status} />}
-              onPress={p ? () => nav.go('tag', { qr: t.qr_id }) : isUnused ? () => setActiveQr(t.qr_id) : undefined}
+              onPress={p ? () => nav.go('tag', { qr: t.qr_id }) : () => setActiveQr(t.qr_id)}
               last={i === shown.length - 1}
             />
           );
@@ -343,7 +343,7 @@ function PrintStudioModal({ tags, onClose }) {
 </html>`;
 
       const printResult = await Print.printToFileAsync({ html: htmlContent, base64: true });
-      let targetUri = `${FileSystem.cacheDirectory}batch-tags-print.pdf`;
+      let targetUri = `${FileSystem.cacheDirectory}batch-tags-print-${Date.now()}.pdf`;
       if (printResult.base64) {
         await FileSystem.writeAsStringAsync(targetUri, printResult.base64, {
           encoding: FileSystem.EncodingType.Base64,

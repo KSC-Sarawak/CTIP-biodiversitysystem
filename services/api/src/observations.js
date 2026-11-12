@@ -3,6 +3,7 @@ import { supabaseAs } from './supabase.js';
 import { OBS_COLUMNS, visibleTo, findObservation } from './observationAccess.js';
 import { parseBody, fail, dbError, UUID } from './validate.js';
 import { detectImageType, stripMetadata, EXTENSIONS } from './images.js';
+import { sendPushToUsers } from './pushNotifications.js';
 
 // Observation review (CTIP-86): the officer's review queue (CTIP-29) and the
 // botanist's submission status (CTIP-45). Queries run as the signed-in user,
@@ -152,6 +153,31 @@ export const observationHandlers = {
         console.warn('[API] Auto-sync species media notice:', autoErr);
       }
     }
+
+    // Push notification to the record author about the review decision
+    try {
+      const { data: obs } = await supabaseAs(req.user)
+        .from('observations')
+        .select('recorded_by')
+        .eq('id', req.params.id)
+        .maybeSingle();
+
+      if (obs?.recorded_by && obs.recorded_by !== req.user.id) {
+        const titleMap = {
+          approve: 'Observation Approved',
+          return: 'Observation Returned for Changes',
+          reject: 'Observation Rejected',
+        };
+        sendPushToUsers({
+          userIds: obs.recorded_by,
+          title: titleMap[body.decision] || 'Observation Reviewed',
+          body: body.comment ? body.comment.slice(0, 150) : 'Your record review has been updated. Tap to view.',
+          data: { route: 'record', params: { id: req.params.id } },
+          channelId: 'discussions',
+        });
+      }
+    } catch {}
+
     res.status(201).json(data);
   },
 };
