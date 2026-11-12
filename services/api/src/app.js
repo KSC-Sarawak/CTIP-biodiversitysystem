@@ -5,6 +5,7 @@ import { requireAuth, allow, requireMfa } from './auth/middleware.js';
 import { MFA_SETUP_ROUTES } from './mfa.js';
 import { handlers as defaultHandlers } from './handlers.js';
 import { requireHttps as httpsOnly } from './https.js';
+import { requireSensorKey, receiveJpeg } from './sensors.js';
 
 const notImplemented = (req, res) =>
   res.status(501).json({ code: 'NOT_IMPLEMENTED', message: `${req.method} ${req.path} is not built yet` });
@@ -25,7 +26,10 @@ export function createApp({ verify, handlers = defaultHandlers, corsOrigins = []
     if (roles === PUBLIC) {
       v1[method](path, handler);
     } else if (roles === SENSOR) {
-      v1[method](path, notImplemented); // X-Sensor-Key check comes with the sensor ticket
+      // IoT gateway: X-Sensor-Key instead of a person's token. The image
+      // route takes raw JPEG bytes, read only after the key check.
+      const body = path.endsWith('/images') ? [receiveJpeg] : [];
+      v1[method](path, requireSensorKey, ...body, handler);
     } else {
       v1[method](path, requireAuth(verify), allow(...roles), requireMfa(mfaRoles, MFA_SETUP_ROUTES.has(`${method} ${path}`)), handler);
     }

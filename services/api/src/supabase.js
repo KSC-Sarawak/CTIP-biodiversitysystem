@@ -27,3 +27,15 @@ export function supabaseAs(user) {
     global: { ...options.global, headers: { Authorization: `Bearer ${user.token}` } },
   });
 }
+
+// Sensor data only (POST /telemetry and node images). The sensor routes have
+// no signed-in user, so after the API has checked the node's X-Sensor-Key it
+// writes with the secret key, as the storage migration planned (the
+// sensor-images bucket has no upload policy on purpose). Never use this for a
+// request from a person. null when SUPABASE_SECRET_KEY is not set.
+let serviceClient;
+export function supabaseService() {
+  if (!process.env.SUPABASE_SECRET_KEY) return null;
+  serviceClient ??= createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, options);
+  return serviceClient;
+}
