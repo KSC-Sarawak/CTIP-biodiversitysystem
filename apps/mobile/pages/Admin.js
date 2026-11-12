@@ -15,6 +15,7 @@ import {
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
 import { clearAllDrafts, listDrafts } from '../draftStore.js';
+import { unregisterCurrentPushToken } from '../hooks/useAlertNotifications.js';
 import { unsentTitle } from '../../shared/offline/syncStatus.js';
 import { useShowMore } from '../hooks/useShowMore.js';
 
@@ -61,6 +62,9 @@ export function StaffMore({ nav }) {
     } catch {}
 
     const doSignOut = async () => {
+      try {
+        await unregisterCurrentPushToken();
+      } catch {}
       try {
         await clearAllDrafts();
       } catch {}

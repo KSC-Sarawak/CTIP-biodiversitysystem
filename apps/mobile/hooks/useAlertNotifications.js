@@ -8,7 +8,18 @@
 import { useEffect, useRef } from 'react';
 import { Platform, Vibration } from 'react-native';
 import Constants from 'expo-constants';
-import { registerPushTokenApi } from '../../shared/api.js';
+import { registerPushTokenApi, unregisterPushTokenApi } from '../../shared/api.js';
+
+let activeDevicePushToken = null;
+
+export async function unregisterCurrentPushToken() {
+  if (activeDevicePushToken) {
+    try {
+      await unregisterPushTokenApi({ token: activeDevicePushToken });
+    } catch {}
+    activeDevicePushToken = null;
+  }
+}
 
 let Notifications = null;
 try {
@@ -80,6 +91,7 @@ export function useAlertNotifications(db, me, nav) {
             });
 
             if (tokenData?.data) {
+              activeDevicePushToken = tokenData.data;
               console.log('[PUSH] Got push token:', tokenData.data);
               const res = await registerPushTokenApi({
                 token: tokenData.data,

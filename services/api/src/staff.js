@@ -773,11 +773,14 @@ export const staffHandlers = {
 
   // Remove device Expo push notification token on sign-out
   'delete /me/push-token': async (req, res) => {
-    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    const token = typeof req.body?.token === 'string'
+      ? req.body.token.trim()
+      : typeof req.query?.token === 'string'
+        ? req.query.token.trim()
+        : '';
+    if (!token) return fail(res, 400, 'INVALID_TOKEN', 'Device push token is required to unregister');
     const db = supabaseAs(req.user);
-    let query = db.from('user_push_tokens').delete().eq('user_id', req.user.id);
-    if (token) query = query.eq('token', token);
-    const { error } = await query;
+    const { error } = await db.from('user_push_tokens').delete().eq('user_id', req.user.id).eq('token', token);
     if (error) return dbError(res, error);
     res.status(204).end();
   },
