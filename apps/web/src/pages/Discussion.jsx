@@ -6,7 +6,7 @@ import { Chip, Empty, Mono, Pills } from "../components/Bits.jsx";
 import { useStore } from "../../../shared/store.js";
 import { plantView } from "../../../shared/selectors.js";
 import { ROLE_LABEL } from "../../../shared/permissions.js";
-import { fmtDate, fmtDateTime } from "../../../shared/utils.js";
+import { fmtDate, fmtDateTime, initials } from "../../../shared/utils.js";
 import { go, useRoute } from "../useRoute.js";
 import { useConfirm } from "../useConfirm.jsx";
 
@@ -114,14 +114,20 @@ export default function Discussion({ arg }) {
 
   return (
     <Shell seg="discussion">
-      <div className="row between wrap">
-        <h2>Discussion</h2>
-        {!composing && <button className="btn" onClick={() => setComposing(true)}><Icon name="plus" size={18} /> New discussion</button>}
-      </div>
-      <p className="mute">
-        Start a thread and choose who it goes to: single people, whole groups such as all officers, or both.
-        Private threads are only seen by the people you send them to. Public threads can be read by every staff member.
-      </p>
+      <section className="dischero">
+        <ChatArt />
+        <div className="dischero-text">
+          <p className="overline">Team discussion</p>
+          <h1>Discussion, <span className="hl">in one place.</span></h1>
+          <p className="mute">Ask a question about a plant or a record, and choose who it goes to. Private threads are only seen by the people you send them to.</p>
+          {!composing && <p><button className="btn" onClick={() => setComposing(true)}><Icon name="plus" size={18} /> New discussion</button></p>}
+        </div>
+        <p className="disc-stats" aria-label="Your discussions">
+          <span><b>{unreadIds.size}</b> new</span>
+          <span><b>{count("inbox")}</b> sent to you</span>
+          <span><b>{count("all")}</b> in total</span>
+        </p>
+      </section>
 
       {composing && (
         <Composer
@@ -158,6 +164,8 @@ export default function Discussion({ arg }) {
           return (
             <li key={t.id}>
               <button className={"record topic" + (isNew ? " unread" : "")} onClick={() => go("/discussion/" + t.id)}>
+                <Avatar person={people.byId.get(last?.author_id || t.owner_id)} />
+                <span className="topic-body">
                 <span className="row wrap topichead">
                   <b>{t.title}</b>
                   <VisibilityChip value={t.visibility} />
@@ -170,6 +178,8 @@ export default function Discussion({ arg }) {
                   <span>{t.posts.length} {t.posts.length === 1 ? "message" : "messages"}</span>
                   {last && <span>Last {fmtDateTime(last.created_at)}</span>}
                 </span>
+                </span>
+                <Icon name="chevR" size={18} />
               </button>
             </li>
           );
@@ -177,21 +187,64 @@ export default function Discussion({ arg }) {
         {shownRecords.map((t) => (
           <li key={t.obs.id}>
             <button className="record topic" onClick={() => go("/discussion/" + t.obs.id)}>
-              <b>{t.plant.name}</b> <Mono className="mute">{t.plant.qr_id}</Mono>
-              <span className="block clamp2">{t.posts[0].body}</span>
-              <span className="meta">
-                <span>{t.posts.length} {t.posts.length === 1 ? "comment" : "comments"}</span>
-                <span>Last {fmtDateTime(t.posts.at(-1).created_at)}</span>
+              <span className="avatar disc-av leafav" aria-hidden="true"><Icon name="leaf" size={18} /></span>
+              <span className="topic-body">
+                <span className="row wrap topichead"><b>{t.plant.name}</b> <Mono className="mute">{t.plant.qr_id}</Mono></span>
+                <span className="block clamp2">{t.posts[0].body}</span>
+                <span className="meta">
+                  <span>{t.posts.length} {t.posts.length === 1 ? "comment" : "comments"}</span>
+                  <span>Last {fmtDateTime(t.posts.at(-1).created_at)}</span>
+                </span>
               </span>
+              <Icon name="chevR" size={18} />
             </button>
           </li>
         ))}
       </ul>
       {box !== "records" && !shown.length && (
-        <Empty icon="chat">{needle ? "No discussions match your search." : "No discussions here yet. Start one with New discussion."}</Empty>
+        <div className="disc-empty">
+          <ChatArt small />
+          <p className="mute">{needle ? "No discussions match your search." : "No discussions here yet. Start one with New discussion."}</p>
+        </div>
       )}
       {box === "records" && !shownRecords.length && <Empty icon="chat">No record comments{needle ? " match your search" : " yet"}.</Empty>}
     </Shell>
+  );
+}
+
+// A round badge with someone's initials, coloured by their role.
+function Avatar({ person }) {
+  return (
+    <span className={"avatar disc-av role-" + (person?.role || "none")} aria-hidden="true" title={person?.full_name}>
+      {person ? initials(person.full_name || "") : "?"}
+    </span>
+  );
+}
+
+// Two speech bubbles with leaves: the picture at the top of the discussion page.
+function ChatArt({ small = false }) {
+  return (
+    <svg className={"chatart" + (small ? " small" : "")} viewBox="0 0 240 180" aria-hidden="true" focusable="false">
+      <circle className="ca-glow" cx="120" cy="92" r="80" />
+      <g className="ca-b1">
+        <path className="ca-bubble" d="M34 40h112a18 18 0 0 1 18 18v40a18 18 0 0 1-18 18H84l-24 20v-20H34a18 18 0 0 1-18-18V58a18 18 0 0 1 18-18z" />
+        <rect className="ca-line" x="38" y="62" width="88" height="8" rx="4" />
+        <rect className="ca-line" x="38" y="80" width="62" height="8" rx="4" />
+      </g>
+      <g className="ca-b2">
+        <path className="ca-bubble2" d="M206 86H118a16 16 0 0 0-16 16v32a16 16 0 0 0 16 16h56l20 16v-16h12a16 16 0 0 0 16-16v-32a16 16 0 0 0-16-16z" />
+        <circle className="ca-dot" cx="138" cy="118" r="5" />
+        <circle className="ca-dot" cx="160" cy="118" r="5" />
+        <circle className="ca-dot" cx="182" cy="118" r="5" />
+      </g>
+      <g className="ca-leaf">
+        <path d="M196 20c18 10 22 32 6 46-16-10-20-32-6-46z" />
+        <path className="ca-vein" d="M199 26v38" />
+      </g>
+      <g className="ca-leaf ca-leaf2">
+        <path d="M22 140c14 2 22 16 14 30-14-2-22-16-14-30z" />
+      </g>
+    </svg>
   );
 }
 
@@ -673,6 +726,8 @@ function Post({ post, threadId, people, readers, ask }) {
 
   return (
     <li className={"post" + (mine ? " mine" : "") + (deleted ? " deleted" : "")}>
+      <Avatar person={author} />
+      <div className="post-bubble">
       <header>
         <b>{author?.full_name || "Former member"}</b>
         {author && <Chip value={author.role}>{ROLE_LABEL[author.role]}</Chip>}
@@ -716,6 +771,7 @@ function Post({ post, threadId, people, readers, ask }) {
       ) : (
         <Body text={post.body} mentions={post.mentions} people={people} />
       )}
+      </div>
     </li>
   );
 }

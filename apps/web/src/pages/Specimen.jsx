@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import Icon from "../components/Icon.jsx";
+import BackButton from "../components/BackButton.jsx";
 import Img from "../components/Img.jsx";
 import MiniMap from "../components/MiniMap.jsx";
 import NewSpeciesButton from "../components/NewSpeciesButton.jsx";
@@ -28,6 +29,7 @@ export default function Specimen({ qr }) {
   const [editing, setEditing] = useState(false);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
   const [qrBig, setQrBig] = useState(false); // QR code enlarged for scanning
+  const [decided, setDecided] = useState(null); // the decision just made here, for the "done" panel
   const [ask, confirmDialog] = useConfirm();
 
   const plant = visiblePlants(db, role).find((p) => p.qr_id === qr);
@@ -78,8 +80,9 @@ export default function Specimen({ qr }) {
   return (
     <>
       {confirmDialog}
+      {staff && <BackButton fallback="/dashboard/all" />}
       <nav className="crumbs" aria-label="Breadcrumb">
-        <a href={staff ? "#/dashboard" : "#/plants"}>{staff ? "Tagged plants" : "Plants"}</a> <span aria-hidden="true">›</span>{" "}
+        <a href={staff ? "#/dashboard/all" : "#/plants"}>{staff ? "Tagged plants" : "Plants"}</a> <span aria-hidden="true">›</span>{" "}
         {plant.species ? <a href={"#/plants/" + plant.species.id}>{plant.name}</a> : <span>{plant.name}</span>} <span aria-hidden="true">›</span>{" "}
         <Mono><span aria-current="page">{plant.qr_id}</span></Mono>
       </nav>
@@ -127,6 +130,21 @@ export default function Specimen({ qr }) {
         </div>
       )}
 
+      {/* After a decision: say what happened and offer the way back. */}
+      {decided && (
+        <section className="reviewdone" role="status">
+          <span className="reviewdone-ic"><Icon name={decided === "approve" ? "check" : decided === "return" ? "undo" : "x"} size={22} /></span>
+          <div className="grow">
+            <b>{decided === "approve" ? "Approved and published" : decided === "return" ? "Returned to the botanist" : "Record rejected"}</b>
+            <p className="mute small">{plant.qr_id} is done. Go back to where you were, or open the next record.</p>
+          </div>
+          <div className="row wrap">
+            <BackButton fallback="/review" label="Back to previous page" className="btn" />
+            <a className="btn ghost" href="#/review">Next in the queue</a>
+          </div>
+        </section>
+      )}
+
       {/* Officer review panel displayed directly on the tag's page */}
       {canReview && (pendingObs || showReviewPanel) && activeObsForReview && (
         <OfficerReviewCard
@@ -139,6 +157,7 @@ export default function Specimen({ qr }) {
           setPlantLocationHidden={setPlantLocationHidden}
           notify={notify}
           onClose={() => setShowReviewPanel(false)}
+          onDecided={setDecided}
         />
       )}
 
@@ -295,7 +314,7 @@ export default function Specimen({ qr }) {
 }
 
 // Inline review card on the tag's page for officers
-function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onClose }) {
+function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onClose, onDecided }) {
   const [comment, setComment] = useState("");
   const [hideChoice, setHideChoice] = useState(null); // null until the officer changes it
   const [ask, confirmDialog] = useConfirm();
@@ -322,6 +341,7 @@ function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservatio
         : "Record rejected"
     );
     setComment("");
+    onDecided?.(decision);
     if (onClose) onClose();
   };
 

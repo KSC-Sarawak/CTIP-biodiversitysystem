@@ -156,7 +156,7 @@ test.describe("Daun Sense Agent-Based QA & UX Testing", () => {
   // =========================================================================
   test("Officer Role: Must be able to review, approve, return, or reject from the tag page itself", async ({ page }) => {
     const watchdog = attachBugWatchdog(page);
-    await page.goto("#/dashboard");
+    await page.goto("#/dashboard/all"); // the full table (Daun v2: #/dashboard is the role's home)
     await switchRole(page, "Officer");
 
     // Open first plant tag (switch to all plants tab if review queue is empty)

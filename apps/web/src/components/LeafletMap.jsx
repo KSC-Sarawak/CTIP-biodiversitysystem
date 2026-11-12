@@ -91,6 +91,7 @@ function fitToPoints(map, pts, animate = false) {
 // onSelect(id, qr_id, ids): ids lists every plant at the spot or cluster that was chosen.
 // fitKey: when it changes, the view moves to the current points (a new search or filter).
 // onMapClick(lat, lng): for choosing a location by hand.
+// zoomToSelected: false keeps the selected pin highlighted without zooming in on it.
 export default function LeafletMap({
   points = [],
   selectedId = null,
@@ -103,6 +104,7 @@ export default function LeafletMap({
   className = "",
   showControls = true,
   initialLayer = "osm",
+  zoomToSelected = true,
 }) {
   const containerRef = useRef(null);
   const mapRef = useRef(null);
@@ -268,7 +270,7 @@ export default function LeafletMap({
     // Done before adding markers, or the clusters keep their grouping from the old zoom.
     if (moveView) {
       fittedRef.current = fitKey;
-      const chosen = located.find((pt) => pt.id === selectedId || pt.qr_id === selectedId);
+      const chosen = zoomToSelected && located.find((pt) => pt.id === selectedId || pt.qr_id === selectedId);
       if (chosen) map.setView([chosen.lat, chosen.lng], SELECTED_ZOOM, { animate: false });
       else fitToPoints(map, located);
     }
@@ -311,7 +313,7 @@ export default function LeafletMap({
 
       group.addLayer(marker);
     });
-  }, [points, selectedId, interactive, fitKey]);
+  }, [points, selectedId, interactive, fitKey, zoomToSelected]);
 
   // User Location marker rendering
   const renderUserLocation = useCallback((loc, panTo = false) => {
@@ -478,8 +480,8 @@ export default function LeafletMap({
             type="button"
             className="tool-btn"
             onClick={() => fitToPoints(mapRef.current, pointsRef.current.filter(hasCoords), true)}
-            aria-label="Reset zoom to show every plant"
-            title="Reset zoom to show every plant"
+            aria-label="Reset zoom to show every pin"
+            title="Reset zoom to show every pin"
           >
             <Icon name="refresh" size={15} />
             <span>Reset zoom</span>

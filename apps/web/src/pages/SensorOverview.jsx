@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import PageHead from "../components/PageHead.jsx";
 import { Chip, Empty, Mono, Pills } from "../components/Bits.jsx";
 import { NodeImages, NodeMap, TimeChart } from "../components/SensorParts.jsx";
 import { NODE_STATE, has, nodeState } from "../sensorState.js";
@@ -137,26 +138,32 @@ export default function SensorOverview() {
   return (
     <Shell seg="monitoring" plain>
       {confirmDialog}
-      <div className="pagehead">
-        <div>
-          <h1>Monitoring</h1>
-          <p className="mute"><span className="livedot" aria-hidden="true" /> Live: readings update on their own every few seconds{newestTs ? ` · newest ${fmtDateTime(newestTs)}` : ""}</p>
-        </div>
-      </div>
-
-      <div className="tiles">
-        <div className={"glass tile" + (open.length ? " tile-bad" : "")}><span className="mute">Open alerts</span><b>{open.length}</b></div>
-        <div className="glass tile"><span className="mute">Nodes online</span><b>{online} <small className="mute">of {nodes.length}</small></b></div>
-        <div className={"glass tile" + (nodes.length - online ? " tile-warn" : "")}><span className="mute">Offline or faulty</span><b>{nodes.length - online}</b></div>
-        <div className={"glass tile" + (outOfLimits ? " tile-warn" : "")}><span className="mute">Outside alert limits</span><b>{outOfLimits}</b></div>
-        <div className="glass tile"><span className="mute">Readings, last 24 h</span><b>{readings24h}</b></div>
-      </div>
+      <PageHead
+        overline="Sensor network"
+        title="Monitoring"
+        lead={
+          open.length ? `${open.length} open ${open.length === 1 ? "alert needs" : "alerts need"} your attention.`
+            : nodes.length - online ? `No open alerts, but ${nodes.length - online} ${nodes.length - online === 1 ? "node is" : "nodes are"} offline or faulty.`
+              : nodes.length ? "All quiet. Every node is online and no alerts are open."
+                : "No sensor nodes are set up yet."
+        }
+        tone={open.length ? "bad" : nodes.length - online ? "warn" : nodes.length ? "ok" : "info"}
+        stats={[
+          { label: "Open alerts", value: open.length, tone: "bad", onClick: () => document.getElementById("attn")?.scrollIntoView({ behavior: "smooth", block: "start" }) },
+          { label: `Nodes online of ${nodes.length}`, value: online },
+          { label: "Offline or faulty", value: nodes.length - online, tone: "warn" },
+          { label: "Outside alert limits", value: outOfLimits, tone: "warn" },
+          { label: "Readings, last 24 h", value: readings24h },
+        ]}
+      >
+        <p className="mute small"><span className="livedot" aria-hidden="true" /> Live: readings update on their own every few seconds{newestTs ? ` · newest ${fmtDateTime(newestTs)}` : ""}</p>
+      </PageHead>
 
       <div className="monitor-top gap-section-s">
         <section className="glass pad" aria-labelledby="nodemap">
           <h2 id="nodemap">Node map</h2>
           <p className="mute small">Select a pin to see that node's readings and photos.</p>
-          <NodeMap nodes={nodes} whereOf={whereOf} openByNode={openByNode} onSelect={setNodeId} />
+          <NodeMap nodes={nodes} whereOf={whereOf} plantOf={plantOf} openByNode={openByNode} selectedId={node?.id} onSelect={setNodeId} />
         </section>
 
         <section aria-labelledby="attn-h" id="attn">

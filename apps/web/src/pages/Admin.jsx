@@ -2,6 +2,7 @@
 import { useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import PageHead from "../components/PageHead.jsx";
 import { Chip, PasswordInput } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
@@ -63,6 +64,8 @@ export function Users() {
   // Deleted ones first, soonest to be removed at the top.
   const inactiveUsers = sortedUsers.filter((u) => !u.is_active || u.deleted_at)
     .sort((a, b) => (!!b.deleted_at - !!a.deleted_at) || (a.deleted_at && b.deleted_at ? a.deleted_at.localeCompare(b.deleted_at) : 0));
+
+  const waitingUsers = inactiveUsers.filter((u) => !u.deleted_at);
 
   const add = async (e) => {
     e.preventDefault();
@@ -136,7 +139,17 @@ export function Users() {
 
   return (
     <Shell seg="users">
-      <h2>Users</h2>
+      <PageHead
+        overline="Admin dashboard"
+        title="Users"
+        lead={waitingUsers.length ? `${waitingUsers.length} ${waitingUsers.length === 1 ? "account is" : "accounts are"} turned off and may be waiting for access.` : `All ${activeUsers.length} accounts are active.`}
+        tone={waitingUsers.length ? "warn" : "ok"}
+        stats={[
+          { label: "Active", value: activeUsers.length },
+          ...Object.entries(ROLE_LABEL).map(([r, text]) => ({ label: text, value: activeUsers.filter((u) => u.role === r).length })),
+          { label: "Not active", value: inactiveUsers.length, tone: "warn" },
+        ]}
+      />
       {confirmDialog}
 
       {/* noValidate: our own checks say why a value is wrong, instead of the browser's bubble */}
@@ -243,8 +256,12 @@ export function Audit() {
   const { db } = useStore();
   return (
     <Shell seg="audit">
-      <h2>Audit log</h2>
-      <p className="mute">Who changed what. Entries cannot be edited.</p>
+      <PageHead
+        overline="Admin dashboard"
+        title="Audit log"
+        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited.`}
+        tone="info"
+      />
 
       <div className="tablewrap">
         <table>

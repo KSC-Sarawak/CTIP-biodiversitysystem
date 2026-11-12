@@ -31,6 +31,8 @@ export const palettes = {
     mapTile: "#123021", // map ground
     mapLine: "#24533a", // map rivers and trails
     camera: "#06110b", // behind the camera preview (same in both themes)
+    washLeaf: "#1d4a2a", // v2: soft green wash behind a hero, fading into bg
+    washWater: "#113a40", // v2: second hero wash, fading into bg
   },
   light: {
     bg: "#f3f6ec",
@@ -55,6 +57,8 @@ export const palettes = {
     mapTile: "#e3eed8",
     mapLine: "#bcd3ae",
     camera: "#06110b",
+    washLeaf: "#dcebd2",
+    washWater: "#d5e9ea",
   },
 };
 
@@ -136,6 +140,29 @@ export const typeScale = {
   mono: { size: 13, line: 18, font: "mono", weight: 500 },
 };
 
+// ---------- Daun v2 type (website) ----------
+// The website reads better with a plain sans: Inter is everything you read or tap, and Fraunces
+// is kept for the one big headline on a screen (28px and up). The field app still bundles Nunito
+// and the scale above; it moves to these values when its font files are swapped.
+export const webFonts = { display: "Fraunces", text: "Inter", mono: "JetBrains Mono" };
+
+// Website overrides and additions to typeScale: more room between lines, lighter weights
+// (400 to read, 600 for titles and buttons, 700 only for small capitals).
+export const webType = {
+  hero: { size: 96, line: 98, font: "display", weight: 600 }, // visitor home headline (shrinks with the screen, App.css)
+  greeting: { size: 44, line: 50, font: "display", weight: 600 }, // the sentence that opens a staff home
+  title1: { size: 30, line: 38, font: "display", weight: 600 },
+  title2: { size: 22, line: 30, font: "text", weight: 600 },
+  title3: { size: 18, line: 26, font: "text", weight: 600 },
+  sci: { size: 15, line: 22, font: "text", weight: 400, italic: true },
+  bodyLg: { size: 18, line: 30, font: "text", weight: 400 },
+  body: { size: 16, line: 26, font: "text", weight: 400 },
+  label: { size: 15, line: 22, font: "text", weight: 600 },
+  small: { size: 14, line: 22, font: "text", weight: 400 },
+  caption: { size: 13, line: 20, font: "text", weight: 600 },
+  overline: { size: 12, line: 16, font: "text", weight: 700, caps: true, tracking: 0.08 },
+};
+
 // ---------- space, shape, touch ----------
 export const space = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32, 7: 56 };
 export const radius = { tag: 6, control: 10, card: 14, sheet: 20, pill: 999 };
@@ -153,6 +180,7 @@ export const motion = {
   fast: 120, // hover, press, colour changes
   base: 200, // popovers, menus, chips, theme change
   slow: 320, // page and panel entrances
+  enter: 560, // v2: a home's sentence, focus card and links rising in once
   ease: "cubic-bezier(0.2, 0, 0, 1)", // settle into place (entrances)
   easeInOut: "cubic-bezier(0.4, 0, 0.2, 1)", // colour and size changes
 };

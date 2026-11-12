@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import PageHead from "../components/PageHead.jsx";
 import { Chip, Mono, Modal } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import TagPrint from "../components/TagPrint.jsx";
@@ -61,7 +62,18 @@ export default function Tags() {
   return (
     <Shell seg="tags">
       {confirmDialog}
-      <h2>QR tags</h2>
+      <PageHead
+        overline="Print and assign"
+        title="QR tags"
+        lead={unused.length ? `${unused.length} unused ${unused.length === 1 ? "tag is" : "tags are"} ready to print and put on plants.` : "No unused tags left. Create a new batch below."}
+        tone={unused.length ? "ok" : "warn"}
+        stats={[
+          { label: "Ready to use", value: unused.length },
+          { label: "On a plant", value: db.tags.filter((t) => t.status === "assigned").length },
+          { label: "Kept for a botanist", value: db.tags.filter(isKept).length },
+          { label: "Retired", value: db.tags.filter((t) => t.status === "retired").length },
+        ]}
+      />
       <form className="row wrap" onSubmit={make}>
         <label>How many<input type="number" min="1" max="50" value={count} onChange={(e) => setCount(e.target.value)} /></label>
         <label>Batch label<input value={batch} onChange={(e) => setBatch(e.target.value)} /></label>
