@@ -380,12 +380,13 @@ function NewDiscussionModal({ directory, onClose, onCreated }) {
                         <Text style={{ fontFamily: font('text', 700), fontSize: 15, color: on ? c.accent : c.ink }}>{g.label}</Text>
                         <Txt v="caption" color={c.ink2}>All members with the {g.role} role</Txt>
                       </View>
-                      <Switch
-                        value={on}
-                        onValueChange={() => toggleRole(g.role)}
-                        trackColor={{ false: c.line, true: c.accent }}
-                        thumbColor={Platform.OS === 'android' ? (on ? c.onAccent : '#f4f3f4') : undefined}
-                      />
+                      <View pointerEvents="none">
+                        <Switch
+                          value={on}
+                          trackColor={{ false: c.line, true: c.accent }}
+                          thumbColor={Platform.OS === 'android' ? (on ? c.onAccent : '#f4f3f4') : undefined}
+                        />
+                      </View>
                     </Pressable>
                   );
                 })}
@@ -424,12 +425,13 @@ function NewDiscussionModal({ directory, onClose, onCreated }) {
                             <Txt v="caption" color={c.ink2}>{ROLE_LABEL[u.role] || u.role}</Txt>
                           </View>
                         </View>
-                        <Switch
-                          value={on}
-                          onValueChange={() => toggleUser(u.id)}
-                          trackColor={{ false: c.line, true: c.accent }}
-                          thumbColor={Platform.OS === 'android' ? (on ? c.onAccent : '#f4f3f4') : undefined}
-                        />
+                        <View pointerEvents="none">
+                          <Switch
+                            value={on}
+                            trackColor={{ false: c.line, true: c.accent }}
+                            thumbColor={Platform.OS === 'android' ? (on ? c.onAccent : '#f4f3f4') : undefined}
+                          />
+                        </View>
                       </Pressable>
                     );
                   })}

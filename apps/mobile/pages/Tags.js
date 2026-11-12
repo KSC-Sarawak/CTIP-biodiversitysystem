@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { View, Text, Pressable, Alert, Modal, ScrollView, TextInput } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import QRCodeLib from 'qrcode';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
@@ -256,6 +257,17 @@ function PrintStudioModal({ tags, onClose }) {
     if (!chosenIds.length || exporting) return;
     setExporting(true);
     try {
+      // Pre-generate offline inline SVGs for all unique tag IDs
+      const svgMap = {};
+      for (const id of chosenIds) {
+        try {
+          const svg = await QRCodeLib.toString(tagUrl(id), { type: 'svg', margin: 1 });
+          svgMap[id] = svg;
+        } catch {
+          svgMap[id] = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(tagUrl(id))}" alt="${id}" />`;
+        }
+      }
+
       const allItems = chosenIds.flatMap((id) => Array.from({ length: numCopies }, () => id));
       const htmlContent = `<!DOCTYPE html>
 <html>
@@ -289,6 +301,11 @@ function PrintStudioModal({ tags, onClose }) {
     ${layout === 'sheet' && cutLines ? 'border: 1px dashed #999;' : ''}
     page-break-inside: avoid;
   }
+  .tagcard .qr-svg svg {
+    width: ${presetMm}mm;
+    height: ${presetMm}mm;
+    display: block;
+  }
   .tagcard img {
     width: ${presetMm}mm;
     height: ${presetMm}mm;
@@ -308,7 +325,7 @@ function PrintStudioModal({ tags, onClose }) {
     .map(
       (id) => `
     <div class="tagcard">
-      <img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(tagUrl(id))}" alt="${id}" />
+      <div class="qr-svg">${svgMap[id] || ''}</div>
       ${caption ? `<div class="id">${id}</div>` : ''}
     </div>
   `

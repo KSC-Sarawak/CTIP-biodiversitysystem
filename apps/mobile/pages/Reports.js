@@ -22,6 +22,16 @@ import {
 import { shortDate } from '../components/format.js';
 import { useShowMore } from '../hooks/useShowMore.js';
 
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function Bar({ labelText, n, max, tone = 'accent', onPress, on }) {
   const { c } = useTheme();
   const body = (
@@ -237,7 +247,7 @@ export default function Reports({ nav }) {
 </head>
 <body>
   <h1>Plant Records Report</h1>
-  <p class="meta">Niah National Park · ${filteredRecords.length} records matching filters · Generated ${new Date().toLocaleDateString()}</p>
+  <p class="meta">Niah National Park · ${filteredRecords.length} records matching filters · Generated ${escapeHtml(new Date().toLocaleDateString())}</p>
   <table>
     <thead>
       <tr>
@@ -256,14 +266,14 @@ export default function Reports({ nav }) {
         .map(
           (p) => `
         <tr>
-          <td class="mono">${p.qr_id || '-'}</td>
-          <td><b>${p.name || '-'}</b></td>
-          <td class="sci">${p.scientific || '-'}</td>
-          <td>${STATUS_TEXT[p.status] || p.status}</td>
-          <td>${p.conservation || '-'}</td>
-          <td>${zoneNames[p.zone_id] || '-'}</td>
-          <td>${p.lastSeen ? fmtDate(p.lastSeen) : '-'}</td>
-          <td>${p.height_cm ? `${p.height_cm} cm` : '-'}</td>
+          <td class="mono">${escapeHtml(p.qr_id || '-')}</td>
+          <td><b>${escapeHtml(p.name || '-')}</b></td>
+          <td class="sci">${escapeHtml(p.scientific || '-')}</td>
+          <td>${escapeHtml(STATUS_TEXT[p.status] || p.status || '-')}</td>
+          <td>${escapeHtml(p.conservation || '-')}</td>
+          <td>${escapeHtml(zoneNames[p.zone_id] || '-')}</td>
+          <td>${escapeHtml(p.lastSeen ? fmtDate(p.lastSeen) : '-')}</td>
+          <td>${escapeHtml(p.height_cm ? `${p.height_cm} cm` : '-')}</td>
         </tr>
       `
         )

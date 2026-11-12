@@ -457,6 +457,13 @@ function PhotoManagerModal({ species, initialPhotos, onClose, onSave }) {
   };
 
   const handleSave = async () => {
+    const emptyIdx = photos.findIndex((p) => !p.caption?.trim());
+    if (emptyIdx >= 0) {
+      return Alert.alert(
+        'Caption Required',
+        `Please provide a caption for photo ${emptyIdx + 1}. Every species photo requires a descriptive caption.`
+      );
+    }
     setSaving(true);
     try {
       await onSave(photos);
@@ -476,7 +483,7 @@ function PhotoManagerModal({ species, initialPhotos, onClose, onSave }) {
         <ScrollView contentContainerStyle={{ padding: 20, gap: 16, paddingBottom: 40 }}>
           <TitleBlock
             title="Species photos"
-            sub="Manage photos, captions & display order"
+            sub="Manage photos, mandatory captions & display order"
           />
 
           <Button label="Add photo from library" icon="camera" kind="secondary" height={44} onPress={addPhotoFromLibrary} />
@@ -521,7 +528,7 @@ function PhotoManagerModal({ species, initialPhotos, onClose, onSave }) {
                     <TextInput
                       value={ph.caption || ''}
                       onChangeText={(t) => updateCaption(idx, t)}
-                      placeholder="Add photo caption..."
+                      placeholder="Photo caption (required)*"
                       placeholderTextColor={c.ink3}
                       style={{
                         padding: 8,
@@ -530,8 +537,15 @@ function PhotoManagerModal({ species, initialPhotos, onClose, onSave }) {
                         color: c.ink,
                         fontSize: 13,
                         fontFamily: font('text', 400),
+                        borderWidth: 1,
+                        borderColor: !ph.caption?.trim() ? (c.danger || '#e11d48') : c.line,
                       }}
                     />
+                    {!ph.caption?.trim() && (
+                      <Txt v="caption" color={c.danger || '#e11d48'} style={{ fontSize: 11, marginTop: -2 }}>
+                        * Caption is required
+                      </Txt>
+                    )}
                   </View>
                 </View>
               ))}
