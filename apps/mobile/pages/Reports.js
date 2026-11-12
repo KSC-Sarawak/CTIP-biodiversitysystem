@@ -7,6 +7,7 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
 
 import { useStore } from '../../shared/store.js';
 import { countPlants, visiblePlants } from '../../shared/selectors.js';
@@ -224,7 +225,7 @@ export default function Reports({ nav }) {
     }
   };
 
-  const exportPrintHtml = async () => {
+  const exportPrintPdf = async () => {
     if (!filteredRecords.length || exporting) return;
     setExporting(true);
     try {
@@ -283,15 +284,27 @@ export default function Reports({ nav }) {
 </body>
 </html>`;
 
-      const fileUri = `${FileSystem.cacheDirectory}plant-records-report.html`;
-      await FileSystem.writeAsStringAsync(fileUri, htmlContent, { encoding: FileSystem.EncodingType.UTF8 });
+      const printResult = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      let targetUri = `${FileSystem.cacheDirectory}plant-records-report.pdf`;
+      if (printResult.base64) {
+        await FileSystem.writeAsStringAsync(targetUri, printResult.base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } else if (printResult.uri) {
+        try {
+          await FileSystem.copyAsync({ from: printResult.uri, to: targetUri });
+        } catch {
+          targetUri = printResult.uri;
+        }
+      }
+
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'text/html', dialogTitle: 'Print or Share Records Report' });
+        await Sharing.shareAsync(targetUri, { mimeType: 'application/pdf', dialogTitle: 'Print or Share Records PDF', UTI: 'com.adobe.pdf' });
       } else {
-        Alert.alert('Saved', `Printable report saved to ${fileUri}`);
+        Alert.alert('PDF Created', `Report PDF saved to ${targetUri}`);
       }
     } catch (err) {
-      Alert.alert('Print Error', err.message || 'Could not generate report');
+      Alert.alert('Print Error', err.message || 'Could not generate report PDF');
     } finally {
       setExporting(false);
     }
@@ -369,13 +382,13 @@ export default function Reports({ nav }) {
               onPress={exportCsv}
             />
             <Button
-              label={exporting ? 'Generating…' : 'Print / PDF'}
+              label={exporting ? 'Generating PDF…' : 'Print / PDF'}
               icon="printer"
               kind="secondary"
               flex={1}
               height={44}
               disabled={!filteredRecords.length || exporting}
-              onPress={exportPrintHtml}
+              onPress={exportPrintPdf}
             />
           </View>
 

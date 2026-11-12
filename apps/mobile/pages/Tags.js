@@ -6,6 +6,7 @@ import QRCode from 'react-native-qrcode-svg';
 import QRCodeLib from 'qrcode';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as Print from 'expo-print';
 
 import { useStore } from '../../shared/store.js';
 import { plantView, tagUrl } from '../../shared/selectors.js';
@@ -260,7 +261,7 @@ function PrintStudioModal({ tags, onClose }) {
   const numCopies = Math.max(1, parseInt(copies, 10) || 1);
   const totalTags = chosenIds.length * numCopies;
 
-  const exportHtml = async () => {
+  const exportPdf = async () => {
     if (!chosenIds.length || exporting) return;
     setExporting(true);
     try {
@@ -341,15 +342,27 @@ function PrintStudioModal({ tags, onClose }) {
 </body>
 </html>`;
 
-      const fileUri = `${FileSystem.cacheDirectory}batch-tags-print.html`;
-      await FileSystem.writeAsStringAsync(fileUri, htmlContent, { encoding: FileSystem.EncodingType.UTF8 });
+      const printResult = await Print.printToFileAsync({ html: htmlContent, base64: true });
+      let targetUri = `${FileSystem.cacheDirectory}batch-tags-print.pdf`;
+      if (printResult.base64) {
+        await FileSystem.writeAsStringAsync(targetUri, printResult.base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } else if (printResult.uri) {
+        try {
+          await FileSystem.copyAsync({ from: printResult.uri, to: targetUri });
+        } catch {
+          targetUri = printResult.uri;
+        }
+      }
+
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'text/html', dialogTitle: 'Print or Share Tags HTML' });
+        await Sharing.shareAsync(targetUri, { mimeType: 'application/pdf', dialogTitle: 'Print or Share Tags PDF', UTI: 'com.adobe.pdf' });
       } else {
-        Alert.alert('Saved', `Printable HTML saved to ${fileUri}`);
+        Alert.alert('PDF Created', `Tags PDF saved to ${targetUri}`);
       }
     } catch (err) {
-      Alert.alert('Export Error', err.message || 'Could not export tags');
+      Alert.alert('Export Error', err.message || 'Could not export tags PDF');
     } finally {
       setExporting(false);
     }
@@ -525,11 +538,11 @@ function PrintStudioModal({ tags, onClose }) {
 
           {/* Print/Share Action */}
           <Button
-            label={exporting ? 'Generating print file…' : `Print / Share ${totalTags} Tags`}
-            icon="qr"
+            label={exporting ? 'Generating PDF…' : `Print / Export ${totalTags} Tags (PDF)`}
+            icon="printer"
             height={50}
             disabled={!chosenIds.length || exporting}
-            onPress={exportHtml}
+            onPress={exportPdf}
           />
         </ScrollView>
       </View>
