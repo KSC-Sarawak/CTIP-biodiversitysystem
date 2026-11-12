@@ -14,7 +14,7 @@ import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
   Screen, Header, IconButton, TitleBlock, SearchField, SortBar, Row, Thumb, Sci, DotLabel, Notice,
-  EmptyState, Button, Chip, Field, Segmented, Txt, Mono,
+  Empty, EmptyState, Button, Chip, Field, Segmented, Txt, Mono,
 } from '../components/Bits.js';
 import { useShowMore } from '../hooks/useShowMore.js';
 
@@ -116,11 +116,17 @@ export default function SpeciesAdmin({ nav }) {
   };
 
   return (
-    <Screen header={<Header left={<IconButton name="chevL" label="Back" onPress={nav.back} />} />} top={0} gap={16}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <TitleBlock title="Species" sub={`${allActive.length} species · ${unpublishedCount} not published`} />
-        <Button label="Add species" icon="plus" height={42} size={14} onPress={() => setFormSpecies({ ...BLANK_SPECIES })} />
-      </View>
+    <Screen
+      header={
+        <Header
+          left={<IconButton name="chevL" label="Back" onPress={nav.back} />}
+          right={<Button label="New species" icon="plus" height={36} size={13} onPress={() => setFormSpecies({ ...BLANK_SPECIES })} />}
+        />
+      }
+      top={0}
+      gap={16}
+    >
+      <TitleBlock title="Species" sub={`${allActive.length} species · ${unpublishedCount} not published`} />
 
       <SearchField value={q} onChangeText={setQ} placeholder="Search species by name, family or genus" />
       <SortBar items={SORT_SPECIES_ADMIN} value={sort} onChange={setSort} />
@@ -236,9 +242,12 @@ export default function SpeciesAdmin({ nav }) {
   );
 }
 
-function SpeciesFormModal({ species, onClose, onSave }) {
+export function SpeciesFormModal({ species, onClose, onSave, onManagePhotos }) {
+  const { db, setSpeciesMedia, notify } = useStore();
   const { c } = useTheme();
   const isEditing = !!species.id;
+  const [managingPhotos, setManagingPhotos] = useState(false);
+  const photosList = isEditing ? speciesMedia(db, species.id) || [] : [];
 
   const [scientificName, setScientificName] = useState(species.scientific_name || '');
   const [commonName, setCommonName] = useState(species.common_name || '');
@@ -342,6 +351,58 @@ function SpeciesFormModal({ species, onClose, onSave }) {
             </ScrollView>
           </View>
 
+          {/* Photos Management Card in Species Edit */}
+          {isEditing && (
+            <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 10 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Txt v="label" style={{ fontSize: 15 }}>
+                    Species photos ({photosList.length})
+                  </Txt>
+                  <Txt v="caption" color={c.ink2}>
+                    Manage cover photo, gallery images & mandatory captions
+                  </Txt>
+                </View>
+                <Button
+                  label="Edit photos"
+                  icon="camera"
+                  kind="secondary"
+                  height={38}
+                  size={13}
+                  onPress={() => {
+                    if (onManagePhotos) onManagePhotos(species);
+                    else setManagingPhotos(true);
+                  }}
+                />
+              </View>
+
+              {photosList.length > 0 ? (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingTop: 4 }}>
+                  {photosList.map((ph, idx) => (
+                    <View
+                      key={ph.id || idx}
+                      style={{
+                        width: 64,
+                        height: 64,
+                        borderRadius: 8,
+                        overflow: 'hidden',
+                        borderWidth: ph.is_primary ? 2 : 1,
+                        borderColor: ph.is_primary ? c.accent : c.line,
+                        backgroundColor: c.surface,
+                      }}
+                    >
+                      <Image source={{ uri: ph.url }} style={{ width: '100%', height: '100%' }} />
+                    </View>
+                  ))}
+                </ScrollView>
+              ) : (
+                <Txt v="caption" color={c.ink3} style={{ fontStyle: 'italic' }}>
+                  No photos uploaded for this species yet. Tap "Edit photos" to add from library.
+                </Txt>
+              )}
+            </View>
+          )}
+
           <View style={{ gap: 6 }}>
             <Txt v="label" style={{ fontSize: 15 }}>Description</Txt>
             <TextInput
@@ -391,12 +452,30 @@ function SpeciesFormModal({ species, onClose, onSave }) {
             onPress={handleSubmit}
           />
         </ScrollView>
+
+        {/* Embedded Photo Manager Modal */}
+        {managingPhotos && (
+          <PhotoManagerModal
+            species={species}
+            initialPhotos={photosList}
+            onClose={() => setManagingPhotos(false)}
+            onSave={async (mediaList) => {
+              const res = await setSpeciesMedia(species.id, mediaList);
+              if (res?.ok !== false) {
+                notify('Photos updated');
+                setManagingPhotos(false);
+              } else {
+                Alert.alert('Error', res?.message || 'Could not save photos');
+              }
+            }}
+          />
+        )}
       </View>
     </Modal>
   );
 }
 
-function PhotoManagerModal({ species, initialPhotos, onClose, onSave }) {
+export function PhotoManagerModal({ species, initialPhotos, onClose, onSave }) {
   const { c } = useTheme();
   const [photos, setPhotos] = useState(() => initialPhotos.map((p, idx) => ({ ...p, sort_order: p.sort_order ?? idx })));
   const [saving, setSaving] = useState(false);

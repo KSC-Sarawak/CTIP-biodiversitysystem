@@ -5,7 +5,7 @@
 import React, { useRef, useState } from 'react';
 import { View, Text, FlatList, Pressable, Animated, Linking, Alert, Modal, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 import { useStore } from '../../shared/store.js';
@@ -454,7 +454,7 @@ export function StaffDashboard({ nav }) {
     .filter((v) => !v.roles || v.roles.includes(role))
     .map((v) => ({ ...v, count: rows.filter((r) => v.test(r, me)).length }));
 
-  const curView = views.find((v) => v.key === viewKey) || views[0];
+  const curView = views.find((v) => v.key === viewKey) || views[0] || { key: 'all', name: 'All Tagged Plants', test: () => true };
   const needle = q.trim().toLowerCase();
 
   const filtered = rows
@@ -496,10 +496,10 @@ export function StaffDashboard({ nav }) {
           r.nphotos,
         ]),
       ]);
-      const fileUri = `${FileSystem.cacheDirectory}tagged-plants-${curView.key}.csv`;
+      const fileUri = `${FileSystem.cacheDirectory}tagged-plants-${curView?.key || 'all'}.csv`;
       await FileSystem.writeAsStringAsync(fileUri, csvData, { encoding: FileSystem.EncodingType.UTF8 });
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: `Export ${curView.name}` });
+        await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: `Export ${curView?.name || 'Tagged Plants'}` });
       } else {
         Alert.alert('CSV Created', `File saved to ${fileUri}`);
       }
@@ -511,9 +511,9 @@ export function StaffDashboard({ nav }) {
   };
 
   const shareEmail = async () => {
-    const subject = encodeURIComponent(`Daun Sense: ${curView.name}`);
+    const subject = encodeURIComponent(`Daun Sense: ${curView?.name || 'Tagged Plants'}`);
     const body = encodeURIComponent(
-      `Please check the tagged plants list (${curView.name}, ${sorted.length} records).\n\nSent from Daun Sense mobile app.`
+      `Please check the tagged plants list (${curView?.name || 'Tagged Plants'}, ${sorted.length} records).\n\nSent from Daun Sense mobile app.`
     );
     try {
       await Linking.openURL(`mailto:?subject=${subject}&body=${body}`);
@@ -533,13 +533,11 @@ export function StaffDashboard({ nav }) {
         refreshControl={refreshControl}
         ListHeaderComponent={
           <View style={{ gap: 14, paddingTop: 12, paddingBottom: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-              <View>
-                <Txt v="caption" color={c.ink2} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                  {DASHBOARD_LABEL[role] || 'Staff Dashboard'}
-                </Txt>
-                <TitleBlock title={curView.name} right={<Txt v="small" color={c.ink2}>{sorted.length} plants</Txt>} />
-              </View>
+            <View style={{ gap: 2 }}>
+              <Txt v="caption" color={c.ink2} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
+                {DASHBOARD_LABEL[role] || 'Staff Dashboard'}
+              </Txt>
+              <TitleBlock title={curView.name} right={<Txt v="small" color={c.ink2}>{sorted.length} plants</Txt>} />
             </View>
 
             {/* Saved view pills */}

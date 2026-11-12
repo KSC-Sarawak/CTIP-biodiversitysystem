@@ -11,7 +11,7 @@ import { useTheme, font } from '../components/Theme.js';
 import { AppearanceSection, VersionLine } from '../components/Chrome.js';
 import {
   Screen, Header, IconButton, TitleBlock, Section, MenuRow, Button, Avatar, Txt, Mono, SearchField, Pills, SortBar, Row, DotLabel,
-  Field, Segmented, EmptyState,
+  Field, Segmented, EmptyState, Chip,
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
 import { clearAllDrafts, listDrafts } from '../draftStore.js';

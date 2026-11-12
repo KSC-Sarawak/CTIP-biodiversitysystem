@@ -5,7 +5,7 @@
 //    CSV export, and printable report output.
 import React, { useMemo, useState } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 import { useStore } from '../../shared/store.js';

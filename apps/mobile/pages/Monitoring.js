@@ -5,7 +5,7 @@
 // - Admin threshold limits editing (temp_max, moisture_min)
 // - Alert detail with 3-step progress pipeline (Assign -> Acknowledge -> Resolve),
 //   conservation officer assignment, investigation notes, and resolution outcome.
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
@@ -13,13 +13,29 @@ import { plantView, nameOf } from '../../shared/selectors.js';
 import { useTheme, font, statusText } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
-  Screen, Bar, TitleBlock, Section, Row, Thumb, Mono, Txt, DotLabel, Chip, Spark, Button, Area,
+  Screen, Bar, Header, IconButton, TitleBlock, Section, Row, Thumb, Mono, Txt, DotLabel, Chip, Spark, Button, Area,
   Empty, EmptyState, Pills, Field,
 } from '../components/Bits.js';
 import { dateTime, shortDate } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 
 const latest = (readings = []) => readings[readings.length - 1];
+
+const TIME_RANGES = [
+  { key: 6, label: '6h' },
+  { key: 12, label: '12h' },
+  { key: 24, label: '24h' },
+  { key: 168, label: '7d' },
+  { key: 720, label: '30d' },
+];
+
+const RANGE_TITLE = {
+  6: 'Last 6 hours readings',
+  12: 'Last 12 hours readings',
+  24: 'Last 24 hours readings',
+  168: 'Last 7 days readings',
+  720: 'Last 30 days readings',
+};
 
 function AlertCard({ a, node, onPress }) {
   const { c } = useTheme();
@@ -65,7 +81,7 @@ function AlertCard({ a, node, onPress }) {
 
 export function Monitor({ nav }) {
   usePolling(5000);
-  const { db, role, setThresholds, notify } = useStore();
+  const { db, role, setThresholds, notify, loadNodeTelemetry } = useStore();
   const { c } = useTheme();
 
   const [picked, setPicked] = useState(null);
@@ -75,12 +91,50 @@ export function Monitor({ nav }) {
   const [newMoistureMin, setNewMoistureMin] = useState('25');
   const [savingLimits, setSavingLimits] = useState(false);
 
+  // Time range selection
+  const [range, setRange] = useState(24);
+  const [customTelemetry, setCustomTelemetry] = useState(null);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+
   const nodeId = (db.nodes || []).some((n) => n.id === picked)
     ? picked
     : (db.nodes || []).find((n) => n.status === 'active')?.id || db.nodes?.[0]?.id;
 
   const node = (db.nodes || []).find((n) => n.id === nodeId);
-  const readings = (db.telemetry || {})[nodeId] || [];
+
+  // Fetch telemetry when range > 24 hours
+  useEffect(() => {
+    if (range <= 24 || !nodeId || !loadNodeTelemetry) {
+      setCustomTelemetry(null);
+      return;
+    }
+    let cancel = false;
+    setTelemetryLoading(true);
+    loadNodeTelemetry(nodeId, range).then((res) => {
+      if (cancel) return;
+      setTelemetryLoading(false);
+      if (res?.ok) {
+        setCustomTelemetry(res.rows || []);
+      } else {
+        notify(`Could not load readings: ${res?.message || 'Error'}`);
+      }
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [nodeId, range, loadNodeTelemetry]);
+
+  const readings = useMemo(() => {
+    if (range > 24) return customTelemetry || [];
+    const base = (db.telemetry || {})[nodeId] || [];
+    if (range === 24) return base;
+    const cutoff = Date.now() - range * 3600e3;
+    return base.filter((r) => {
+      const t = r.ts ? new Date(r.ts).getTime() : 0;
+      return !t || t >= cutoff;
+    });
+  }, [nodeId, range, db.telemetry, customTelemetry]);
+
   const now = latest(readings);
   const limits = node?.thresholds || {};
 
@@ -127,7 +181,7 @@ export function Monitor({ nav }) {
 
       {/* Node Telemetry & Dual Sparklines Section */}
       <Section
-        title="Last 24 hours readings"
+        title={RANGE_TITLE[range] || 'Telemetry readings'}
         gap={12}
         right={
           role === 'admin' && node ? (
@@ -142,6 +196,23 @@ export function Monitor({ nav }) {
           onChange={setPicked}
           items={(db.nodes || []).map((n) => ({ key: n.id, label: n.name }))}
         />
+
+        {/* Time range selector */}
+        <View style={{ gap: 6 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Txt v="caption" color={c.ink2} style={{ textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700' }}>
+              Time span:
+            </Txt>
+            {telemetryLoading && (
+              <Txt v="caption" color={c.accent}>Loading readings…</Txt>
+            )}
+          </View>
+          <Pills
+            value={range}
+            onChange={setRange}
+            items={TIME_RANGES}
+          />
+        </View>
 
         {node && (
           <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 6 }}>
@@ -190,6 +261,10 @@ export function Monitor({ nav }) {
               </View>
               <Spark values={readings.map((r) => r.soil_moisture).filter((v) => v != null)} limit={limits.moisture_min} height={70} />
             </View>
+
+            <Txt v="caption" color={c.ink2} style={{ textAlign: 'right' }}>
+              {readings.length} reading{readings.length === 1 ? '' : 's'} recorded · {RANGE_TITLE[range] || ''}
+            </Txt>
           </View>
         ) : (
           <EmptyState count={0} icon="activity" rows={2}>No readings available for this node.</EmptyState>
@@ -383,8 +458,10 @@ export function AlertDetail({ nav, params = {} }) {
     setAssignPicker(false);
     setBusy(true);
     try {
-      await assignAlert(a.id, officerId);
-      notify(`Assigned to ${nameOf(db, officerId)}`);
+      const ok = await assignAlert(a.id, officerId);
+      if (ok) {
+        notify(`Assigned to ${nameOf(db, officerId)}`);
+      }
     } finally {
       setBusy(false);
     }

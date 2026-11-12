@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { View, Text, Pressable, Alert, Modal, ScrollView, TextInput } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import QRCodeLib from 'qrcode';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 
 import { useStore } from '../../shared/store.js';
@@ -68,7 +68,6 @@ export default function Tags({ nav }) {
     try {
       const ids = await generateTags(count, newBatch.trim() || 'batch');
       if (ids && ids.length) {
-        notify(`${ids.length} new tags created`);
         setCreating(false);
       }
     } catch (err) {
@@ -89,7 +88,6 @@ export default function Tags({ nav }) {
           style: 'destructive',
           onPress: () => {
             retireTag(t.qr_id);
-            notify(`${t.qr_id} retired`);
           },
         },
       ]
@@ -106,8 +104,7 @@ export default function Tags({ nav }) {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
-            const ok = deleteTag(t.qr_id);
-            notify(ok ? `${t.qr_id} deleted` : 'Only unused tags can be deleted');
+            deleteTag(t.qr_id);
           },
         },
       ]

@@ -163,10 +163,12 @@ export default function SignIn({ nav }) {
         </Txt>
 
         {/* On-Screen QR Code Display */}
-        <View style={{ alignItems: 'center', padding: 16, borderRadius: 16, backgroundColor: '#ffffff', gap: 10 }}>
-          <QRCode value={setup.uri} size={180} backgroundColor="#ffffff" color="#000000" />
-          <Txt v="caption" color="#444444">Scan with your authenticator camera</Txt>
-        </View>
+        {setup?.uri ? (
+          <View style={{ alignItems: 'center', padding: 16, borderRadius: 16, backgroundColor: '#ffffff', gap: 10 }}>
+            <QRCode value={setup.uri} size={180} backgroundColor="#ffffff" color="#000000" />
+            <Txt v="caption" color="#444444">Scan with your authenticator camera</Txt>
+          </View>
+        ) : null}
 
         <Button label="Open authenticator app directly" kind="secondary" onPress={openAuthenticator} />
 

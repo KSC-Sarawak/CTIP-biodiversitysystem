@@ -1517,9 +1517,12 @@ function collectionMatches(a = [], b = []) {
 
   const assignAlert = async (id, assignee) => {
     const res = await callApi(assignAlertApi, id, assignee || null);
-    if (!res.ok) return notify(`Failed to assign alert: ${res.message}`);
-    notify("Alert assigned");
+    if (!res.ok) {
+      notify(`Failed to assign alert: ${res.message}`);
+      return false;
+    }
     await loadFromApi(true);
+    return true;
   };
 
   const addAlertNote = async (id, note) => {
