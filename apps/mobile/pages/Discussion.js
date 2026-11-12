@@ -537,7 +537,10 @@ function ThreadDetail({ nav, id }) {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: c.surface }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={{ flex: 1, backgroundColor: c.surface }}
+    >
       <Screen
         stickToEnd
         header={
@@ -693,6 +696,6 @@ function ThreadDetail({ nav, id }) {
           onPress={handleSend}
         />
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

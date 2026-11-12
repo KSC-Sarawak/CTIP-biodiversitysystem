@@ -17,6 +17,16 @@ import {
 import { TagQrView } from './TagQr.js';
 import { useShowMore } from '../hooks/useShowMore.js';
 
+function escapeHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 const SIZES = [
   { mm: 40, label: 'Medium · 40mm' },
   { mm: 20, label: 'Tiny · 20mm' },
@@ -264,7 +274,7 @@ function PrintStudioModal({ tags, onClose }) {
           const svg = await QRCodeLib.toString(tagUrl(id), { type: 'svg', margin: 1 });
           svgMap[id] = svg;
         } catch {
-          svgMap[id] = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(tagUrl(id))}" alt="${id}" />`;
+          svgMap[id] = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(tagUrl(id))}" alt="${escapeHtml(id)}" />`;
         }
       }
 
@@ -326,7 +336,7 @@ function PrintStudioModal({ tags, onClose }) {
       (id) => `
     <div class="tagcard">
       <div class="qr-svg">${svgMap[id] || ''}</div>
-      ${caption ? `<div class="id">${id}</div>` : ''}
+      ${caption ? `<div class="id">${escapeHtml(id)}</div>` : ''}
     </div>
   `
     )

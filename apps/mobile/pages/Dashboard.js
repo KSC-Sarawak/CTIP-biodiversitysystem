@@ -510,12 +510,16 @@ export function StaffDashboard({ nav }) {
     }
   };
 
-  const shareEmail = () => {
+  const shareEmail = async () => {
     const subject = encodeURIComponent(`Daun Sense: ${curView.name}`);
     const body = encodeURIComponent(
       `Please check the tagged plants list (${curView.name}, ${sorted.length} records).\n\nSent from Daun Sense mobile app.`
     );
-    Linking.openURL(`mailto:?subject=${subject}&body=${body}`);
+    try {
+      await Linking.openURL(`mailto:?subject=${subject}&body=${body}`);
+    } catch {
+      Alert.alert('No Mail Client', 'Could not open an email app on this device.');
+    }
   };
 
   return (

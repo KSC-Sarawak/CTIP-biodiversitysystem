@@ -109,12 +109,9 @@ export function Monitor({ nav }) {
     }
     setSavingLimits(true);
     try {
-      const res = await setThresholds(node.id, { temp_max: tMax, moisture_min: mMin });
-      if (res?.ok !== false) {
-        notify('Thresholds updated');
+      const ok = await setThresholds(node.id, { temp_max: tMax, moisture_min: mMin });
+      if (ok) {
         setEditingLimits(false);
-      } else {
-        Alert.alert('Error', res?.message || 'Could not update limits');
       }
     } finally {
       setSavingLimits(false);
@@ -349,9 +346,10 @@ export function AlertDetail({ nav, params = {} }) {
     if (!investigationNote.trim() || busy) return;
     setBusy(true);
     try {
-      await addAlertNote(a.id, investigationNote.trim());
-      setInvestigationNote('');
-      notify('Investigation note added');
+      const ok = await addAlertNote(a.id, investigationNote.trim());
+      if (ok) {
+        setInvestigationNote('');
+      }
     } finally {
       setBusy(false);
     }
@@ -361,7 +359,6 @@ export function AlertDetail({ nav, params = {} }) {
     setBusy(true);
     try {
       await ackAlert(a.id);
-      notify('Alert acknowledged');
     } finally {
       setBusy(false);
     }
@@ -373,9 +370,10 @@ export function AlertDetail({ nav, params = {} }) {
     }
     setBusy(true);
     try {
-      await resolveAlert(a.id, resolutionOutcome.trim());
-      notify('Alert resolved');
-      nav.back();
+      const ok = await resolveAlert(a.id, resolutionOutcome.trim());
+      if (ok) {
+        nav.back();
+      }
     } finally {
       setBusy(false);
     }

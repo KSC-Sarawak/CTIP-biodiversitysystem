@@ -1536,9 +1536,13 @@ function collectionMatches(a = [], b = []) {
 
   const setThresholds = async (nodeId, thresholds) => {
     const res = await callApi(setThresholdsApi, nodeId, thresholds);
-    if (!res.ok) return notify(`Failed to update thresholds: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to update thresholds: ${res.message}`);
+      return false;
+    }
     setDb((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId ? { ...n, thresholds } : n)) }));
     notify("Thresholds updated");
+    return true;
   };
 
   // One node's readings over a longer range than the workspace's last 24 hours.

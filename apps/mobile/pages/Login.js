@@ -132,6 +132,7 @@ export default function SignIn({ nav }) {
   };
 
   const openAuthenticator = async () => {
+    if (!setup?.uri) return;
     try {
       await Linking.openURL(setup.uri);
     } catch {
@@ -140,7 +141,7 @@ export default function SignIn({ nav }) {
   };
 
   const copyKey = async () => {
-    await Clipboard.setStringAsync(setup.secret);
+    await Clipboard.setStringAsync(setup?.secret || '');
     notify('Set-up key copied');
   };
 
@@ -172,7 +173,7 @@ export default function SignIn({ nav }) {
         <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 8 }}>
           <Txt v="caption" color={c.ink2}>Or enter this set-up key by hand:</Txt>
           <Txt v="mono" selectable style={{ fontSize: 16, lineHeight: 22 }}>
-            {setup.secret.replace(/(.{4})/g, '$1 ').trim()}
+            {(setup?.secret || '').replace(/(.{4})/g, '$1 ').trim()}
           </Txt>
           <Button label="Copy set-up key" kind="quiet" height={36} size={13} onPress={copyKey} />
         </View>

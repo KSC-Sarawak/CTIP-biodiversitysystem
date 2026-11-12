@@ -384,15 +384,25 @@ function describe(db, a) {
   return `${a.action === 'insert' ? 'Added' : a.action === 'delete' ? 'Removed' : 'Changed'} ${a.table_name?.replace('_', ' ') || 'row'}`;
 }
 
-// Full raw JSON state diff (old_value -> new_value for all keys)
+// Full raw JSON state diff (old_value -> new_value for all keys with sensitive redaction)
+const SENSITIVE_KEYS = new Set(['password', 'password_hash', 'mfa_secret', 'token', 'access_token', 'refresh_token', 'secret']);
+
+function formatVal(k, v) {
+  if (v === undefined) return undefined;
+  if (SENSITIVE_KEYS.has(k.toLowerCase())) return '••••••••';
+  return typeof v === 'object' ? JSON.stringify(v) : String(v);
+}
+
 function fullJsonDiff(a) {
   const nv = a.new_value || {};
   const ov = a.old_value || {};
   const allKeys = [...new Set([...Object.keys(nv), ...Object.keys(ov)])];
   if (!allKeys.length) return null;
   return allKeys.map((k) => {
-    const before = ov[k] === undefined ? '(none)' : typeof ov[k] === 'object' ? JSON.stringify(ov[k]) : String(ov[k]);
-    const after = nv[k] === undefined ? '(deleted)' : typeof nv[k] === 'object' ? JSON.stringify(nv[k]) : String(nv[k]);
+    const bVal = formatVal(k, ov[k]);
+    const aVal = formatVal(k, nv[k]);
+    const before = bVal === undefined ? '(none)' : bVal;
+    const after = aVal === undefined ? '(deleted)' : aVal;
     return `${k}: ${before} → ${after}`;
   });
 }
