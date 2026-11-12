@@ -16,7 +16,8 @@ try {
   if (Notifications && Notifications.setNotificationHandler) {
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
-        shouldShowAlert: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
         shouldPlaySound: true,
         shouldSetBadge: true,
       }),
@@ -38,23 +39,25 @@ export function useAlertNotifications(db, me, nav) {
     async function setup() {
       try {
         if (Platform.OS === 'android') {
-          // Channel for high-priority IoT sensor alerts
-          await Notifications.setNotificationChannelAsync('alerts', {
-            name: 'IoT Sensor Alerts',
-            importance: Notifications.AndroidImportance.MAX,
-            vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#D9383A',
-            sound: 'default',
-          });
+          try {
+            // Channel for high-priority IoT sensor alerts
+            await Notifications.setNotificationChannelAsync('alerts', {
+              name: 'IoT Sensor Alerts',
+              importance: Notifications.AndroidImportance.MAX,
+              vibrationPattern: [0, 250, 250, 250],
+              lightColor: '#D9383A',
+            });
 
-          // Channel for team discussions, replies, and mentions
-          await Notifications.setNotificationChannelAsync('discussions', {
-            name: 'Discussions and Activity',
-            importance: Notifications.AndroidImportance.HIGH,
-            vibrationPattern: [0, 200, 150, 200],
-            lightColor: '#2D6A4F',
-            sound: 'default',
-          });
+            // Channel for team discussions, replies, and mentions
+            await Notifications.setNotificationChannelAsync('discussions', {
+              name: 'Discussions and Activity',
+              importance: Notifications.AndroidImportance.HIGH,
+              vibrationPattern: [0, 200, 150, 200],
+              lightColor: '#2D6A4F',
+            });
+          } catch (chErr) {
+            // In Expo Go on some Android versions, setting channels can throw NPE; safe fallback
+          }
         }
 
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
