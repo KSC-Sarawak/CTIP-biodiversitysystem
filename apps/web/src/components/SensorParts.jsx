@@ -7,20 +7,36 @@ import Icon from "./Icon.jsx";
 import { Empty, Modal } from "./Bits.jsx";
 import { useStore } from "../../../shared/store.js";
 import { MAP_BOUNDS } from "../../../shared/site.js";
+import { fuzzyMatch } from "../../../shared/fuzzy.js";
 import { fmtDateTime, label } from "../../../shared/utils.js";
 import { NODE_STATE, has, nodeState } from "../sensorState.js";
 
 /* ---------- node map (CTIP-39) ---------- */
 
 // Every sensor node at its registered location, coloured by state. `whereOf(node)` gives
-// { lat, lng } (the node's own location, else its plant's) or null. Selecting a pin picks that node.
-// The view fits every node; it does not zoom to the chosen one, so none drop out of sight.
-export function NodeMap({ nodes, whereOf, openByNode, onSelect }) {
+// { lat, lng } (the node's own location, else its plant's) or null; `plantOf(node)` gives the
+// plant it watches, for search. Selecting a pin picks that node.
+// Has the plant map's tools: search, a key that filters by state, satellite view, locate me,
+// reset zoom, fit to park and the pointer readout. Searching or filtering moves the view to the
+// pins still shown; picking a node only highlights its pin, so no other node drops out of sight.
+export function NodeMap({ nodes, whereOf, plantOf, openByNode, selectedId, onSelect }) {
+  const [q, setQ] = useState("");
+  const [only, setOnly] = useState(null); // node state picked in the key, or null for all
+  const needle = q.trim().toLowerCase();
+  const stateOf = (n) => nodeState(n, openByNode[n.id] || 0);
+  const matches = (n) => {
+    if (!needle) return true;
+    const p = plantOf?.(n);
+    return fuzzyMatch([n.name, n.id, p?.name, p?.qr_id].filter(Boolean).join(" "), needle);
+  };
+
+  const found = nodes.filter(matches); // the search, in every state (for the key counts)
   const placed = [];
   const unplaced = [];
-  for (const n of nodes) {
+  for (const n of found) {
+    const state = stateOf(n);
+    if (only && state !== only) continue;
     const at = whereOf(n);
-    const state = nodeState(n, openByNode[n.id] || 0);
     if (!at) { unplaced.push(n); continue; }
     placed.push({
       id: n.id,
@@ -32,22 +48,52 @@ export function NodeMap({ nodes, whereOf, openByNode, onSelect }) {
       protect: !!at.protect,
     });
   }
-  const count = (s) => nodes.filter((n) => nodeState(n, openByNode[n.id] || 0) === s).length;
+  const count = (s) => found.filter((n) => stateOf(n) === s).length;
+  const filtered = !!(needle || only);
 
   return (
-    <div>
+    <div className="nodemap-wrap">
+      <div className="row wrap nodemap-tools">
+        <label className="search">
+          <Icon name="search" size={18} />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Node, plant or tag" aria-label="Search the node map" />
+        </label>
+        <details className="maphelp">
+          <summary><Icon name="info" size={18} /> How to read the map</summary>
+          <p>
+            Each pin is one sensor node, coloured by its state. Select a pin to see that node&apos;s readings below.
+            A number is a group of nodes: select it to zoom in. Use the key to show only one state.
+          </p>
+        </details>
+      </div>
+
       {placed.length ? (
         <div className="minimap nodemap" role="group" aria-label="Map of sensor nodes">
-          <LeafletMap points={placed} bounds={MAP_BOUNDS} height={340} showControls={false} onSelect={(id) => onSelect(id)} />
+          <LeafletMap
+            points={placed}
+            selectedId={selectedId}
+            zoomToSelected={false}
+            bounds={MAP_BOUNDS}
+            height={380}
+            fitKey={`${only || ""}|${needle}`}
+            onSelect={(id) => onSelect(id)}
+          />
         </div>
       ) : (
-        <Empty icon="map">No sensor node has a location yet.</Empty>
+        <Empty icon="map">{filtered ? "No node on the map matches." : "No sensor node has a location yet."}</Empty>
       )}
-      <ul className="legend plain" aria-label="Map key">
+
+      <div className="legend" role="group" aria-label="Map key: show nodes by state">
+        <button type="button" className={"fam" + (!only ? " on" : "")} aria-pressed={!only} onClick={() => setOnly(null)}>
+          <i style={{ background: "var(--ink2)" }} aria-hidden="true" /> All <b>{found.length}</b>
+        </button>
         {Object.entries(NODE_STATE).map(([k, s]) => (
-          <li key={k}><i style={{ background: s.color }} aria-hidden="true" />{s.text} <b>{count(k)}</b></li>
+          <button key={k} type="button" className={"fam" + (only === k ? " on" : "")} aria-pressed={only === k} onClick={() => setOnly(only === k ? null : k)}>
+            <i style={{ background: s.color }} aria-hidden="true" /> {s.text} <b>{count(k)}</b>
+          </button>
         ))}
-      </ul>
+        {filtered && <button type="button" className="textlink" onClick={() => { setQ(""); setOnly(null); }}>Show all</button>}
+      </div>
       {unplaced.length > 0 && (
         <p className="mute small">Not on the map (no location recorded): {unplaced.map((n) => n.name).join(", ")}.</p>
       )}

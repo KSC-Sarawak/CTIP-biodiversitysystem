@@ -4,14 +4,14 @@
 // Colour, type, spacing and radius values live only in tokens.js. Never put a hex value here.
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
-import { colors, alpha, typeScale, space, radius, fonts, motion, layout } from "../../shared/tokens.js";
+import { colors, alpha, typeScale, webType, space, radius, webFonts as fonts, motion, layout } from "../../shared/tokens.js";
 
 // ---------- CSS variables ----------
 export function themeVars(theme) {
   const c = colors(theme);
   const light = theme === "light";
   const vars = {
-    // Surfaces. Solid colours only: no see-through panels.
+    // Surfaces. Solid colours, except the sticky header, which is --chrome over a blur (v2).
     "--ground": c.bg, // page background
     "--surface": c.surface, // cards, popups
     "--raised": c.raised, // table heads, hover and selected rows
@@ -35,10 +35,18 @@ export function themeVars(theme) {
     "--neutral": c.neutral,
     "--map-tile": c.mapTile,
     "--map-line": c.mapLine,
-    // Depth: dark mode steps surfaces up in lightness; light mode adds one soft shadow.
-    "--shadow": light ? `0 1px 2px ${alpha(c.ink, 0.06)}, 0 8px 24px ${alpha(c.ink, 0.07)}` : "none",
-    // A hovered card lifts a little: a deeper shadow in light mode, a brighter border in dark mode.
-    "--shadow-lift": light ? `0 2px 4px ${alpha(c.ink, 0.06)}, 0 14px 32px ${alpha(c.ink, 0.11)}` : "none",
+    // Depth (v2): three levels in both themes. Light mode uses soft green-black shadows;
+    // dark mode steps surfaces up in lightness and adds a deeper black shadow.
+    "--shadow": light ? `0 1px 2px ${alpha(c.ink, 0.06)}, 0 4px 12px ${alpha(c.ink, 0.05)}` : "0 1px 2px rgba(0, 0, 0, 0.3)",
+    // A hovered card, the search bar, popovers.
+    "--shadow-lift": light ? `0 2px 4px ${alpha(c.ink, 0.06)}, 0 14px 32px -8px ${alpha(c.ink, 0.14)}` : "0 14px 32px -10px rgba(0, 0, 0, 0.55)",
+    // A lifted plant card, dialogs.
+    "--shadow-pop": light ? `0 4px 8px ${alpha(c.ink, 0.06)}, 0 32px 64px -20px ${alpha(c.ink, 0.26)}` : "0 32px 70px -20px rgba(0, 0, 0, 0.7)",
+    // One-pixel highlight on the top inner edge of a card.
+    "--hl": light ? "inset 0 1px 0 #ffffff" : `inset 0 1px 0 ${alpha(c.ink, 0.07)}`,
+    // Soft washes behind a hero.
+    "--wash-leaf": c.washLeaf,
+    "--wash-water": c.washWater,
     // Behind popups and the phone menu: the near-black camera colour, so it dims both themes alike.
     "--scrim": alpha(c.camera, light ? 0.4 : 0.6),
   };
@@ -48,7 +56,7 @@ export function themeVars(theme) {
     vars[`--${name}-line`] = c[tone + "Line"];
   }
   // Type scale: --t-title1-size, --t-title1-line ... (same numbers as the mobile app)
-  for (const [name, t] of Object.entries(typeScale)) {
+  for (const [name, t] of Object.entries({ ...typeScale, ...webType })) {
     vars[`--t-${name}-size`] = t.size + "px";
     vars[`--t-${name}-line`] = t.line + "px";
   }
@@ -56,11 +64,11 @@ export function themeVars(theme) {
   for (const [k, v] of Object.entries(radius)) vars[`--r-${k}`] = v + "px";
   vars["--page-max"] = layout.pageMax + "px"; // widest content column (header, page, footer)
   // Motion: --m-fast, --m-base, --m-slow durations and the two easing curves.
-  for (const k of ["fast", "base", "slow"]) vars[`--m-${k}`] = motion[k] + "ms";
+  for (const k of ["fast", "base", "slow", "enter"]) vars[`--m-${k}`] = motion[k] + "ms";
   vars["--ease"] = motion.ease;
   vars["--ease-io"] = motion.easeInOut;
   vars["--f-display"] = `${fonts.display}, Georgia, serif`;
-  vars["--f-text"] = `${fonts.text}, system-ui, sans-serif`;
+  vars["--f-text"] = `${fonts.text}, system-ui, -apple-system, "Segoe UI", sans-serif`;
   vars["--f-mono"] = `"${fonts.mono}", ui-monospace, Menlo, Consolas, monospace`;
   return vars;
 }
