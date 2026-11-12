@@ -131,6 +131,9 @@ test('verify: right code gives a new session, wrong code 401, bad format 422', a
   let res = await request(app).post('/v1/auth/mfa/verify').set('Authorization', 'Bearer officer-aal1').send({ code: '000000' });
   assert.equal(res.status, 401);
   assert.equal(res.body.code, 'WRONG_CODE');
+  const log = calls.filter((c) => c.path === '/rest/v1/rpc/log_auth_event');
+  assert.deepEqual(log.map((c) => c.body.p_event), ['MFA_FAILED'], 'VA-71: wrong code is in the audit log');
+  assert.doesNotMatch(JSON.stringify(log), /000000/, 'the code itself is never logged');
   res = await request(app).post('/v1/auth/mfa/verify').set('Authorization', 'Bearer officer-aal1').send({ code: '12ab' });
   assert.equal(res.status, 422);
   res = await request(app).post('/v1/auth/mfa/verify').set('Authorization', 'Bearer officer-aal1').send({ code: '123456' });
