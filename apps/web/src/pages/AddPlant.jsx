@@ -9,6 +9,7 @@ import LeafletMap from "../components/LeafletMap.jsx";
 import { useStore } from "../../../shared/store.js";
 import { tagUrl, unfinishedPlants } from "../../../shared/selectors.js";
 import { can } from "../../../shared/permissions.js";
+import { isReservedForOther } from "../../../shared/offline/tags.js";
 import { go, useRoute } from "../useRoute.js";
 import { photoFileProblem } from "../../../shared/utils.js";
 
@@ -35,7 +36,8 @@ export default function AddPlant() {
   const [suggestOpen, setSuggestOpen] = useState(false);
   const suggestRef = useRef(null);
 
-  const unused = db.tags.filter((t) => t.status === "unused");
+  // Tags kept on a botanist's phone for offline use belong to that botanist (CTIP-116).
+  const unused = db.tags.filter((t) => t.status === "unused" && !isReservedForOther(t, me?.id));
   // My plants saved without their record (an earlier send failed): sending again finishes them.
   const unfinished = unfinishedPlants(db, me?.id);
   const activeSpecies = (db.species || []).filter((s) => !s.is_deleted);

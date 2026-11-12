@@ -102,7 +102,7 @@ function PlantDetails({ plant, coords, onOpen, last }) {
             : plant.gps_accuracy_m != null ? `GPS accuracy ${accuracy(plant.gps_accuracy_m)}` : 'GPS accuracy not recorded'}
         </Txt>
       </View>
-      <Button label="View full page" kind="secondary" icon="arrowRight" height={44} size={15} onPress={() => onOpen(plant)} />
+      <Button label="View full page" kind="secondary" icon="arrowRight" height={48} size={15} onPress={() => onOpen(plant)} />
     </View>
   );
 }

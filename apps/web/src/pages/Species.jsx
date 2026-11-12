@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import PageHead from "../components/PageHead.jsx";
 import PhotoEditor from "../components/PhotoEditor.jsx";
 import SpeciesForm from "../components/SpeciesForm.jsx";
 import { Chip, Empty, Modal } from "../components/Bits.jsx";
@@ -75,15 +76,26 @@ export default function Species() {
     if (r?.ok) setPhotosOf(null);
   };
 
+  const liveSpecies = db.species.filter((x) => !x.is_deleted);
+  const drafts = liveSpecies.filter((x) => !x.is_published).length;
   const inUse = removing ? db.plants.filter((p) => p.species_id === removing.id).length : 0;
 
   return (
     <Shell seg="species">
       {confirmDialog}
-      <div className="row between wrap">
-        <h2>Species</h2>
-        <button className="btn" onClick={() => setForm(BLANK_SPECIES)}><Icon name="plus" size={18} /> Add species</button>
-      </div>
+      <PageHead
+        overline="Species catalogue"
+        title="Species"
+        lead={drafts ? `${drafts} ${drafts === 1 ? "species is" : "species are"} not published yet, so visitors cannot see ${drafts === 1 ? "it" : "them"}.` : `All ${liveSpecies.length} species are published.`}
+        tone={drafts ? "warn" : "ok"}
+        actions={<button className="btn" onClick={() => setForm(BLANK_SPECIES)}><Icon name="plus" size={18} /> Add species</button>}
+        stats={[
+          { label: "Species", value: liveSpecies.length },
+          { label: "Published", value: liveSpecies.length - drafts },
+          { label: "Not published", value: drafts, tone: "warn" },
+          { label: "Threatened", value: liveSpecies.filter((x) => isThreatened(x.conservation_status)).length, tone: "bad" },
+        ]}
+      />
       {loadError && <p className="mute small" role="alert">Could not load species from the API: {loadError}. Showing the last saved list.</p>}
       <div className="toolbar" style={{ display: "flex", gap: 12, alignItems: "center", margin: "14px 0", flexWrap: "wrap" }}>
         <label className="search grow" style={{ flex: 1, minWidth: 220 }}>

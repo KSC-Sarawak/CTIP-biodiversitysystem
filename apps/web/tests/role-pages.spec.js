@@ -55,8 +55,8 @@ test.describe("Web Portal: Automated Role & Page Verification", () => {
     await expect(page).toHaveURL(/#\/scan/);
     await expect(page.locator("h1")).toContainText(/Scan Plant QR Tag/i);
 
-    // 3. Navigate back and inspect "How a plant gets here" cards
-    await page.goto("/");
+    // 3. "How a plant gets here" lives on the About page (Daun v2: the home page keeps one job)
+    await page.goto("/#/about");
     const stepCards = page.locator(".steps3 li.stepcard");
     await expect(stepCards).toHaveCount(3);
     const firstStep = stepCards.first();

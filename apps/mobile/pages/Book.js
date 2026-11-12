@@ -30,7 +30,7 @@ export default function Book({ nav }) {
         <Section key={letter} title={letter} gap={0}>
           {list.map((e, i) => (
             <Pressable key={e.id} accessibilityRole="button" onPress={() => nav.go('species', { id: e.id })}
-              style={{ gap: 4, paddingVertical: 12, borderBottomWidth: i === list.length - 1 ? 0 : 1, borderBottomColor: c.line }}>
+              style={({ pressed }) => ({ gap: 4, paddingVertical: 12, borderBottomWidth: i === list.length - 1 ? 0 : 1, borderBottomColor: c.line, opacity: pressed ? 0.7 : 1 })}>
               <Txt v="label" style={{ fontSize: 16 }}>{bookName(e)}</Txt>
               <Sci size={14}>{e.scientific_name}</Sci>
               {e.family ? <Txt v="caption" color={c.ink2}>{e.family}{e.genus ? ` · ${e.genus}` : ''}</Txt> : null}

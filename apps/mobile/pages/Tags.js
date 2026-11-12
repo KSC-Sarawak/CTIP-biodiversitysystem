@@ -8,18 +8,15 @@ import { useStore } from '../../shared/store.js';
 import { plantView } from '../../shared/selectors.js';
 import { useTheme } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
-import { Screen, Header, IconButton, TitleBlock, Stat, SearchField, Row, Mono, Txt, DotLabel, Empty } from '../components/Bits.js';
+import { Screen, Header, IconButton, TitleBlock, Stat, SearchField, Row, Mono, Txt, DotLabel, EmptyState, Button } from '../components/Bits.js';
 import { TagQrView } from './TagQr.js';
+import { useShowMore } from '../hooks/useShowMore.js';
 
 export default function Tags({ nav }) {
   const { db } = useStore();
   const { c } = useTheme();
   const [q, setQ] = useState('');
   const [activeQr, setActiveQr] = useState(null);
-
-  if (activeQr) {
-    return <TagQrView qr={activeQr} onBack={() => setActiveQr(null)} />;
-  }
 
   const n = (s) => db.tags.filter((t) => t.status === s).length;
   const order = { unused: 0, assigned: 1, retired: 2 };
@@ -28,6 +25,11 @@ export default function Tags({ nav }) {
     .filter((t) => !needle || (t?.qr_id && t.qr_id.includes(needle)))
     .sort((a, b) => order[a.status] - order[b.status] || String(a?.qr_id || '').localeCompare(String(b?.qr_id || '')));
   const plantFor = (qr) => plantView(db, db.plants.find((p) => p.qr_id === qr));
+  const { shown, left, showMore } = useShowMore(rows, needle);
+
+  if (activeQr) {
+    return <TagQrView qr={activeQr} onBack={() => setActiveQr(null)} />;
+  }
 
   return (
     <Screen header={<Header left={<IconButton name="chevL" label="Back" onPress={nav.back} />} />} top={0} gap={16}>
@@ -39,8 +41,8 @@ export default function Tags({ nav }) {
       </View>
       <SearchField value={q} onChangeText={setQ} placeholder="Find a tag ID" />
       <View>
-        {rows.length === 0 ? <Empty icon="qr">No tag with that ID.</Empty> : null}
-        {rows.map((t, i) => {
+        <EmptyState count={rows.length} icon="qr" filtered={!!needle}>{needle ? 'No tag with that ID.' : 'No QR tags yet.'}</EmptyState>
+        {shown.map((t, i) => {
           const p = t.status === 'assigned' ? plantFor(t.qr_id) : null;
           const isUnused = t.status === 'unused';
           return (
@@ -62,10 +64,11 @@ export default function Tags({ nav }) {
               sub={<Txt v="small" color={c.ink2} style={{ fontSize: 14 }}>{p ? p.name : `Batch ${t.batch_label}`}</Txt>}
               right={<DotLabel status={t.status} />}
               onPress={p ? () => nav.go('tag', { qr: t.qr_id }) : isUnused ? () => setActiveQr(t.qr_id) : undefined}
-              last={i === rows.length - 1}
+              last={i === shown.length - 1}
             />
           );
         })}
+        {left > 0 ? <Button label={`Show more (${left} left)`} kind="text" height={48} size={15} onPress={showMore} /> : null}
       </View>
     </Screen>
   );

@@ -5,7 +5,7 @@ import { View, Text, Pressable } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { useTheme, font } from '../components/Theme.js';
-import { Screen, TitleBlock, Section, IconTile, TextLink, Empty, Txt } from '../components/Bits.js';
+import { Screen, TitleBlock, Section, IconTile, TextLink, EmptyState, Txt } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 
@@ -59,7 +59,7 @@ export default function Alerts({ nav }) {
   return (
     <Screen gap={18}>
       <TitleBlock title="Alerts" right={fresh.length ? <TextLink label="Mark all read" size={14} onPress={markAllRead} /> : null} />
-      {mine.length === 0 ? <Empty icon="bell">Nothing yet. You'll see reviews, replies and sensor alerts here.</Empty> : null}
+      <EmptyState count={mine.length} icon="bell">Nothing yet. You'll see reviews, replies and sensor alerts here.</EmptyState>
       {fresh.length ? <Section title="New" top={false} gap={0}>{fresh.map((n, i) => <Item key={n.id} n={n} last={i === fresh.length - 1} />)}</Section> : null}
       {earlier.length ? <Section title="Earlier" top={fresh.length > 0} gap={0}>{earlier.map((n, i) => <Item key={n.id} n={n} last={i === earlier.length - 1} />)}</Section> : null}
     </Screen>

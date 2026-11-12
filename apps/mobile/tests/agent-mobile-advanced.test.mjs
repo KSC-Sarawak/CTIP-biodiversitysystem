@@ -49,7 +49,7 @@ describe("Mobile Port: Advanced QA & Safety Invariants (from agent-advanced.spec
     const botanistCoords = shownCoords(endangeredPlant, "botanist");
     assert.deepEqual(botanistCoords, { lat: 3.816667, lng: 113.783333 });
     const formattedStaffGps = coords(botanistCoords.lat, botanistCoords.lng);
-    assert.equal(formattedStaffGps, "3.8167, 113.7833");
+    assert.equal(formattedStaffGps, "3.81667, 113.78333");
 
     // Non-endangered plant coordinates remain public
     const commonPlant = { id: "plant-2", endangered: false, lat: 3.82, lng: 113.79 };
@@ -60,7 +60,7 @@ describe("Mobile Port: Advanced QA & Safety Invariants (from agent-advanced.spec
       [Screen] PlantPage
       [Species] Dipterocarpus sarawakensis (Endangered)
       [Visitor View] Location: "Location hidden to protect this plant."
-      [Staff View] Location: "3.8167, 113.7833"
+      [Staff View] Location: "3.81667, 113.78333"
       [Map Pin] Hidden for role: visitor. Shown for role: botanist, officer.
     `;
     const audit = await auditWithOllama({

@@ -1,14 +1,14 @@
 // apps/mobile/pages/Review.js
 // Officer review queue and the decision screen (CTIP-29, CTIP-69 on the web side).
-import React, { useState } from 'react';
-import { View, Text, ScrollView, Image, Pressable, useWindowDimensions } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, ScrollView, Image, Pressable, Alert, useWindowDimensions } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
 import { plantView, nameOf } from '../../shared/selectors.js';
 import { HIDE_LOCATION_LABEL, hideLocationRule } from '../../shared/data.js';
 import { useTheme, font } from '../components/Theme.js';
 import {
-  Screen, Bar, TitleBlock, Pills, SortBar, Row, Thumb, Mono, Txt, Sci, DotLabel, KV, Button, Area, Empty, Field, Notice, Check, TextLink, Section,
+  Screen, Bar, TitleBlock, Pills, SortBar, Row, Thumb, Mono, Txt, Sci, DotLabel, KV, Button, Area, Empty, EmptyState, Field, Notice, Check, TextLink,
 } from '../components/Bits.js';
 import PlantSpotMap from '../components/PlantSpotMap.js';
 import PhotoNote from '../components/PhotoNote.js';
@@ -58,7 +58,7 @@ export function ReviewQueue({ nav }) {
       <Pills value={filter} onChange={setFilter} items={FILTERS.map((f) => ({ key: f.key, label: f.key === 'all' ? f.label : `${f.label} ${n(f.key)}` }))} />
       <SortBar items={SORT_REVIEW} value={sort} onChange={setSort} />
       <View>
-        {sorted.length === 0 ? <Empty icon="clipboard">No records here.</Empty> : null}
+        <EmptyState count={sorted.length} icon="clipboard" filtered={all.length > 0}>No records here.</EmptyState>
         {sorted.map((o, i) => (
           <Row
             key={o.id}
@@ -106,7 +106,18 @@ export function ReviewRecord({ nav, params = {} }) {
   const { c } = useTheme();
   const o = db.observations.find((x) => x.id === params.id);
   const plant = o ? plantView(db, db.plants.find((p) => p.id === o.specimen_id)) : null;
-  const [spText, setSpText] = useState(plant?.species?.scientific_name || plant?.proposed_species || '');
+  // The botanist's species, as the starting point. The screen can open before the
+  // record has loaded (from an alert), so it is filled once, the first time the
+  // plant exists, and never again: the 5 s poll must not undo what the officer types.
+  const guess = plant ? plant.species?.scientific_name || plant.proposed_species || '' : null;
+  const [spText, setSpText] = useState(guess || '');
+  const [seeded, setSeeded] = useState(guess != null);
+  useEffect(() => {
+    if (!seeded && guess != null) {
+      setSpText(guess);
+      setSeeded(true);
+    }
+  }, [seeded, guess]);
   const [note, setNote] = useState('');
   const [needNote, setNeedNote] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -122,8 +133,17 @@ export function ReviewRecord({ nav, params = {} }) {
 
   // Waits for the API: the species must be saved before approving (the API checks it),
   // and the screen only closes when the decision was really saved.
-  const decide = async (decision) => {
+  // A rejection ends the record, so it is asked about once more first.
+  const decide = (decision) => {
     if (decision !== 'approve' && !note.trim()) return setNeedNote(true);
+    if (busy) return;
+    if (decision !== 'reject') return save(decision);
+    Alert.alert(`Reject ${plant.qr_id}?`, 'The botanist is told, with your note.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Reject', style: 'destructive', onPress: () => save('reject') },
+    ]);
+  };
+  const save = async (decision) => {
     if (busy) return;
     setBusy(true);
     if (decision === 'approve' && match && match.id !== plant.species_id) await setPlantSpecies(plant.id, match.id);
@@ -137,8 +157,10 @@ export function ReviewRecord({ nav, params = {} }) {
     nav.back();
   };
 
+  // No pull to refresh while the decision form is open, so a pull cannot interrupt the typing.
   return (
     <Screen
+      refresh={!open}
       header={<Bar title={plant.name} sub={`${plant.qr_id} · version ${o.version}`} onBack={nav.back} />}
       top={20}
       gap={18}
@@ -168,7 +190,7 @@ export function ReviewRecord({ nav, params = {} }) {
             <Field label="Confirm species" value={spText} onChangeText={setSpText} italic
               hint={match ? `${match.common_name} · ${match.family}` : 'Pick a species from the list to approve.'} />
             {suggestions.map((s) => (
-              <Pressable key={s.id} accessibilityRole="button" onPress={() => setSpText(s.scientific_name)} style={{ paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, backgroundColor: c.bg }}>
+              <Pressable key={s.id} accessibilityRole="button" onPress={() => setSpText(s.scientific_name)} style={({ pressed }) => ({ paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, backgroundColor: c.bg, opacity: pressed ? 0.7 : 1 })}>
                 <Text style={{ fontFamily: font('text', 700), fontSize: 15, color: c.ink }}>{s.common_name}</Text>
                 <Sci size={14}>{s.scientific_name}</Sci>
               </Pressable>
@@ -178,7 +200,7 @@ export function ReviewRecord({ nav, params = {} }) {
           {match && !match.is_published ? (
             <View style={{ gap: 8 }}>
               <Notice tone="warning" icon="info" title="This species is not published" body="Visitors will not see this plant until it is, even after you approve it." />
-              <Button label="Publish species" kind="secondary" height={44} size={15} onPress={() => setSpeciesPublished(match.id, true)} />
+              <Button label="Publish species" kind="secondary" height={48} size={15} onPress={() => setSpeciesPublished(match.id, true)} />
             </View>
           ) : null}
           {plant.lat != null ? (

@@ -9,6 +9,7 @@ export const NEEDS = {
   revisit: "add",
   records: "records",
   record: "records",
+  phoneRecord: "records", // a record saved on this phone, not sent yet (CTIP-68)
   review: "review",
   reviewItem: "review",
   monitor: "monitor",
@@ -33,7 +34,7 @@ export const ROUTE_NAMES = [
   "home", "about", "contact", "more", "signin",
   "plants", "species", "tag", "map", "scan",
   "tagged", "add", "submitted", "revisit",
-  "records", "record", "alerts", "discussion",
+  "records", "record", "phoneRecord", "alerts", "discussion",
   "review", "reviewItem", "monitor", "alert",
   "staffMore", "speciesAdmin", "tags", "tagQr", "reports",
   "users", "audit", "account", "book",

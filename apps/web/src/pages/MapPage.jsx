@@ -72,9 +72,9 @@ export default function MapPage({ arg }) {
   );
 
   const needle = q.trim().toLowerCase();
-  const { onMap, hidden } = useMemo(() => {
+  // `found` matches the search in every family (for the legend counts); `onMap` is also cut to the picked family.
+  const { found, onMap, hidden } = useMemo(() => {
     const s = plants
-      .filter((p) => !only || familyOf(p) === only)
       .filter((p) => !needle || fuzzyMatch([p.name, p.scientific, p.qr_id, familyOf(p)].join(' '), needle))
       .map((p) => {
         // Same rule for API points as for local ones: anyone who may not see exact
@@ -83,12 +83,13 @@ export default function MapPage({ arg }) {
         return { p, c: shownCoords({ ...p, endangered: p.endangered || isThreatened(p.species?.conservation_status) }, role) };
       });
     const m = s.filter((x) => x.c);
-    return { onMap: m, hidden: s.filter((x) => !x.c && x.p.endangered).length };
+    const inFamily = (x) => !only || familyOf(x.p) === only;
+    return { found: m, onMap: m.filter(inFamily), hidden: s.filter((x) => !x.c && x.p.endangered && inFamily(x)).length };
   }, [plants, only, needle, role]);
 
   const selId = picked || arg;
   const spotPlants = spotIds ? onMap.filter((x) => spotIds.includes(x.p.id)) : [];
-  const count = (f) => onMap.filter((x) => familyOf(x.p) === f).length;
+  const count = (f) => found.filter((x) => familyOf(x.p) === f).length;
 
   const mapPoints = useMemo(() => {
     return onMap.map(({ p, c }) => ({
@@ -104,85 +105,81 @@ export default function MapPage({ arg }) {
     }));
   }, [onMap, colors]);
 
+  const total = onMap.length;
+
   return (
-    <section className="glass pad">
-      <div className="pagehead">
+    <section className="mappage">
+      <header className="mappage-head">
         <div>
           <h1>Plant map</h1>
-          <p className="mute">
-            Each pin is one plant and its colour shows the plant family. Zoom in and select a pin to see the plants at
-            that spot, with their photos and details. A number is a group of plants: select it to zoom in.
+          <p className="mute">Each pin is one plant, coloured by its family. Select a pin to see the plants at that spot.</p>
+        </div>
+        <details className="maphelp">
+          <summary><Icon name="info" size={18} /> How to read the map</summary>
+          <p>
+            Zoom in and select a pin to see the plants at that spot, with their photos and details. A number is a
+            group of plants: select it to zoom in.
             {staff && " Plants appear here once a record has been approved."}
             {!staff && " Locations of endangered plants are not shown, to protect them."}
           </p>
-        </div>
-      </div>
+        </details>
+      </header>
 
-      {/* Search Bar matching mobile styling and functionality */}
-      <div className="row wrap between gap-bottom" style={{ alignItems: "center" }}>
-        <label className="search" style={{ maxWidth: 360, width: "100%" }}>
-          <Icon name="search" size={18} />
-          <input
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search the map"
-            aria-label="Search the map"
+      <div className="maplayout">
+        <aside className="glass mapside" aria-label="Find and filter plants">
+          <label className="search">
+            <Icon name="search" size={18} />
+            <input
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Name, tag or family"
+              aria-label="Search the map"
+            />
+          </label>
+          <p className="mapcount" aria-live="polite">
+            <b>{total}</b> {total === 1 ? "plant" : "plants"} on the map
+            {(q || only) && (
+              <button type="button" className="textlink" onClick={() => { setQ(""); setOnly(null); }}>Show all</button>
+            )}
+          </p>
+
+          <div className="maplegend" role="group" aria-labelledby="legend-title">
+            <h2 id="legend-title" className="overline">Plant families</h2>
+            <div className="legend">
+              <button className={"fam" + (!only ? " on" : "")} onClick={() => setOnly(null)} aria-pressed={!only}>
+                <i style={{ background: "var(--ink2)" }} /> <span className="grow">All families</span> <b>{found.length}</b>
+              </button>
+              {families.map((f) => (
+                <button key={f} className={"fam" + (only === f ? " on" : "")} onClick={() => setOnly(only === f ? null : f)} aria-pressed={only === f}>
+                  <i style={{ background: colors[f] }} /> <span className="grow">{f}</span> <b>{count(f)}</b>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {hidden > 0 && (
+            <p className="maphidden">
+              <Icon name="lock" size={16} />
+              <span>{hidden} endangered plant{hidden === 1 ? " is" : "s are"} not shown, to protect {hidden === 1 ? "it" : "them"}.</span>
+            </p>
+          )}
+        </aside>
+
+        <div className="mapstage">
+          <LeafletMap
+            points={mapPoints}
+            selectedId={selId}
+            onSelect={(id, qr_id, ids) => {
+              setPicked(qr_id || id);
+              setSpotIds(ids);
+            }}
+            fitKey={`${only || ""}|${needle}`}
+            bounds={MAP_BOUNDS}
+            height="100%"
           />
-        </label>
-        {q ? (
-          <button className="btn ghost" onClick={() => setQ("")}>
-            <Icon name="x" size={16} /> Clear search
-          </button>
-        ) : null}
-      </div>
-
-      <LeafletMap
-        points={mapPoints}
-        selectedId={selId}
-        onSelect={(id, qr_id, ids) => {
-          setPicked(qr_id || id);
-          setSpotIds(ids);
-        }}
-        fitKey={`${only || ""}|${needle}`}
-        bounds={MAP_BOUNDS}
-        height={480}
-      />
-
-      <div className="maplegend" role="group" aria-labelledby="legend-title">
-        <h3 id="legend-title">Legend</h3>
-        <p className="mute small">
-          <i className="dot" style={{ background: "var(--ink2)" }} /> One pin = one plant. Colour = plant family.
-        </p>
-        <div className="legend">
-          <button
-            className={"fam" + (!only ? " on" : "")}
-            onClick={() => setOnly(null)}
-            aria-pressed={!only}
-          >
-            All families ({onMap.length} {onMap.length === 1 ? "plant" : "plants"})
-          </button>
-          {families.map((f) => (
-            <button
-              key={f}
-              className={"fam" + (only === f ? " on" : "")}
-              onClick={() => setOnly(only === f ? null : f)}
-              aria-pressed={only === f}
-            >
-              <i style={{ background: colors[f] }} /> {f} ({count(f)} {count(f) === 1 ? "plant" : "plants"})
-            </button>
-          ))}
         </div>
       </div>
-
-      {hidden > 0 && (
-        <div className="row gap-top-s" style={{ alignItems: "center", color: "var(--ink2)" }}>
-          <Icon name="lock" size={16} />
-          <small className="mute">
-            {hidden} endangered plant{hidden === 1 ? " is" : "s are"} not shown on the map, to protect {hidden === 1 ? "it" : "them"}.
-          </small>
-        </div>
-      )}
 
       {spotPlants.length > 0 && <PlantWindow entries={spotPlants} onClose={() => setSpotIds(null)} />}
     </section>
