@@ -11,6 +11,7 @@ import { staffHandlers } from './staff.js';
 import { discussionHandlers } from './discussions.js';
 import { sessionHandlers } from './session.js';
 import { mfaHandlers } from './mfa.js';
+import { sensorHandlers } from './sensors.js';
 import { protectSpecimen } from './distribution.js';
 import { tooMany } from './rateLimit.js';
 import { dbLoad } from './dbLoad.js';
@@ -168,4 +169,5 @@ export const handlers = {
   ...discussionHandlers,
   ...sessionHandlers,
   ...mfaHandlers,
+  ...sensorHandlers,
 };
