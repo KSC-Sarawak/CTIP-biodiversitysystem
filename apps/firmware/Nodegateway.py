@@ -61,8 +61,8 @@ import paho.mqtt.client as mqtt
 import requests
 
 # ================================================================ Settings
-MODE = "supabase"        # telemetry: "supabase" now, "api" when POST /telemetry works
-IMAGE_MODE = "supabase"  # images:    "supabase" now, "api" when POST /sensor-nodes/{id}/images works
+MODE = "api"        # telemetry: "supabase" now, "api" when POST /telemetry works
+IMAGE_MODE = "api"  # images:    "supabase" now, "api" when POST /sensor-nodes/{id}/images works
 IMAGE_BUCKET = "sensor-images"
 
 # F-14 switch. False = old public broker (no TLS, no login) until the team broker is ready.
@@ -81,7 +81,7 @@ CA_CERT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ca.crt")  # 
 TELEMETRY_TOPIC = "nodes/+/telemetry"
 TRIGGER_TOPIC = "nodes/+/trigger"
 
-API_URL = "http://localhost:8000/v1"   # the team's API, used for telemetry (api mode) and images
+API_URL = "https://ctip-biodiversitysystem.onrender.com/v1"   # the team's API, used for telemetry (api mode) and images
 SUPABASE_URL = "https://cgtvoirktzqjqaosslfh.supabase.co"
 HTTP_TIMEOUT_S = 10
 UPLOAD_TIMEOUT_S = 15
@@ -98,7 +98,8 @@ COOLDOWN_S = 5              # at most one photo per node every 5 s
 # Node IDs (sensor_nodes.id) this gateway accepts. Anything else is ignored.
 # Each node's MQTT username must be the same ID, so the broker ACL matches.
 REGISTERED_NODES = {
-    "0ac66bdc-db55-4a8e-a7c6-4c30daa8124b",   # put the real node UUID(s) here
+    "0ac66bdc-db55-4a8e-a7c6-4c30daa8124b", 
+      # put the real node UUID(s) here
 }
 ALLOWED_SOURCES = ("motion", "tripwire")   # trigger "source" values the node sends
 MAX_PHOTOS_PER_MINUTE = 6                  # for ALL nodes together (disk and bucket)
@@ -173,7 +174,6 @@ def utc_stamp():
 def supabase_headers():
     return {
         "apikey": SUPABASE_SERVICE_KEY,
-        "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
     }
@@ -358,7 +358,6 @@ def upload_to_supabase(path):
             "%s/storage/v1/object/%s/%s" % (SUPABASE_URL, IMAGE_BUCKET, key),
             data=data, timeout=UPLOAD_TIMEOUT_S,
             headers={"apikey": SUPABASE_SERVICE_KEY,
-                     "Authorization": "Bearer " + SUPABASE_SERVICE_KEY,
                      "Content-Type": "image/jpeg",
                      "x-upsert": "false"})
     except requests.RequestException as e:
