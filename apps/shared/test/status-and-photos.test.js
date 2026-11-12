@@ -5,6 +5,8 @@ import { statusKey, withStatusKey, isThreatened } from "../data.js";
 import { speciesCatalogue, shownCoords } from "../selectors.js";
 import { sniffFileKind, photoFileProblem } from "../utils.js";
 import { seed } from "../data.js";
+import { outboxStatus } from "../offline/syncEngine.js";
+import { STATUS_TEXT, STATUS_TONE } from "../tokens.js";
 
 // 1. "Endangered" with a capital E must count as endangered everywhere.
 
@@ -53,4 +55,23 @@ test("a video renamed to .jpg is refused with the reason; a real JPG passes", as
   assert.match(await photoFileProblem(pdf), /scan\.jpg is not a picture, whatever its name says/);
   const jpg = new File([bytes(0xff, 0xd8, 0xff, 0xe0, 0, 0x10)], "leaf.jpg", { type: "image/jpeg" });
   assert.equal(await photoFileProblem(jpg), null);
+});
+
+// 3. A record saved on the phone shows its outbox state in the words the app
+//    already uses (docs/architecture/offline-sync.md, section 6).
+
+test("outboxStatus maps every outbox state to a status with STATUS_TEXT wording", () => {
+  const expected = {
+    pending: ["queued", "Waiting to sync", "neutral"],
+    sending: ["sending", "Sending", "info"],
+    failed: ["sync_failed", "Couldn't send", "warning"],
+    conflict: ["sync_conflict", "Changed on another device", "warning"],
+  };
+  for (const [state, [status, text, tone]] of Object.entries(expected)) {
+    assert.equal(outboxStatus({ state }), status, state);
+    assert.equal(STATUS_TEXT[status], text, status);
+    assert.equal(STATUS_TONE[status], tone, status);
+  }
+  // A row from an older build without a state is still waiting.
+  assert.equal(outboxStatus({}), "queued");
 });

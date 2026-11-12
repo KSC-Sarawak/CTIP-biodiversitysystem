@@ -29,7 +29,12 @@ function checkInsert(table, row) {
   if (db[table].some((r) => r[key] === row[key])) return pgError('23505', `duplicate key value violates unique constraint "${table}_pkey"`);
   if (table === 'specimens') {
     if (db.specimens.some((r) => r.qr_id === row.qr_id)) return pgError('23505', 'duplicate key value violates unique constraint "specimens_qr_id_key"');
-    if (!db.qr_tags.some((t) => t.qr_id === row.qr_id)) return pgError('23503', 'violates foreign key constraint "specimens_qr_id_fkey"');
+    const tagRow = db.qr_tags.find((t) => t.qr_id === row.qr_id);
+    if (!tagRow) return pgError('23503', 'violates foreign key constraint "specimens_qr_id_fkey"');
+    // The tag trigger (migration 20261028000000) refuses a retired or damaged tag.
+    if (['retired', 'damaged'].includes(tagRow.status)) {
+      return pgError('CTTG0', `Tag ${row.qr_id} is ${tagRow.status}, use another tag`);
+    }
   }
   return null;
 }
@@ -52,6 +57,11 @@ async function fakeSupabase(input, init = {}) {
     stored.push(key);
     return json(200, { Key: `observation-photos/${key}` });
   }
+  if (url.pathname === '/storage/v1/object/observation-photos' && method === 'DELETE') {
+    const { prefixes } = JSON.parse(init.body);
+    stored = stored.filter((k) => !prefixes.includes(k));
+    return json(200, prefixes.map((name) => ({ name })));
+  }
 
   const table = url.pathname.replace('/rest/v1/', '');
   if (!db[table]) return json(404, { message: `no table ${table}` });
@@ -64,6 +74,8 @@ async function fakeSupabase(input, init = {}) {
     const want = rest.join('.');
     if (op === 'eq') return `${row[k]}` === want;
     if (op === 'neq') return `${row[k]}` !== want;
+    if (op === 'gte') return `${row[k]}` >= want; // ISO timestamps compare as text
+    if (op === 'lte') return `${row[k]}` <= want;
     if (op === 'ilike') return `${row[k]}`.toLowerCase() === want.toLowerCase();
     if (op === 'in') return want.replace(/^\(|\)$/g, '').split(',').map((s) => s.replace(/"/g, '')).includes(`${row[k]}`);
     if (op === 'is' && want === 'null') return row[k] == null;
@@ -80,7 +92,9 @@ async function fakeSupabase(input, init = {}) {
       if (err) return err;
     }
     const now = new Date().toISOString();
-    rows = list.map((r) => ({ id: crypto.randomUUID(), created_at: now, ...r }));
+    // Column defaults the real table has, so a row inserted here is found by the not-deleted filters.
+    const defaults = table === 'observations' ? { is_deleted: false } : {};
+    rows = list.map((r) => ({ id: crypto.randomUUID(), created_at: now, ...defaults, ...r }));
     db[table].push(...rows);
   } else if (method === 'PATCH') {
     rows = db[table].filter(matches);
@@ -108,7 +122,7 @@ async function fakeSupabase(input, init = {}) {
 beforeEach((t) => {
   db = {
     qr_tags: [], specimens: [], observations: [], observation_photos: [], observation_comments: [],
-    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [],
+    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], telemetry: [], sensor_images: [],
     notifications: [], audit_logs: [], profiles: [], zones: [],
     discussions: [], discussion_audience: [], discussion_posts: [], 'rpc/discussion_directory': [],
   };
@@ -155,6 +169,37 @@ test('a tag already on another plant gets 409 TAG_IN_USE; an unknown tag 422 TAG
   const unknown = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-9999' });
   assert.equal(unknown.status, 422);
   assert.equal(unknown.body.code, 'TAG_NOT_FOUND');
+});
+
+test('a retired or damaged tag gets 409 TAG_RETIRED, not a 500', async () => {
+  tag('NIAH-0002', 'retired');
+  tag('NIAH-0003', 'damaged');
+  for (const qr_id of ['NIAH-0002', 'NIAH-0003']) {
+    const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ id: crypto.randomUUID(), qr_id });
+    assert.equal(res.status, 409);
+    assert.equal(res.body.code, 'TAG_RETIRED');
+    assert.equal(res.body.message, `Tag ${qr_id} has been retired. Pick or scan an unused tag.`);
+  }
+  assert.equal(db.specimens.length, 0);
+});
+
+test("the database refusing another botanist's kept tag answers 409 TAG_RESERVED, not a 500", async (t) => {
+  // The tag was kept for someone else at the moment of the insert, though the
+  // API's own check just before did not see it (a race), so the database's tag
+  // trigger refuses it (migration 20261110000000, errcode CTTG1). A 500 would
+  // make the phone's sync retry it for ever; TAG_RESERVED lets the botanist pick another tag.
+  tag('TEST-0001');
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const path = new URL(input).pathname;
+    if (path === '/rest/v1/specimens' && init.method === 'POST') {
+      return pgError('CTTG1', 'Tag TEST-0001 is kept for another botanist');
+    }
+    return fakeSupabase(input, init);
+  });
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ id: crypto.randomUUID(), qr_id: 'TEST-0001' });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'TAG_RESERVED');
+  assert.equal(res.body.message, 'Tag TEST-0001 is kept for another botanist. Pick or scan an unused tag.');
 });
 
 test('clients cannot set registered_by or species_id when registering', async () => {
@@ -231,6 +276,32 @@ test('photo upload: stored at {observation_id}/{photo_id}.jpg, row saved, signed
     .field('id', photoId).attach('file', jpeg, 'leaf.jpg');
   assert.equal(again.status, 200, 'a retry with the same photo id is not saved twice');
   assert.equal(db.observation_photos.length, 1);
+});
+
+test('a retry that overlaps the first upload of a photo keeps the file the saved row points to', async (t) => {
+  // Case 2d: the connection drops while the server is still saving the photo,
+  // and the phone sends it again as soon as the signal is back. The retry finds
+  // no row yet, writes the same file, and then loses the insert to the first request.
+  const obs = observation({ status: 'queued' });
+  const photoId = crypto.randomUUID();
+  const key = `${obs.id}/${photoId}.jpg`;
+  t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
+    const res = await fakeSupabase(input, init);
+    const path = new URL(input).pathname;
+    if (path === `/storage/v1/object/observation-photos/${key}` && (init.method ?? 'GET') === 'POST') {
+      // The first request finishes here: its row is saved, pointing at the same file.
+      db.observation_photos.push({ id: photoId, observation_id: obs.id, s3_bucket: 'observation-photos', s3_key: key,
+        content_type: 'image/jpeg', size_bytes: 10, upload_status: 'uploaded', caption: null, traits: [] });
+    }
+    return res;
+  });
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const res = await request(app).post(`/v1/observations/${obs.id}/photos`).set(as('botanist'))
+    .field('id', photoId).attach('file', jpeg, 'leaf.jpg');
+  assert.equal(res.status, 200, 'the retry answers with the photo already saved');
+  assert.equal(res.body.id, photoId);
+  assert.equal(db.observation_photos.length, 1);
+  assert.deepEqual(stored, [key], 'the saved photo still has its file');
 });
 
 test('photo upload keeps its caption and traits, and refuses a trait not on the list', async () => {
@@ -328,6 +399,68 @@ test('a tag on a plant cannot be deleted (409); an unused one can (204)', async 
   assert.deepEqual(db.qr_tags.map((t) => t.qr_id), ['NIAH-0001']);
 });
 
+/* ---------- kept tags (CTIP-116) ---------- */
+
+// A "kept" tag is one a botanist reserved on their phone for use with no signal.
+const keptTag = (qr_id, fields = {}) => {
+  db.qr_tags.push({ qr_id, status: 'unassigned', batch_label: 'reserved', created_by: users.botanist, ...fields });
+};
+
+test('botanist releases own reserved unused tag', async () => {
+  keptTag('NIAH-0001');
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 204);
+  assert.equal(db.qr_tags.length, 0);
+});
+
+test("botanist cannot release another botanist's tag", async () => {
+  keptTag('NIAH-0001', { created_by: users.officer });
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'FORBIDDEN');
+  assert.equal(db.qr_tags.length, 1);
+});
+
+test('botanist cannot release a printed tag', async () => {
+  keptTag('NIAH-0001', { batch_label: 'Print 3' });
+  const res = await request(app).delete('/v1/qr-tags/NIAH-0001').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(db.qr_tags.length, 1);
+});
+
+test('an officer cannot make a batch labelled reserved', async () => {
+  // "reserved" marks a tag kept on one botanist's phone: an officer's batch with
+  // that label would be refused to every botanist.
+  for (const role of ['officer', 'admin']) {
+    for (const count of [1, 5]) {
+      const res = await request(app).post('/v1/qr-tags/batch').set(as(role)).send({ count, batch_label: 'reserved' });
+      assert.equal(res.status, 403, `${role} ${count}`);
+      assert.equal(res.body.code, 'FORBIDDEN');
+      assert.equal(res.body.message, "Only a botanist's phone can make kept tags.");
+    }
+  }
+  assert.equal(db.qr_tags.length, 0);
+  // A botanist's phone keeps one tag at a time.
+  const one = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 1, batch_label: 'reserved' });
+  assert.equal(one.status, 201);
+  assert.equal(one.body[0].batch_label, 'reserved');
+});
+
+test("POST /specimens on another botanist's reserved tag answers 409 TAG_RESERVED", async () => {
+  keptTag('NIAH-0001', { created_by: users.officer });
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'TAG_RESERVED');
+  assert.equal(db.specimens.length, 0);
+});
+
+test('POST /specimens on my own reserved tag works', async () => {
+  keptTag('NIAH-0001');
+  const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
+  assert.equal(res.status, 201);
+  assert.equal(db.specimens.length, 1);
+});
+
 /* ---------- start-up load ---------- */
 
 test('workspace: every list, with signed links on field photos', async () => {
@@ -338,6 +471,75 @@ test('workspace: every list, with signed links on field photos', async () => {
   assert.equal(res.body.observations.length, 1);
   assert.match(res.body.observation_photos[0].url, /token=t/);
   assert.deepEqual(res.body.unavailable, []);
+});
+
+test('workspace: sensor readings from the last 24 hours only', async () => {
+  const node = crypto.randomUUID();
+  const ago = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  db.telemetry.push({ id: 'new', node_id: node, ts: ago(1), temperature: 30 }, { id: 'old', node_id: node, ts: ago(48), temperature: 20 });
+  const res = await request(app).get('/v1/workspace').set(as('officer'));
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.telemetry.map((r) => r.id), ['new']);
+});
+
+test('sensor node telemetry: readings in the asked range, oldest first; bad input refused', async () => {
+  const node = crypto.randomUUID();
+  const other = crypto.randomUUID();
+  const ago = (h) => new Date(Date.now() - h * 3600_000).toISOString();
+  db.telemetry.push(
+    { id: 'a', node_id: node, ts: ago(2) }, { id: 'b', node_id: node, ts: ago(1) },
+    { id: 'c', node_id: node, ts: ago(100) }, { id: 'x', node_id: other, ts: ago(1) },
+  );
+  const day = await request(app).get(`/v1/sensor-nodes/${node}/telemetry`).set(as('officer'));
+  assert.equal(day.status, 200);
+  assert.deepEqual(day.body.map((r) => r.id).sort(), ['a', 'b']);
+  const week = await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=168`).set(as('admin'));
+  assert.deepEqual(week.body.map((r) => r.id).sort(), ['a', 'b', 'c']);
+  assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=0`).set(as('officer'))).status, 400);
+  assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=abc`).set(as('officer'))).status, 400);
+  assert.equal((await request(app).get('/v1/sensor-nodes/not-a-uuid/telemetry').set(as('officer'))).status, 404);
+  assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry`).set(as('botanist'))).status, 403);
+});
+
+test('sensor node telemetry: a chosen date range (from and to)', async () => {
+  const node = crypto.randomUUID();
+  db.telemetry.push(
+    { id: 'before', node_id: node, ts: '2026-11-01T10:00:00.000Z' },
+    { id: 'in1', node_id: node, ts: '2026-11-02T10:00:00.000Z' },
+    { id: 'in2', node_id: node, ts: '2026-11-03T10:00:00.000Z' },
+    { id: 'after', node_id: node, ts: '2026-11-05T10:00:00.000Z' },
+  );
+  const get = (q) => request(app).get(`/v1/sensor-nodes/${node}/telemetry?${q}`).set(as('officer'));
+  const res = await get('from=2026-11-02T00:00:00Z&to=2026-11-04T00:00:00Z');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.map((r) => r.id).sort(), ['in1', 'in2']);
+  assert.equal((await get('from=2026-11-04&to=2026-11-02')).status, 400); // backwards
+  assert.equal((await get('from=2026-01-01&to=2026-11-01')).status, 400); // longer than 30 days
+  assert.equal((await get('from=yesterday')).status, 400);
+  assert.equal((await get('to=2026-11-04')).status, 400); // to without from
+  assert.equal((await get('hours=24&from=2026-11-02')).status, 400); // both kinds
+});
+
+test('sensor node images: newest photos with signed links, officers and admins only', async () => {
+  const node = crypto.randomUUID();
+  db.sensor_images.push(
+    { id: 'p1', node_id: node, captured_at: '2026-11-10T10:00:00.000Z', s3_bucket: 'sensor-images', s3_key: `${node}/p1.jpg` },
+    { id: 'p0', node_id: node, captured_at: '2026-11-01T10:00:00.000Z', s3_bucket: 'sensor-images', s3_key: `${node}/p0.jpg` },
+    { id: 'p2', node_id: crypto.randomUUID(), captured_at: '2026-11-10T11:00:00.000Z', s3_key: 'other/p2.jpg' },
+  );
+  const get = (q = '', role = 'officer') => request(app).get(`/v1/sensor-nodes/${node}/images${q}`).set(as(role));
+  const res = await get('', 'admin');
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.data.map((r) => r.id).sort(), ['p0', 'p1']);
+  assert.match(res.body.data[0].view_url, /token=t/);
+  assert.equal(res.body.meta.total, 2);
+  const recent = await get('?from=2026-11-05');
+  assert.deepEqual(recent.body.data.map((r) => r.id), ['p1']);
+  assert.equal((await get('?limit=0')).status, 400);
+  assert.equal((await get('?limit=500')).status, 400);
+  assert.equal((await get('?from=soon')).status, 400);
+  assert.equal((await request(app).get('/v1/sensor-nodes/nope/images').set(as('officer'))).status, 404);
+  assert.equal((await get('', 'botanist')).status, 403);
 });
 
 test('workspace: a side list that fails comes back empty and named; a core list fails the request', async () => {
@@ -480,6 +682,16 @@ test("marking a notification read only touches the caller's own", async () => {
 
 const versionsAre = (v) => { db.table_versions = Object.entries(v).map(([table_name, version]) => ({ table_name, version })); };
 const poll = (who, cursor) => request(app).get('/v1/workspace').query(cursor ? { cursor } : {}).set(as(who));
+
+test('workspace: an account an admin turned off is told so, and gets no data', async () => {
+  db.profiles.push({ id: users.botanist, role: 'botanist', is_active: false, deleted_at: null });
+  const res = await request(app).get('/v1/workspace').set(as('botanist'));
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'ACCOUNT_DISABLED');
+  assert.equal(res.body.species, undefined);
+  db.profiles[0].deleted_at = '2026-11-01T00:00:00Z';
+  assert.match((await request(app).get('/v1/workspace').set(as('botanist'))).body.message, /deleted/);
+});
 
 test('workspace: the first load is full and hands back a cursor and a poll delay', async () => {
   versionsAre({ species: 1, notifications: 3 });
@@ -698,4 +910,159 @@ test('photo confirm: an uploaded photo is returned as it is; a pending one is ma
   assert.equal(notYet.body.code, 'UPLOAD_NOT_FOUND');
   assert.equal(missing.upload_status, 'pending');
   assert.equal((await confirm({ id: crypto.randomUUID() })).status, 404);
+});
+
+/* ---------- CTIP-16: POST /sync ---------- */
+
+const syncItem = (fields = {}) => ({
+  id: crypto.randomUUID(), specimen_id: crypto.randomUUID(), base_version: null,
+  observed_at: '2026-11-02T08:30:00.000Z', height_cm: 120, notes: 'seen on the trail', ...fields,
+});
+const sync = (items, who = 'botanist') =>
+  request(app).post('/v1/sync').set(as(who)).send({ device_id: 'phone-1', observations: items });
+// A row the phone already sent once (queued, version 1), ready to be edited.
+const queuedRow = (fields = {}) => observation({ status: 'queued', height_cm: 100, notes: 'first note', ...fields });
+const editItem = (row, fields = {}) => ({ id: row.id, specimen_id: row.specimen_id, base_version: row.version, ...fields });
+
+test('POST /sync creates new observations as queued', async () => {
+  const item = syncItem();
+  const res = await sync([item]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].id, item.id);
+  assert.equal(res.body.results[0].result, 'created');
+  assert.equal(res.body.results[0].server_version, 1);
+  const row = db.observations.find((o) => o.id === item.id);
+  assert.equal(row.status, 'queued');
+  assert.equal(row.observed_at, item.observed_at);
+  assert.equal(row.recorded_by, users.botanist);
+  assert.equal(row.last_synced_at, null);
+});
+
+test('POST /sync replayed batch stores each observation once', async () => {
+  const items = [syncItem(), syncItem()];
+  const before = db.observations.length;
+  const first = await sync(items);
+  const second = await sync(items);
+  assert.equal(db.observations.length, before + 2);
+  for (const res of [first, second]) {
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.results.map((r) => r.result), ['created', 'created']);
+  }
+});
+
+test('POST /sync answers another user\'s id with ID_TAKEN and keeps their row', async () => {
+  const theirs = observation({ recorded_by: users.officer, status: 'queued', notes: 'theirs' });
+  const res = await sync([syncItem({ id: theirs.id, notes: 'mine' })]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].result, 'error');
+  assert.equal(res.body.results[0].error.code, 'ID_TAKEN');
+  assert.equal(theirs.notes, 'theirs');
+});
+
+test('POST /sync leaves a plant waiting for an officer alone (botanist), and still saves the others', async () => {
+  const specimen_id = crypto.randomUUID();
+  observation({ specimen_id, status: 'synced' });
+  const res = await sync([syncItem({ specimen_id }), syncItem()]);
+  assert.equal(res.body.results[0].result, 'error');
+  assert.equal(res.body.results[0].error.code, 'REVIEW_IN_PROGRESS');
+  assert.equal(res.body.results[1].result, 'created');
+});
+
+test('POST /sync resend of a create the server already holds answers created, even once the plant waits for an officer', async () => {
+  // The first send of this revisit was stored as queued, but its answer was lost.
+  // Before the phone sends it again, another record of the same plant is sent for
+  // review (say from the botanist's second phone). The resend must still be
+  // answered "created", so the phone goes on to its photos and submit.
+  const specimen_id = crypto.randomUUID();
+  const item = syncItem({ specimen_id });
+  assert.equal((await sync([item])).body.results[0].result, 'created');
+  observation({ specimen_id, status: 'synced' });
+  const again = await sync([item]);
+  assert.equal(again.body.results[0].result, 'created');
+  assert.equal(again.body.results[0].server_version, 1);
+  assert.equal(db.observations.filter((o) => o.id === item.id).length, 1);
+});
+
+test('POST /sync edit with the right base_version answers updated', async () => {
+  const row = queuedRow();
+  const res = await sync([editItem(row, { height_cm: 150, notes: 'taller now' })]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].result, 'updated');
+  assert.equal(res.body.results[0].server_version, 2);
+  assert.equal(row.version, 2);
+  assert.equal(row.height_cm, 150);
+  assert.equal(row.notes, 'taller now');
+});
+
+test('POST /sync edit with an old base_version answers conflict and changes nothing', async () => {
+  const row = queuedRow({ version: 3 });
+  const res = await sync([editItem(row, { base_version: 1, height_cm: 150, notes: 'from the phone' })]);
+  assert.equal(res.body.results[0].result, 'conflict');
+  assert.equal(res.body.results[0].server_version, 3);
+  assert.equal(row.version, 3);
+  assert.equal(row.height_cm, 100);
+  assert.equal(row.notes, 'first note');
+});
+
+test('POST /sync replayed edit answers updated, not conflict', async () => {
+  const row = queuedRow();
+  const item = editItem(row, { height_cm: 150, notes: 'taller now' });
+  const first = await sync([item]);
+  const second = await sync([item]); // the answer was lost, so the phone sends it again
+  assert.equal(first.body.results[0].result, 'updated');
+  assert.equal(second.body.results[0].result, 'updated');
+  assert.equal(second.body.results[0].server_version, 2);
+  assert.equal(row.version, 2);
+});
+
+test('POST /sync edit of a record sent for review answers conflict WRONG_STATUS', async () => {
+  const row = observation({ status: 'synced', notes: 'under review' });
+  const res = await sync([editItem(row, { notes: 'late edit' })]);
+  assert.equal(res.body.results[0].result, 'conflict');
+  assert.equal(res.body.results[0].error.code, 'WRONG_STATUS');
+  assert.equal(row.notes, 'under review');
+  assert.equal(row.version, 1);
+});
+
+test('POST /sync edit of a missing record answers NOT_FOUND, and another user\'s record looks missing too', async () => {
+  const theirs = queuedRow({ recorded_by: users.officer });
+  const res = await sync([
+    editItem({ id: crypto.randomUUID(), specimen_id: crypto.randomUUID(), version: 1 }, { notes: 'x' }),
+    editItem(theirs, { notes: 'x' }),
+  ]);
+  assert.equal(res.body.results[0].error.code, 'NOT_FOUND');
+  assert.equal(res.body.results[1].error.code, 'NOT_FOUND');
+  assert.equal(theirs.version, 1);
+});
+
+test('POST /sync item without id answers error and the others still save', async () => {
+  const { id, ...noId } = syncItem();
+  const good = syncItem();
+  const res = await sync([noId, good]);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.results[0].result, 'error');
+  assert.equal(res.body.results[0].error.code, 'VALIDATION_ERROR');
+  assert.equal(res.body.results[1].result, 'created');
+  assert.ok(db.observations.some((o) => o.id === good.id));
+});
+
+test('POST /sync refuses a status from the phone and unknown fields, per item', async () => {
+  const res = await sync([syncItem({ status: 'synced' }), syncItem({ recorded_by: users.officer }), syncItem()]);
+  assert.equal(res.body.results[0].error.code, 'VALIDATION_ERROR');
+  assert.equal(res.body.results[1].error.code, 'VALIDATION_ERROR');
+  assert.equal(res.body.results[2].result, 'created');
+  assert.equal(db.observations.length, 1);
+});
+
+test('POST /sync refuses 21 items, or none, with 422', async () => {
+  const many = await sync(Array.from({ length: 21 }, () => syncItem()));
+  assert.equal(many.status, 422);
+  assert.equal(many.body.code, 'VALIDATION_ERROR');
+  assert.equal((await sync([])).status, 422);
+  assert.equal(db.observations.length, 0);
+});
+
+test('POST /sync needs sign-in', async () => {
+  const res = await request(app).post('/v1/sync').send({ device_id: 'phone-1', observations: [syncItem()] });
+  assert.equal(res.status, 401);
 });

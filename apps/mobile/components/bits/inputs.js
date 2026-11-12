@@ -7,7 +7,8 @@ import { useTheme, font } from '../Theme.js';
 import { Txt } from './text.js';
 import { IconButton } from './buttons.js';
 
-export function SearchField({ value, onChangeText, placeholder, pill }) {
+// `onSubmitEditing`: the keyboard's search key. `autoFocus`: open with the keyboard up.
+export function SearchField({ value, onChangeText, placeholder, pill, onSubmitEditing, autoFocus }) {
   const { c } = useTheme();
   return (
     <View style={{ height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, borderRadius: pill ? 999 : 10, backgroundColor: c.bg }}>
@@ -19,6 +20,9 @@ export function SearchField({ value, onChangeText, placeholder, pill }) {
         placeholder={placeholder}
         placeholderTextColor={c.ink3}
         returnKeyType="search"
+        onSubmitEditing={onSubmitEditing}
+        autoFocus={autoFocus}
+        autoCorrect={false}
         style={{ flex: 1, fontFamily: font('text', 400), fontSize: 16, color: c.ink }}
       />
       {value ? <IconButton name="x" label="Clear search" size={18} color={c.ink2} onPress={() => onChangeText('')} /> : null}
@@ -27,7 +31,10 @@ export function SearchField({ value, onChangeText, placeholder, pill }) {
 }
 
 // Label + filled input. `mono` for tag IDs, `italic` for scientific names.
-export function Field({ label, value, onChangeText, placeholder, mono, italic, suffix, hint, optional, width, secure, rightIcon, onRightPress, keyboardType, error, editable = true }) {
+// `rightLabel`: what a screen reader says for the right icon ("Show password"), when
+// the field's own label would be wrong for it. `inputRef` lets a form move the
+// cursor here (the keyboard's "next" key); `autoComplete` lets the phone fill it in.
+export function Field({ label, value, onChangeText, placeholder, mono, italic, suffix, hint, optional, width, secure, rightIcon, onRightPress, rightLabel, keyboardType, error, editable = true, maxLength, autoComplete, returnKeyType, onSubmitEditing, autoFocus, inputRef }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
   const family = mono ? font('mono', 500) : italic ? font('display', 500, true) : font('text', 400);
@@ -49,13 +56,20 @@ export function Field({ label, value, onChangeText, placeholder, mono, italic, s
           secureTextEntry={secure}
           keyboardType={keyboardType}
           editable={editable}
-          autoCapitalize={mono || keyboardType === 'email-address' ? 'none' : 'sentences'}
+          maxLength={maxLength}
+          ref={inputRef}
+          autoComplete={autoComplete}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
+          autoFocus={autoFocus}
+          autoCorrect={keyboardType === 'email-address' || secure || mono ? false : undefined}
+          autoCapitalize={mono || secure || keyboardType === 'email-address' ? 'none' : 'sentences'}
           onFocus={() => setFocus(true)}
           onBlur={() => setFocus(false)}
           style={{ flex: 1, minWidth: 0, fontFamily: family, fontSize: italic ? 17 : 16, color: c.ink }}
         />
         {suffix ? <Text style={{ fontFamily: font('text', 600), fontSize: 14, color: c.ink2 }}>{suffix}</Text> : null}
-        {rightIcon ? <IconButton name={rightIcon} label={label} onPress={onRightPress} size={20} color={c.ink2} /> : null}
+        {rightIcon ? <IconButton name={rightIcon} label={rightLabel || label} onPress={onRightPress} size={20} color={c.ink2} /> : null}
       </View>
       {error ? (
         <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
@@ -67,7 +81,8 @@ export function Field({ label, value, onChangeText, placeholder, mono, italic, s
   );
 }
 
-export function Area({ label, value, onChangeText, placeholder, rows = 3, optional }) {
+// `maxLength`: the most characters the API accepts for this field, if it has a limit.
+export function Area({ label, value, onChangeText, placeholder, rows = 3, optional, maxLength }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
 
@@ -84,6 +99,7 @@ export function Area({ label, value, onChangeText, placeholder, rows = 3, option
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={c.ink3}
+        maxLength={maxLength}
         onFocus={() => setFocus(true)}
         onBlur={() => setFocus(false)}
         textAlignVertical="top"
@@ -103,7 +119,7 @@ export function Check({ label, hint, value, onChange, disabled }) {
       accessibilityLabel={label}
       disabled={disabled}
       onPress={() => onChange(!value)}
-      style={{ flexDirection: 'row', gap: 12, paddingVertical: 8, minHeight: 44, opacity: disabled ? 0.7 : 1 }}
+      style={({ pressed }) => ({ flexDirection: 'row', gap: 12, paddingVertical: 8, minHeight: 48, opacity: disabled || pressed ? 0.7 : 1 })}
     >
       <View style={{ width: 24, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: value ? c.accent : c.ink3, backgroundColor: value ? c.accent : 'transparent' }}>
         {value ? <Icon name="check" size={16} color={c.onAccent} /> : null}
@@ -124,8 +140,8 @@ export function Pills({ items, value, onChange }) {
       {items.map((it) => {
         const on = it.key === value;
         return (
-          <Pressable key={it.key} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => onChange(it.key)}
-            style={{ height: 36, paddingHorizontal: 14, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: on ? c.accent : 'transparent', borderWidth: on ? 0 : 1, borderColor: c.line }}>
+          <Pressable key={it.key} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => onChange(it.key)} hitSlop={{ top: 6, bottom: 6 }}
+            style={({ pressed }) => ({ height: 36, paddingHorizontal: 14, borderRadius: 999, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: on ? c.accent : 'transparent', borderWidth: on ? 0 : 1, borderColor: c.line, opacity: pressed ? 0.7 : 1 })}>
             <Text style={{ fontFamily: font('text', on ? 700 : 600), fontSize: 14, color: on ? c.onAccent : c.ink }}>{it.label}</Text>
           </Pressable>
         );
@@ -142,8 +158,8 @@ export function Segmented({ items, value, onChange }) {
       {items.map((it) => {
         const on = it.key === value;
         return (
-          <Pressable key={it.key} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => onChange(it.key)}
-            style={{ flex: 1, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.surface : 'transparent', borderWidth: on ? 1 : 0, borderColor: c.line }}>
+          <Pressable key={it.key} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => onChange(it.key)} hitSlop={{ top: 4, bottom: 4 }}
+            style={({ pressed }) => ({ flex: 1, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.surface : 'transparent', borderWidth: on ? 1 : 0, borderColor: c.line, opacity: pressed ? 0.7 : 1 })}>
             <Text style={{ fontFamily: font('text', on ? 800 : 700), fontSize: 14, color: on ? c.ink : c.ink2 }}>{it.label}</Text>
           </Pressable>
         );
@@ -173,8 +189,9 @@ export function SortBar({ items = [], value, onChange, label = 'Sort' }) {
               accessibilityState={{ selected: on }}
               accessibilityLabel={`Sort by ${opt.label}`}
               onPress={() => onChange(opt.key)}
-              style={{
-                height: 28,
+              hitSlop={{ top: 8, bottom: 8 }}
+              style={({ pressed }) => ({
+                height: 32,
                 paddingHorizontal: 10,
                 borderRadius: 8,
                 alignItems: 'center',
@@ -182,7 +199,8 @@ export function SortBar({ items = [], value, onChange, label = 'Sort' }) {
                 backgroundColor: on ? c.accentSoft : c.bg,
                 borderWidth: 1,
                 borderColor: on ? c.accent : 'transparent',
-              }}
+                opacity: pressed ? 0.7 : 1,
+              })}
             >
               <Text style={{ fontFamily: font('text', on ? 700 : 500), fontSize: 12, color: on ? c.accent : c.ink2 }}>
                 {opt.label}

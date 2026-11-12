@@ -177,3 +177,6 @@ Thumbs.db
 
 # Graphify
 graphify-out/
+
+# Claude
+.claude/

@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import Icon from "../components/Icon.jsx";
+import BackButton from "../components/BackButton.jsx";
 import Img from "../components/Img.jsx";
 import MiniMap from "../components/MiniMap.jsx";
 import NewSpeciesButton from "../components/NewSpeciesButton.jsx";
 import PhotoGallery from "../components/PhotoGallery.jsx";
 import PhotoEditor from "../components/PhotoEditor.jsx";
 import PublicPlant from "./PublicPlant.jsx";
-import { Chip, Empty, Mono, Sci } from "../components/Bits.jsx";
+import { Chip, Empty, Modal, Mono, Sci } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { decisionPrompt } from "../decisionPrompt.jsx";
 import { useStore } from "../../../shared/store.js";
@@ -27,6 +28,8 @@ export default function Specimen({ qr }) {
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState(false);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [qrBig, setQrBig] = useState(false); // QR code enlarged for scanning
+  const [decided, setDecided] = useState(null); // the decision just made here, for the "done" panel
   const [ask, confirmDialog] = useConfirm();
 
   const plant = visiblePlants(db, role).find((p) => p.qr_id === qr);
@@ -77,8 +80,9 @@ export default function Specimen({ qr }) {
   return (
     <>
       {confirmDialog}
+      {staff && <BackButton fallback="/dashboard/all" />}
       <nav className="crumbs" aria-label="Breadcrumb">
-        <a href={staff ? "#/dashboard" : "#/plants"}>{staff ? "Tagged plants" : "Plants"}</a> <span aria-hidden="true">›</span>{" "}
+        <a href={staff ? "#/dashboard/all" : "#/plants"}>{staff ? "Tagged plants" : "Plants"}</a> <span aria-hidden="true">›</span>{" "}
         {plant.species ? <a href={"#/plants/" + plant.species.id}>{plant.name}</a> : <span>{plant.name}</span>} <span aria-hidden="true">›</span>{" "}
         <Mono><span aria-current="page">{plant.qr_id}</span></Mono>
       </nav>
@@ -126,6 +130,21 @@ export default function Specimen({ qr }) {
         </div>
       )}
 
+      {/* After a decision: say what happened and offer the way back. */}
+      {decided && (
+        <section className="reviewdone" role="status">
+          <span className="reviewdone-ic"><Icon name={decided === "approve" ? "check" : decided === "return" ? "undo" : "x"} size={22} /></span>
+          <div className="grow">
+            <b>{decided === "approve" ? "Approved and published" : decided === "return" ? "Returned to the botanist" : "Record rejected"}</b>
+            <p className="mute small">{plant.qr_id} is done. Go back to where you were, or open the next record.</p>
+          </div>
+          <div className="row wrap">
+            <BackButton fallback="/review" label="Back to previous page" className="btn" />
+            <a className="btn ghost" href="#/review">Next in the queue</a>
+          </div>
+        </section>
+      )}
+
       {/* Officer review panel displayed directly on the tag's page */}
       {canReview && (pendingObs || showReviewPanel) && activeObsForReview && (
         <OfficerReviewCard
@@ -138,6 +157,7 @@ export default function Specimen({ qr }) {
           setPlantLocationHidden={setPlantLocationHidden}
           notify={notify}
           onClose={() => setShowReviewPanel(false)}
+          onDecided={setDecided}
         />
       )}
 
@@ -224,7 +244,7 @@ export default function Specimen({ qr }) {
             <h2>Location</h2>
             {coords ? (
               <>
-                <MiniMap points={[{ p: plant, c: coords }]} height={150} highlight={plant.qr_id} label={`Location of ${plant.qr_id}`} />
+                <MiniMap points={[{ p: plant, c: coords }]} height={150} highlight={plant.qr_id} label={`Location of ${plant.qr_id}`} expandable mapHref={"#/map/" + plant.qr_id} />
                 <p className="gap-top-s"><Mono>{coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}</Mono></p>
                 {plant.location_reduced
                   ? <p className="mute small">{REDUCED_LOCATION_NOTE}</p>
@@ -253,9 +273,17 @@ export default function Specimen({ qr }) {
             <section className="glass pad">
               <h2>QR tag</h2>
               <div className="qrbox">
-                <div className="qrwhite"><QRCodeSVG value={tagUrl(plant.qr_id)} size={76} /></div>
-                <p className="mute small">Scanning this tag opens this page.</p>
+                <button type="button" className="qrwhite qrbtn" onClick={() => setQrBig(true)} aria-label={`Enlarge QR code for ${plant.qr_id}`} title="Enlarge to scan">
+                  <QRCodeSVG value={tagUrl(plant.qr_id)} size={76} />
+                </button>
+                <p className="mute small">Scanning this tag opens this page. Select the code to enlarge it.</p>
               </div>
+              {qrBig && (
+                <Modal title={`QR tag ${plant.qr_id}`} onClose={() => setQrBig(false)}>
+                  <div className="qrwhite qrlarge"><QRCodeSVG value={tagUrl(plant.qr_id)} size={512} /></div>
+                  <p className="mute small gap-top-s" style={{ textAlign: "center" }}>Point a phone camera at the code to open this page.</p>
+                </Modal>
+              )}
             </section>
           )}
           {plant.species && (
@@ -286,7 +314,7 @@ export default function Specimen({ qr }) {
 }
 
 // Inline review card on the tag's page for officers
-function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onClose }) {
+function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onClose, onDecided }) {
   const [comment, setComment] = useState("");
   const [hideChoice, setHideChoice] = useState(null); // null until the officer changes it
   const [ask, confirmDialog] = useConfirm();
@@ -313,6 +341,7 @@ function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservatio
         : "Record rejected"
     );
     setComment("");
+    onDecided?.(decision);
     if (onClose) onClose();
   };
 

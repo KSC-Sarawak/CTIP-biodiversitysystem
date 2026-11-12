@@ -4,6 +4,7 @@ import { parseBody, fail, dbError, UUID } from './validate.js';
 import { withSignedUrls } from './field.js';
 import { protectSpecimen } from './distribution.js';
 import { publicMediaUrl } from './photoLinks.js';
+import { accountBlock } from './accountStatus.js';
 import { dbLoad } from './dbLoad.js';
 import { emailProblem, passwordProblem, nameProblem, weakPasswordMessage } from './accountRules.js';
 import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } from './emailLimit.js';
@@ -13,7 +14,40 @@ import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } 
 // notifications. Queries run as the signed-in user, so RLS still applies.
 
 const ROLES = ['botanist', 'officer', 'admin'];
+const TELEMETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
+const TELEMETRY_LIMIT = 5000;
+const TELEMETRY_MAX_HOURS = 24 * 30;   // longest range one request can ask for
+const TELEMETRY_KEEP_DAYS = 366;        // how far back a custom range can start
+const IMAGE_BUCKET = 'sensor-images';
+const IMAGE_LINK_SECONDS = 60 * 60;     // signed links to sensor photos last an hour
+const ImageList = z.object({
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
 
+
+// The time range asked for on GET /sensor-nodes/:id/telemetry: { from, to } or { error }.
+// `to` is null when the range runs up to now.
+function telemetryRange({ hours, from, to }) {
+  if (from === undefined && to === undefined) {
+    const h = hours === undefined ? 24 : Number(hours);
+    if (!Number.isFinite(h) || h < 1 || h > TELEMETRY_MAX_HOURS) {
+      return { error: `hours must be a number from 1 to ${TELEMETRY_MAX_HOURS}` };
+    }
+    return { from: new Date(Date.now() - h * 3600_000), to: null };
+  }
+  if (hours !== undefined) return { error: 'Use either hours, or from and to, not both' };
+  if (from === undefined) return { error: 'from is needed with to' };
+  const start = new Date(from);
+  const end = to === undefined ? new Date() : new Date(to);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return { error: 'from and to must be dates, like 2026-11-01' };
+  if (start >= end) return { error: 'from must be before to' };
+  if (end - start > TELEMETRY_MAX_HOURS * 3600_000) return { error: `The range can be at most ${TELEMETRY_MAX_HOURS / 24} days` };
+  if (Date.now() - start > TELEMETRY_KEEP_DAYS * 86400_000) return { error: `from can be at most ${TELEMETRY_KEEP_DAYS} days ago` };
+  return { from: start, to: end };
+}
 
 // The start-up load. Each list is what RLS lets this user see, the same rows
 // the apps read before. Without plants, tags or observations the apps would
@@ -31,6 +65,11 @@ const WORKSPACE = {
   alerts: (db) => db.from('alerts').select('*').order('created_at', { ascending: false }),
   alert_notes: (db) => db.from('alert_notes').select('*').order('created_at'),
   sensor_nodes: (db) => db.from('sensor_nodes').select('*').order('created_at'),
+  // Sensor readings from the last day, newest first and capped, so a busy
+  // node cannot make every poll huge. Officers and admins only (RLS).
+  telemetry: (db) => db.from('telemetry').select('*')
+    .gte('ts', new Date(Date.now() - TELEMETRY_WINDOW_MS).toISOString())
+    .order('ts', { ascending: false }).limit(TELEMETRY_LIMIT),
   notifications: (db) => db.from('notifications').select('*').order('created_at', { ascending: false }),
   audit_logs: (db) => db.from('audit_logs').select('*').order('changed_at', { ascending: false }),
   profiles: (db) => db.from('profiles').select('*'),
@@ -207,6 +246,10 @@ export const staffHandlers = {
   // cursor }, or { partial: true, unchanged: true, cursor } when nothing did.
   // poll_after_ms tells the app how long to wait before asking again.
   'get /workspace': async (req, res) => {
+    // The apps load this every few seconds, so an account an admin turns off is
+    // told so within one poll, not only when its token next refreshes (up to an hour).
+    const blocked = await accountBlock(req.user);
+    if (blocked) return fail(res, 403, 'ACCOUNT_DISABLED', blocked);
     const db = supabaseAs(req.user);
     try {
       const now = Date.now();
@@ -498,6 +541,12 @@ export const staffHandlers = {
     if (req.user.role === 'botanist' && body.count !== 1) {
       return fail(res, 403, 'FORBIDDEN', 'Botanists can create one tag at a time. Ask an officer to print a batch.');
     }
+    // "reserved" marks a tag kept on one botanist's phone for making a tag with
+    // no signal (CTIP-116); the API refuses it to everyone else (TAG_RESERVED).
+    // A batch with that label from anyone else would lock it away from every botanist.
+    if (body.batch_label === 'reserved' && !(req.user.role === 'botanist' && body.count === 1)) {
+      return fail(res, 403, 'FORBIDDEN', "Only a botanist's phone can make kept tags.");
+    }
     const db = supabaseAs(req.user);
     for (let attempt = 0; attempt < 3; attempt++) {
       const existing = await db.from('qr_tags').select('qr_id');
@@ -512,8 +561,18 @@ export const staffHandlers = {
   },
 
   // Only a tag that was never put on a plant can be deleted; others are retired.
+  // A botanist may delete only a tag kept for them (reserved by them, CTIP-116):
+  // the database policy "qr: botanist release own reserved" says the same, and
+  // this check gives the plain-words answer.
   'delete /qr-tags/:qrId': async (req, res) => {
     const db = supabaseAs(req.user);
+    if (req.user.role === 'botanist') {
+      const tag = await db.from('qr_tags').select('qr_id, status, batch_label, created_by').eq('qr_id', req.params.qrId).maybeSingle();
+      if (tag.error) return dbError(res, tag.error);
+      if (!tag.data) return fail(res, 404, 'NOT_FOUND', 'No unused tag with this id');
+      const mine = tag.data.created_by === req.user.id && tag.data.batch_label === 'reserved' && tag.data.status === 'unassigned';
+      if (!mine) return fail(res, 403, 'FORBIDDEN', 'You can release only tags kept for you.');
+    }
     const onPlant = await db.from('specimens').select('id').eq('qr_id', req.params.qrId).limit(1);
     if (onPlant.error) return dbError(res, onPlant.error);
     if (onPlant.data.length) return fail(res, 409, 'TAG_IN_USE', 'This tag is on a plant. Retire it instead.');
@@ -592,6 +651,56 @@ export const staffHandlers = {
     const { data, error } = await supabaseAs(req.user).from('sensor_nodes').select('*').order('created_at');
     if (error) return dbError(res, error);
     res.json(data);
+  },
+
+  'get /sensor-nodes/:id': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    const { data, error } = await supabaseAs(req.user).from('sensor_nodes').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) return dbError(res, error);
+    if (!data) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    res.json(data);
+  },
+
+  // One node's readings, oldest first (CTIP-81). Pick the range with either
+  //   ?hours=   how far back from now (1 to 720, default 24), or
+  //   ?from=&to= two dates or times (to defaults to now), at most 30 days apart.
+  // At most TELEMETRY_LIMIT readings: the newest ones when there are more.
+  'get /sensor-nodes/:id/telemetry': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    const range = telemetryRange(req.query);
+    if (range.error) return fail(res, 400, 'VALIDATION_ERROR', range.error);
+    let query = supabaseAs(req.user).from('telemetry').select('*')
+      .eq('node_id', req.params.id).gte('ts', range.from.toISOString());
+    if (range.to) query = query.lte('ts', range.to.toISOString());
+    const { data, error } = await query.order('ts', { ascending: false }).limit(TELEMETRY_LIMIT);
+    if (error) return dbError(res, error);
+    res.json(data.reverse());
+  },
+
+  // Photos a node's webcam took when it saw movement (CTIP-82), newest first, one page
+  // at a time (?page=, ?limit= up to 100, default 20), optionally only ?from= / ?to=.
+  // The bucket is private: each photo comes with view_url, a signed link that works for
+  // an hour. Signed as the signed-in user, so Storage RLS (officers and admins) applies too.
+  'get /sensor-nodes/:id/images': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    const query = ImageList.safeParse(req.query);
+    if (!query.success) return fail(res, 400, 'VALIDATION_ERROR', 'Bad from, to, page or limit');
+    const { from, to, page, limit } = query.data;
+    const db = supabaseAs(req.user);
+    let q = db.from('sensor_images').select('*', { count: 'exact' }).eq('node_id', req.params.id);
+    if (from) q = q.gte('captured_at', from.toISOString());
+    if (to) q = q.lte('captured_at', to.toISOString());
+    const { data, count, error } = await q.order('captured_at', { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+    if (error) return dbError(res, error);
+    const signed = new Map();
+    const keys = data.map((r) => r.s3_key).filter(Boolean);
+    if (keys.length) {
+      const links = await db.storage.from(IMAGE_BUCKET).createSignedUrls(keys, IMAGE_LINK_SECONDS);
+      if (links.error) console.warn('sensor image links not signed:', links.error.message);
+      for (const item of links.data ?? []) if (item?.signedUrl) signed.set(item.path, item.signedUrl);
+    }
+    res.json({ data: data.map((r) => ({ ...r, view_url: signed.get(r.s3_key) ?? null })), meta: { page, limit, total: count ?? data.length } });
   },
 
   'patch /sensor-nodes/:id': async (req, res) => {

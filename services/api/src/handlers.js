@@ -6,6 +6,7 @@ import { distributionHandlers } from './distribution.js';
 import { speciesMediaHandlers } from './speciesMedia.js';
 import { observationHandlers } from './observations.js';
 import { fieldHandlers } from './field.js';
+import { syncHandlers } from './sync.js';
 import { staffHandlers } from './staff.js';
 import { discussionHandlers } from './discussions.js';
 import { sessionHandlers } from './session.js';
@@ -162,6 +163,7 @@ export const handlers = {
   ...speciesMediaHandlers,
   ...observationHandlers,
   ...fieldHandlers,
+  ...syncHandlers,
   ...staffHandlers,
   ...discussionHandlers,
   ...sessionHandlers,

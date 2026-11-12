@@ -2,12 +2,11 @@
 import { useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
-import { Chip, Empty, Mono, Pills } from "../components/Bits.jsx";
-import { STATUS_TEXT } from "../../../shared/tokens.js";
+import { Chip, Empty, Mono } from "../components/Bits.jsx";
+import PageHead from "../components/PageHead.jsx";
 import { useStore } from "../../../shared/store.js";
 import { nameOf, plantView, unfinishedPlants, recordMatches, draftMatches } from "../../../shared/selectors.js";
 import { fmtDateTime } from "../../../shared/utils.js";
-import { OBS_STATUS } from "../../../shared/data.js";
 
 // A botanist's own submission history, with the status of each record.
 export default function Records() {
@@ -17,10 +16,16 @@ export default function Records() {
   const [q, setQ] = useState("");
 
   const unfinished = unfinishedPlants(db, me?.id);
-  const mine = db.observations
-    .filter((o) => o.recorded_by === me?.id && (filter === "all" || o.status === filter))
+  const all = db.observations.filter((o) => o.recorded_by === me?.id);
+  const countOf = (st) => all.filter((o) => o.status === st).length;
+  const mine = all
+    .filter((o) => filter === "all" || o.status === filter || (filter === "draft" && o.status === "queued"))
     .map((o) => ({ ...o, plant: plantView(db, db.plants.find((p) => p.id === o.specimen_id)) }))
     .sort((a, b) => {
+      // Records returned for a fix always come first: they are the ones waiting on you.
+      const ra = a.status === "returned" ? 0 : 1;
+      const rb = b.status === "returned" ? 0 : 1;
+      if (ra !== rb) return ra - rb;
       if (sort === "oldest") return (a.observed_at || "").localeCompare(b.observed_at || "");
       if (sort === "name") {
         return (a.plant?.name || "").localeCompare(b.plant?.name || "");
@@ -34,24 +39,40 @@ export default function Records() {
   const filteredMine = mine.filter((o) => recordMatches(o, o.plant, q));
   const filteredUnfinished = unfinished.filter((p) => draftMatches(p, q));
 
+  // One sentence: the most urgent thing first.
+  const returned = countOf("returned");
+  const notSent = unfinished.length + countOf("draft") + countOf("queued");
+  const lead = returned
+    ? { tone: "warn", text: `${returned} ${returned === 1 ? "record was" : "records were"} returned to you. Fix ${returned === 1 ? "it" : "them"} first.` }
+    : notSent
+      ? { tone: "warn", text: `${notSent} ${notSent === 1 ? "record has" : "records have"} not been sent yet.` }
+      : countOf("synced")
+        ? { tone: "info", text: `${countOf("synced")} ${countOf("synced") === 1 ? "record is" : "records are"} with an officer. Nothing needs you right now.` }
+        : { tone: "ok", text: all.length ? "All your records are done. Nothing needs you right now." : "You have not recorded a plant yet." };
+  const tile = (key, label, value, tone) => ({ label, value, tone, on: filter === key, onClick: () => setFilter(filter === key && key !== "all" ? "all" : key) });
+
   return (
     <Shell seg="records">
-      <h2>My records</h2>
-      <div className="row wrap between gap-bottom gap-top-s" style={{ alignItems: "center", gap: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 220 }}>
-          <input
-            type="search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search records by plant, species or tag..."
-            aria-label="Search my records"
-            style={{ width: "100%", padding: "8px 12px", borderRadius: "var(--r-small, 8px)", border: "1px solid var(--line)" }}
-          />
-        </div>
-        <Pills label="Status" value={filter} onChange={setFilter}
-          items={["all", ...OBS_STATUS].map((s) => ({ key: s, label: s === "all" ? "All" : STATUS_TEXT[s] || s[0].toUpperCase() + s.slice(1) }))} />
-        <label className="inline" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span>Sort</span>
+      <PageHead
+        overline="Botanist dashboard"
+        title="My records"
+        lead={lead.text}
+        tone={lead.tone}
+        actions={<a className="btn" href="#/add"><Icon name="plus" size={18} /> Add plant</a>}
+        stats={[
+          tile("returned", "Returned to you", returned, "warn"),
+          tile("draft", "Not sent yet", notSent, "warn"),
+          tile("synced", "With an officer", countOf("synced")),
+          tile("approved", "Published", countOf("approved")),
+          tile("all", "All records", all.length),
+        ]}
+      />
+      <div className="toolbar">
+        <label className="search grow">
+          <Icon name="search" size={18} />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by plant, species or tag" aria-label="Search my records" />
+        </label>
+        <label className="inline">Sort
           <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort my records">
             <option value="recent">Recent first</option>
             <option value="oldest">Oldest first</option>
@@ -61,7 +82,7 @@ export default function Records() {
         </label>
       </div>
 
-      {filteredUnfinished.length > 0 && (filter === "all" || filter === "draft") && (
+      {filteredUnfinished.length > 0 && (filter === "all" || filter === "draft" || filter === "queued") && (
         <div className="callout gap-bottom">
           <p><b>Not sent yet.</b> {filteredUnfinished.length === 1 ? "This plant was" : "These plants were"} saved, but the record did not reach the server. Finish and send to put it in the review queue.</p>
           <ul className="drafts-list">

@@ -11,7 +11,7 @@ import { useStore } from '../../shared/store.js';
 import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
-  Screen, Header, IconButton, TextLink, Txt, Mono, Section, Field, Area, Button, Thumb, Empty,
+  Screen, Header, IconButton, TextLink, Txt, Mono, Section, Field, Area, Button, Thumb, Empty, DotLabel, Notice, Check,
 } from '../components/Bits.js';
 import LeafletMap from '../components/LeafletMap.js';
 import { PHOTO_TRAITS, PHOTO_CAPTION_MAX, isThreatened } from '../../shared/data.js';
@@ -22,6 +22,11 @@ import { TagQrView } from './TagQr.js';
 import { prefillFromSpecies } from '../../shared/speciesSearch.js';
 import { uid } from '../../shared/utils.js';
 import { extractTag, plantView } from '../../shared/selectors.js';
+import { revisitTarget, outboxTagsFrom, isReservedForOther } from '../../shared/offline/tags.js';
+import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
+import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation, photoPreview } from '../../shared/offline/records.js';
+import { deleteCameraFiles } from '../offline/photoFiles.js';
+import { useBackHandler } from '../navigation/focus.js';
 
 const MAX_PHOTOS = 6;
 
@@ -78,7 +83,30 @@ async function pickFromGallery() {
 const NO_GPS = { lat: null, lng: null, acc: null };
 const hasFix = (gps) => gps.lat != null && gps.lng != null;
 
-// Real hardware GPS acquisition via expo-location (CTIP-56)
+// getCurrentPositionAsync has no timeout of its own, and without signal (no
+// network help) it can wait a long time, so each try gets one here.
+const BALANCED_WAIT_MS = 15000;
+const HIGH_WAIT_MS = 20000;
+
+// One reading at `accuracy`, or null if it failed or took longer than `ms`.
+async function readPosition(accuracy, ms) {
+  let timer;
+  try {
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), ms); });
+    const loc = await Promise.race([Location.getCurrentPositionAsync({ accuracy }), timeout]);
+    return loc?.coords ? loc : null;
+  } catch (err) {
+    console.warn('GPS hardware read error:', err?.message || err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Real hardware GPS acquisition via expo-location (CTIP-56). Balanced first;
+// if that fails (common in airplane mode, where it cannot use the network),
+// one more try with the GPS chip itself (High). Never a last-known or made-up
+// position: an old reading would put the plant in the wrong place.
 async function requestHardwareLocation() {
   try {
     const { status } = await Location.requestForegroundPermissionsAsync();
@@ -90,11 +118,10 @@ async function requestHardwareLocation() {
       };
     }
 
-    const loc = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    });
+    const loc = (await readPosition(Location.Accuracy.Balanced, BALANCED_WAIT_MS))
+      || (await readPosition(Location.Accuracy.High, HIGH_WAIT_MS));
 
-    if (loc && loc.coords) {
+    if (loc) {
       return {
         gps: {
           lat: +loc.coords.latitude.toFixed(5),
@@ -106,7 +133,7 @@ async function requestHardwareLocation() {
       };
     }
   } catch (err) {
-    console.warn('GPS hardware read error:', err?.message || err);
+    console.warn('GPS permission error:', err?.message || err);
   }
 
   return {
@@ -131,8 +158,8 @@ function PhotoDetails({ photo, index, onChange }) {
           {PHOTO_TRAITS.map((t) => {
             const on = traits.includes(t);
             return (
-              <Pressable key={t} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={t} hitSlop={4} onPress={() => toggle(t)}
-                style={{ height: 36, paddingHorizontal: 12, borderRadius: 999, justifyContent: 'center', backgroundColor: on ? c.accent : c.bg }}>
+              <Pressable key={t} accessibilityRole="checkbox" accessibilityState={{ checked: on }} accessibilityLabel={t} hitSlop={6} onPress={() => toggle(t)}
+                style={({ pressed }) => ({ height: 36, paddingHorizontal: 12, borderRadius: 999, justifyContent: 'center', backgroundColor: on ? c.accent : c.bg, opacity: pressed ? 0.7 : 1 })}>
                 <Text style={{ fontFamily: font('text', 600), fontSize: 13, color: on ? c.onAccent : c.ink }}>{t}</Text>
               </Pressable>
             );
@@ -146,22 +173,21 @@ function PhotoDetails({ photo, index, onChange }) {
 function PhotoStrip({ photos, onAddCamera, onAddGallery, onRemove, onEdit, highlightAdd }) {
   const { c } = useTheme();
 
-  const promptChoice = () => {
-    Alert.alert('Add Photo', 'Take a new photo with camera or choose from gallery', [
-      { text: 'Take photo', onPress: onAddCamera },
-      { text: 'Choose from gallery', onPress: onAddGallery },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
-
   return (
     <View style={{ gap: 10 }}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
         {photos.map((p, i) => (
-          <Pressable key={p.url + i} accessibilityRole="button" accessibilityLabel={`Photo ${i + 1}${i === 0 ? ', cover' : ''}. Hold to remove.`} onLongPress={() => onRemove(i)}
-            style={i === 0 ? { borderRadius: 12, borderWidth: 2, borderColor: c.accent, padding: 2 } : { padding: 4 }}>
-            <Image source={{ uri: p.url }} style={{ width: 72, height: 72, borderRadius: 9, backgroundColor: c.accentSoft }} />
-          </Pressable>
+          <View key={p.url + i}>
+            <Pressable accessibilityRole="image" accessibilityLabel={`Photo ${i + 1}${i === 0 ? ', cover' : ''}`} onLongPress={() => onRemove(i)}
+              style={i === 0 ? { borderRadius: 12, borderWidth: 2, borderColor: c.accent, padding: 2 } : { padding: 4 }}>
+              <Image source={{ uri: p.url }} style={{ width: 72, height: 72, borderRadius: 9, backgroundColor: c.accentSoft }} />
+            </Pressable>
+            {/* Inside the photo's corner, not hanging over it: Android ignores taps outside a parent's box. */}
+            <Pressable accessibilityRole="button" accessibilityLabel={`Remove photo ${i + 1}`} hitSlop={12} onPress={() => onRemove(i)}
+              style={({ pressed }) => ({ position: 'absolute', top: 0, right: 0, width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, borderWidth: 1, borderColor: c.line, opacity: pressed ? 0.7 : 1 })}>
+              <Icon name="x" size={14} color={c.ink} strokeWidth={2} />
+            </Pressable>
+          </View>
         ))}
         {photos.length < MAX_PHOTOS ? (
           <Pressable accessibilityRole="button" accessibilityLabel="Add photo" onPress={onAddCamera}
@@ -178,16 +204,16 @@ function PhotoStrip({ photos, onAddCamera, onAddGallery, onRemove, onEdit, highl
             label="Take photo"
             icon="camera"
             kind="secondary"
-            height={40}
+            height={48}
             size={14}
             flex={1}
             onPress={onAddCamera}
           />
           <Button
             label="From gallery"
-            icon="plus"
+            icon="image"
             kind="secondary"
-            height={40}
+            height={48}
             size={14}
             flex={1}
             onPress={onAddGallery}
@@ -289,11 +315,36 @@ function SetByHand({ typed, gps, qr, protect, onChange }) {
   );
 }
 
+const NO_KEPT_TAGS = 'No offline tags left. Connect to the internet to get more, or scan a pre-printed tag.';
+// The switch is off: nothing is kept, so a new tag needs a connection.
+const TAGS_OFF = 'Offline tags are turned off. Connect to the internet, or scan a pre-printed tag.';
+const KEEP_HINT = 'Keeps 3 tag IDs for you, so you can make a tag with no connection. Write the ID on a spare tag only if you run out of printed ones.';
+
 export function AddPlant({ nav, params = {} }) {
-  const { db, me, addPlant, generateTags } = useStore();
+  const { db, me, addPlant, generateTags, notify, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag } = useStore();
   const { c } = useTheme();
   const [qr, setQr] = useState(params.qr || '');
-  const unusedTags = (db.tags || []).filter((t) => t.status === 'unused');
+  // A tag a record on this phone already uses is taken, though the server does not know yet.
+  // The same set Scan uses (outboxTagsFrom), so a tag is taken the same way everywhere.
+  const onPhone = new Set(outboxTagsFrom(outboxItems).map((t) => t.qr_id));
+  // Tags kept for this botanist are listed in their own section, and those kept for
+  // someone else are not offered at all (CTIP-116).
+  const kept = new Set(keptTags);
+  const unusedTags = (db.tags || []).filter(
+    (t) => t.status === 'unused' && !onPhone.has(t.qr_id) && !kept.has(t.qr_id) && !isReservedForOther(t, me?.id),
+  );
+  const online = apiStatus === 'connected';
+  // With no signal a new tag comes from the kept ones (nothing to make on the server).
+  const noKeptLeft = !online && !takeReservedTag?.();
+  const isBotanist = me?.role === 'botanist';
+  const [changingKeep, setChangingKeep] = useState(false); // the switch is being changed
+  const changeKeep = async (on) => {
+    if (changingKeep) return;
+    setChangingKeep(true);
+    const res = await setKeepOffline(on);
+    setChangingKeep(false);
+    if (!res?.ok) Alert.alert('Could not change this', res?.message || 'Try again in a moment.');
+  };
   const [photos, setPhotos] = useState([]);
   const [sp, setSp] = useState('');
   const [picked, setPicked] = useState(null); // species chosen from search (CTIP-63)
@@ -303,6 +354,8 @@ export function AddPlant({ nav, params = {} }) {
   const { gps, setGps, gpsLoading, gpsError, typed, typeSpot, fetchGps, refresh, toggleHand } = useSpot();
   const [restoredDraft, setRestoredDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Set at once, unlike state: a fast double tap must not save two records (as web AddPlant.jsx does).
+  const submittingRef = useRef(false);
   const [generating, setGenerating] = useState(false);
   const [showQr, setShowQr] = useState(false); // the tag's QR, shown over the form (CTIP-27)
   const [tried, setTried] = useState(false);
@@ -313,20 +366,29 @@ export function AddPlant({ nav, params = {} }) {
     }
   }, [params.qr]);
 
+  const showNewTag = (id) => {
+    setQr(id);
+    // Next step: print the code and fix it to the plant (CTIP-27).
+    Alert.alert('New tag ready', `${id} is now this plant's tag. Show its QR code to print or share it.`, [
+      { text: 'Later', style: 'cancel' },
+      { text: 'Show QR', onPress: () => setShowQr(true) },
+    ]);
+  };
+
   const generateNewTag = async () => {
+    if (!online) {
+      // The tag now on this screen (when changing a tag) stays kept, so skip it.
+      const id = takeReservedTag?.(qr ? [qr] : []);
+      if (id) showNewTag(id);
+      else Alert.alert(keepOffline ? 'No offline tags left' : 'Offline tags are off', keepOffline ? NO_KEPT_TAGS : TAGS_OFF);
+      return;
+    }
     setGenerating(true);
     try {
       const ids = await generateTags(1, 'field');
-      if (ids && ids.length > 0) {
-        setQr(ids[0]);
-        // Next step: print the code and fix it to the plant (CTIP-27).
-        Alert.alert('New tag ready', `${ids[0]} is now this plant's tag. Show its QR code to print or share it.`, [
-          { text: 'Later', style: 'cancel' },
-          { text: 'Show QR', onPress: () => setShowQr(true) },
-        ]);
-      }
+      if (ids && ids.length > 0) showNewTag(ids[0]);
     } catch (err) {
-      Alert.alert('Tag Generation Failed', err?.message || 'Could not generate QR tag.');
+      Alert.alert("Couldn't make a tag", err?.message || 'Try again in a moment.');
     } finally {
       setGenerating(false);
     }
@@ -363,25 +425,37 @@ export function AddPlant({ nav, params = {} }) {
         );
         if (existingPlant) {
           Alert.alert(
-            'Tag Already In Use',
+            'Tag already in use',
             `Tag ${tagCandidate} is already on plant "${existingPlant.species?.common_name || existingPlant.proposed_species || 'Recorded plant'}". Would you like to record a revisit instead?`,
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Record Revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
+              { text: 'Record a revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
+            ]
+          );
+          return;
+        }
+        // A plant saved on this phone and not sent yet already has this tag.
+        if (onPhone.has(tagCandidate)) {
+          Alert.alert(
+            'Tag already in use',
+            `Tag ${tagCandidate} is already on a plant saved on this phone and not sent yet. Would you like to record a revisit instead?`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Record a revisit', onPress: () => nav.replace('revisit', { qr: tagCandidate }) },
             ]
           );
           return;
         }
         setQr(tagCandidate);
-        Alert.alert('QR Tag Bound', `Loaded tag: ${tagCandidate}`);
+        notify(`Tag ${tagCandidate} selected`);
       } else {
         Alert.alert(
-          'No QR Code Detected',
+          'No QR code found',
           'Could not detect a plant QR tag in the selected image. You can scan with camera, generate a new QR tag, or pick an unused tag.'
         );
       }
     } catch (err) {
-      Alert.alert('Gallery Error', err?.message || 'Could not load photo from gallery.');
+      Alert.alert("Couldn't open the photo", err?.message || 'Try another photo.');
     }
   };
 
@@ -389,7 +463,7 @@ export function AddPlant({ nav, params = {} }) {
     fetchGps();
     // Restore crash-safe draft if present (CTIP-57)
     if (qr) {
-      getDraft(qr).then((d) => {
+      getDraft(qr, me?.id).then((d) => {
         if (d) {
           if (d.proposed_species) setSp(d.proposed_species);
           if (d.picked_species) setPicked(d.picked_species);
@@ -412,13 +486,35 @@ export function AddPlant({ nav, params = {} }) {
     }
   }, [qr, me?.id, sp, picked, looks, height, notes, photos, gps]);
 
+  // Leaving the form: ask first when something was entered.
+  const leave = () => {
+    if (!photos.length && !looks && !sp) return nav.back();
+    Alert.alert('Discard this record?', 'What you entered will be lost.', [
+      { text: 'Keep editing', style: 'cancel' },
+      {
+        text: 'Discard',
+        style: 'destructive',
+        onPress: async () => {
+          await clearDraft(qr);
+          nav.back();
+        },
+      },
+    ]);
+  };
+  // Android's back button asks the same question as the X, once a tag is chosen
+  // and the form is showing (the QR view has its own back handler).
+  useBackHandler(() => {
+    leave();
+    return true;
+  }, !!qr && !showQr);
+
   if (showQr && qr) {
     return <TagQrView qr={qr} onBack={() => setShowQr(false)} />;
   }
 
   if (!qr) {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />} gap={20}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />} gap={20}>
         <View style={{ gap: 6 }}>
           <Txt v="title1">{params.make ? 'New tag' : 'Add plant'}</Txt>
           <Txt v="body" color={c.ink2}>
@@ -427,19 +523,21 @@ export function AddPlant({ nav, params = {} }) {
               : 'Every plant record starts from a QR tag. Choose how you want to tag this plant:'}
           </Txt>
         </View>
+        {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
 
         {/* Coming from "No tag? Make a new one" on Scan, making a tag is the main action (CTIP-27). */}
         <View style={{ gap: 12 }}>
           {params.make ? null : <Button label="Scan tag with camera" icon="camera" onPress={() => nav.replace('scan')} />}
           <Button
-            label={generating ? "Generating QR tag..." : "Generate new QR tag"}
+            label={generating ? 'Making a tag…' : 'Generate new QR tag'}
             icon="qr"
             kind={params.make ? 'primary' : 'secondary'}
-            disabled={generating}
+            disabled={generating || noKeptLeft}
             onPress={generateNewTag}
           />
+          {noKeptLeft ? <Txt v="caption" color={c.ink2}>{keepOffline ? NO_KEPT_TAGS : TAGS_OFF}</Txt> : null}
           {params.make ? <Button label="Scan tag with camera" icon="camera" kind="secondary" onPress={() => nav.replace('scan')} /> : null}
-          <Button label="Choose QR from gallery" icon="plus" kind="secondary" onPress={pickQrFromGallery} />
+          <Button label="Choose QR from gallery" icon="image" kind="secondary" onPress={pickQrFromGallery} />
         </View>
 
         {unusedTags.length > 0 && (
@@ -451,19 +549,30 @@ export function AddPlant({ nav, params = {} }) {
                   accessibilityRole="button"
                   accessibilityLabel={`Pick unused tag ${t.qr_id}`}
                   onPress={() => setQr(t.qr_id)}
-                  style={{
-                    paddingVertical: 10,
+                  style={({ pressed }) => ({
+                    minHeight: 48,
+                    justifyContent: 'center',
                     paddingHorizontal: 16,
                     borderRadius: 10,
                     backgroundColor: c.bg,
                     borderWidth: 1,
                     borderColor: c.line,
-                  }}
+                    opacity: pressed ? 0.7 : 1,
+                  })}
                 >
                   <Mono size={15} color={c.ink}>{t.qr_id}</Mono>
                 </Pressable>
               ))}
             </View>
+          </Section>
+        )}
+
+        {/* Tags made ahead of time for this botanist, as a fallback for when they run out of
+            printed tags and have no signal (CTIP-116). One switch, no per-tag buttons. */}
+        {isBotanist && (
+          <Section title="Kept for offline use" gap={10}>
+            <Check label="Keep tags for offline use" hint={KEEP_HINT} value={keepOffline} onChange={changeKeep} disabled={!online || changingKeep} />
+            {keepOffline && keptTags.length > 0 ? keptTags.map((id) => <Mono key={id} size={15} color={c.ink}>{id}</Mono>) : null}
           </Section>
         )}
       </Screen>
@@ -486,14 +595,18 @@ export function AddPlant({ nav, params = {} }) {
     });
   };
 
+  // The API's limits are checked here too (LIMITS), so a record it would
+  // refuse for its content never reaches the outbox (CTIP-68).
   const problems = {
     photos: photos.length === 0,
     looks: !looks.trim(),
     species: !sp.trim(),
+    height: !heightOk(height),
   };
-  const ok = !problems.photos && !problems.looks && !problems.species;
+  const ok = !problems.photos && !problems.looks && !problems.species && !problems.height;
 
   const submit = async () => {
+    if (submittingRef.current) return;
     setTried(true);
     if (!ok) {
       if (problems.species) {
@@ -502,9 +615,12 @@ export function AddPlant({ nav, params = {} }) {
         Alert.alert('Photo required', 'Please add at least one photo of the plant.');
       } else if (problems.looks) {
         Alert.alert('Appearance required', 'Please describe what the plant looks like.');
+      } else if (problems.height) {
+        Alert.alert('Height not valid', HEIGHT_PROBLEM);
       }
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     try {
       const res = await addPlant({
@@ -518,38 +634,30 @@ export function AddPlant({ nav, params = {} }) {
         lng: gps.lng,
         gps_accuracy_m: hasFix(gps) ? gps.acc : null,
       });
-      // addPlant reports failure instead of throwing. Keep the draft so nothing is lost.
+      // addPlant reports failure instead of throwing. Keep the draft so nothing is lost:
+      // it is cleared only once the record is safe (saved on the phone or sent).
       if (!res?.ok) throw new Error(res?.message || 'Failed to submit observation.');
       await clearDraft(qr); // Clean up crash draft after successful submit (CTIP-57)
-      nav.replace('submitted', { qr, name: sp.trim(), photos: photos.length, located: hasFix(gps), acc: gps.acc, cover: photos[0]?.url });
+      deleteCameraFiles(photos); // the photos are in the encrypted outbox (or sent): drop the camera's plain copies
+      nav.replace('submitted', {
+        qr, name: sp.trim(), photos: photos.length, located: hasFix(gps), acc: gps.acc, cover: photoPreview(photos[0]),
+        queued: !!res.queued, // saved on this phone, not sent yet
+        failed: res.state === 'failed', // saved, but the first send was refused
+      });
     } catch (err) {
-      Alert.alert('Submission Error', err?.message || 'Failed to submit observation. Draft has been saved safely.');
+      Alert.alert("Couldn't submit", err?.message || 'Your draft is saved on this phone. Try again in a moment.');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
-  const leave = () => {
-    if (!photos.length && !looks && !sp) return nav.back();
-    Alert.alert('Discard this record?', 'What you entered will be lost.', [
-      { text: 'Keep editing', style: 'cancel' },
-      {
-        text: 'Discard',
-        style: 'destructive',
-        onPress: async () => {
-          await clearDraft(qr);
-          nav.back();
-        },
-      },
-    ]);
-  };
-
   return (
-    <Screen
+    <Screen refresh={false}
       header={<Header left={<IconButton name="x" label="Close" onPress={leave} />} />}
       top={0}
       gap={20}
-      footer={<View style={{ flex: 1 }}><Button label={submitting ? "Submitting..." : "Submit for review"} disabled={submitting} onPress={submit} /></View>}
+      footer={<View style={{ flex: 1 }}><Button label={submitting ? 'Submitting…' : 'Submit for review'} disabled={submitting} onPress={submit} /></View>}
     >
       <View style={{ gap: 6 }}>
         <Txt v="title1">New plant</Txt>
@@ -572,12 +680,13 @@ export function AddPlant({ nav, params = {} }) {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, padding: 8, paddingHorizontal: 12, borderRadius: 10, backgroundColor: c.accentSoft }}>
             <Icon name="check" size={16} color={c.accent} />
             <Txt v="caption" color={c.accent} style={{ fontFamily: font('text', 700), flex: 1 }}>
-              Restored in-progress draft from previous session
+              Draft restored from your last session
             </Txt>
             <IconButton name="x" label="Dismiss" size={14} color={c.accent} onPress={() => setRestoredDraft(false)} />
           </View>
         )}
       </View>
+      {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
 
       <Section title="Photos" right={<Txt v="caption" color={tried && problems.photos ? c.warning : c.ink3}>{tried && problems.photos ? 'Add at least one' : `${photos.length} of ${MAX_PHOTOS}`}</Txt>} gap={12}>
         <PhotoStrip
@@ -597,13 +706,14 @@ export function AddPlant({ nav, params = {} }) {
           onPick={pick}
           picked={picked}
           error={tried && problems.species ? 'Species is required before submitting for review' : undefined}
+          maxLength={LIMITS.speciesName}
         />
-        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} keyboardType="decimal-pad" width={140} />
+        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} keyboardType="decimal-pad" width={140} error={tried && problems.height ? HEIGHT_PROBLEM : undefined} />
         <View style={{ gap: 6 }}>
-          <Area label="Appearance" value={looks} onChangeText={setLooks} placeholder="Leaves, stem, pitchers, flowers, roots" />
+          <Area label="Appearance" value={looks} onChangeText={setLooks} placeholder="Leaves, stem, pitchers, flowers, roots" maxLength={LIMITS.text} />
           {tried && problems.looks ? <Txt v="caption" color={c.danger}>Describe what the plant looks like.</Txt> : null}
         </View>
-        <Area label="Field notes" optional value={notes} onChangeText={setNotes} placeholder="Habitat, nearby trail, anything unusual" rows={2} />
+        <Area label="Field notes" optional value={notes} onChangeText={setNotes} placeholder="Habitat, nearby trail, anything unusual" rows={2} maxLength={LIMITS.text} />
       </Section>
 
       <GpsRow gps={gps} loading={gpsLoading} error={gpsError} onRefresh={refresh} />
@@ -613,64 +723,112 @@ export function AddPlant({ nav, params = {} }) {
   );
 }
 
+// After a submit. `queued`: saved on this phone and not sent yet (UI A in the
+// offline design); it is sent for review by itself, now or once the phone is back online.
 export function Submitted({ nav, params = {} }) {
   const { c } = useTheme();
+  const { apiStatus } = useStore();
+  const queued = !!params.queued;
+  // Saved, but the server refused it within the first few seconds: "No
+  // connection" would be wrong, and the record says why (UI D).
+  const failed = queued && !!params.failed;
+  // Saved and online, but not sent within the first few seconds (a slow
+  // connection, or the photos are still uploading): it is still on its way.
+  const stillSending = queued && !failed && apiStatus === 'connected';
+  const tone = failed ? 'warning' : queued ? 'neutral' : 'success';
   return (
-    <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.home} />} />} top={0} gap={24}>
+    <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.home} />} />} top={0} gap={24}>
       <View style={{ alignItems: 'center', gap: 14, paddingTop: 40 }}>
-        <View style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: c.successSoft }}>
-          <Icon name="check" size={40} color={c.success} strokeWidth={2.25} />
+        <View style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: c[tone + 'Soft'] }}>
+          <Icon name="check" size={40} color={c[tone]} strokeWidth={2.25} />
         </View>
-        <Txt v="title1" accessibilityRole="header">Sent for review</Txt>
+        <Txt v="title1" accessibilityRole="header">{queued ? 'Saved on this phone' : 'Sent for review'}</Txt>
+        {queued ? <DotLabel status={failed ? 'sync_failed' : 'queued'} /> : null}
         <Txt v="body" color={c.ink2} style={{ textAlign: 'center', maxWidth: 300 }}>
-          An officer will check {params.qr}. You'll get an alert when it is approved or returned.
+          {failed
+            ? "Saved on this phone, but it couldn't be sent. Open it in My records to see why."
+            : stillSending
+            ? 'Still sending in the background. It goes for review by itself, so you can carry on.'
+            : queued
+            ? "No connection right now. It will be sent for review automatically when you're back online."
+            : `An officer will check ${params.qr}. You'll get an alert when it is approved or returned.`}
         </Txt>
       </View>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14, backgroundColor: c.bg }}>
         <Thumb uri={params.cover} size={56} />
         <View style={{ flex: 1, gap: 2 }}>
           <Txt v="label">{params.name || 'Plant record'}</Txt>
-          <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 400) }}>{params.photos || 1} photo · {!params.located ? 'location not captured' : params.acc != null ? `GPS ±${params.acc} m` : 'location set by hand'}</Txt>
+          <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 400) }}>{params.photos ?? 0} {params.photos === 1 ? 'photo' : 'photos'} · {!params.located ? 'location not captured' : params.acc != null ? `GPS ±${params.acc} m` : 'location set by hand'}</Txt>
         </View>
       </View>
-      <View style={{ gap: 10, marginTop: 'auto' }}>
-        <Button label="View my records" onPress={() => nav.tab('records')} />
-        <Button label="Back to home" kind="secondary" onPress={nav.home} />
-      </View>
+      {queued ? (
+        <View style={{ gap: 10, marginTop: 'auto', alignItems: 'stretch' }}>
+          <Button label="Record another plant" onPress={() => nav.replace('scan')} />
+          <View style={{ alignItems: 'center' }}>
+            <TextLink label="See records on this phone" onPress={() => nav.tab('records')} />
+          </View>
+        </View>
+      ) : (
+        <View style={{ gap: 10, marginTop: 'auto' }}>
+          <Button label="View my records" onPress={() => nav.tab('records')} />
+          <Button label="Back to home" kind="secondary" onPress={nav.home} />
+        </View>
+      )}
     </Screen>
   );
 }
 
 export function Revisit({ nav, params = {} }) {
-  const { db, addRevisit, notify } = useStore();
+  const { db, addRevisit, notify, outboxItems = [], cachedTags = [] } = useStore();
   const { c } = useTheme();
-  const plant = db.plants.find((p) => p.qr_id === params.qr);
+  // The plant the server holds, or one saved on this phone and not sent yet
+  // (CTIP-83), or one known only from the tag list saved for use offline.
+  const target = revisitTarget(db, params.qr, { cached: cachedTags, outboxItems });
+  const plant = target?.plant || null; // the loaded workspace's plant, if there is one
   const [photos, setPhotos] = useState([]);
   const [height, setHeight] = useState('');
   const [changes, setChanges] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false); // a fast double tap must not save two revisits
   const { gps, gpsLoading, gpsError, typed, typeSpot, fetchGps, refresh, toggleHand } = useSpot();
 
   useEffect(() => {
     fetchGps();
   }, []);
 
-  if (!plant) {
+  // Leaving the form, by the X or Android's back button: ask first when something was entered.
+  const leave = () => {
+    if (!photos.length && !changes.trim() && !height) return nav.back();
+    Alert.alert('Discard this revisit?', 'What you entered will be lost.', [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: () => nav.back() },
+    ]);
+  };
+  useBackHandler(() => {
+    leave();
+    return true;
+  });
+
+  if (!target) {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
         <Empty icon="qr">This tag is not on a plant yet.</Empty>
       </Screen>
     );
   }
-  const pendingObs = db.observations.some((o) => o.specimen_id === plant.id && o.status === 'synced');
+  const pendingObs = !!plant && db.observations.some((o) => o.specimen_id === plant.id && o.status === 'synced');
   if (pendingObs) {
     return (
-      <Screen header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
         <Empty icon="lock">This plant has an observation waiting for officer review. Edits and revisits are locked until a decision is returned.</Empty>
       </Screen>
     );
   }
-  const last = db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => b.observed_at.localeCompare(a.observed_at))[0];
+  const last = plant
+    ? db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => b.observed_at.localeCompare(a.observed_at))[0]
+    : null;
   const ok = photos.length > 0 || changes.trim() || height;
+  const problems = { height: !heightOk(height) }; // the API's limit (LIMITS), as on the new plant form
 
   const addPhotoItems = (items) => {
     if (!items || !items.length) return;
@@ -681,34 +839,59 @@ export function Revisit({ nav, params = {} }) {
   };
 
   const submit = async () => {
-    const obsId = await addRevisit({
-      specimen_id: plant.id,
-      height_cm: height || last?.height_cm,
-      morphology: changes.trim() || last?.morphology,
-      notes: '',
-      photos,
-      lat: hasFix(gps) ? gps.lat : (plant.lat ?? null),
-      lng: hasFix(gps) ? gps.lng : (plant.lng ?? null),
-      gps_accuracy_m: hasFix(gps) ? gps.acc : null,
-    });
-    if (!obsId) return; // addRevisit already showed why; keep what was entered
-    notify(`Revisit of ${plant.qr_id} sent for review`);
-    nav.tab('records');
+    if (submittingRef.current) return;
+    if (problems.height) {
+      Alert.alert('Height not valid', HEIGHT_PROBLEM);
+      return;
+    }
+    submittingRef.current = true;
+    setSubmitting(true);
+    try {
+      const res = await addRevisit({
+        qr_id: target.qr_id,
+        specimen_id: target.specimen_id, // null for a plant saved only on this phone
+        specimen_ref: target.specimen_ref, // that plant's record on this phone
+        height_cm: height || last?.height_cm,
+        morphology: changes.trim() || last?.morphology,
+        notes: '',
+        photos,
+        // No fix and no spot set by hand: no location, never the plant's stored one.
+        ...revisitLocation(gps, { hasFix: hasFix(gps) }),
+      });
+      if (!res?.ok) {
+        if (res?.message) notify(res.message); // keep what was entered
+        return;
+      }
+      deleteCameraFiles(photos); // the photos are in the encrypted outbox (or sent): drop the camera's plain copies
+      if (res.queued) {
+        nav.replace('submitted', {
+          queued: true, failed: res.state === 'failed', qr: target.qr_id, name: target.name, photos: photos.length,
+          located: hasFix(gps), acc: gps.acc, cover: photoPreview(photos[0]),
+        });
+        return;
+      }
+      notify(`Revisit of ${target.qr_id} sent for review`);
+      nav.tab('records');
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
+    }
   };
 
   return (
-    <Screen
-      header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}
+    <Screen refresh={false}
+      header={<Header left={<IconButton name="x" label="Close" onPress={leave} />} />}
       top={0}
       gap={20}
-      footer={<View style={{ flex: 1 }}><Button label="Submit revisit" disabled={!ok} onPress={submit} /></View>}
+      footer={<View style={{ flex: 1 }}><Button label={submitting ? 'Saving…' : 'Submit revisit'} disabled={!ok || submitting} onPress={submit} /></View>}
     >
       <View style={{ gap: 6 }}>
         <Txt v="title1">Revisit</Txt>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <Mono size={15} color={c.ink2}>{plant.qr_id}</Mono>
-          <Txt v="body" color={c.ink2} style={{ fontSize: 15 }}>· {plant.name}</Txt>
+          <Mono size={15} color={c.ink2}>{target.qr_id}</Mono>
+          <Txt v="body" color={c.ink2} style={{ fontSize: 15 }}>· {target.name}</Txt>
         </View>
+        {target.on_phone ? <DotLabel status="queued" /> : null}
       </View>
       {last ? (
         <View style={{ gap: 4, padding: 14, paddingHorizontal: 16, borderRadius: 14, backgroundColor: c.bg }}>
@@ -726,12 +909,13 @@ export function Revisit({ nav, params = {} }) {
         />
       </Section>
       <Section title="What has changed" gap={16}>
-        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} placeholder={last?.height_cm ? String(last.height_cm) : ''} keyboardType="decimal-pad" width={140} hint="Leave empty if it has not changed" />
-        <Area label="Changes" value={changes} onChangeText={setChanges} placeholder="New pitchers, flowering, damage…" />
+        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} placeholder={last?.height_cm ? String(last.height_cm) : ''} keyboardType="decimal-pad" width={140} hint="Leave empty if it has not changed" error={problems.height ? HEIGHT_PROBLEM : undefined} />
+        <Area label="Changes" value={changes} onChangeText={setChanges} placeholder="New pitchers, flowering, damage…" maxLength={LIMITS.text} />
       </Section>
       <GpsRow gps={gps} loading={gpsLoading} error={gpsError} title={typed ? 'Set by hand' : 'Same place as before'} onRefresh={refresh} />
       <TextLink label={typed ? 'Close map' : 'Set it by hand'} onPress={toggleHand} />
-      {typed ? <SetByHand typed={typed} gps={gps} qr={plant.qr_id} protect={!!plantView(db, plant)?.endangered} onChange={typeSpot} /> : null}
+      {/* Without the loaded plant we cannot tell if its species is protected, so treat it as protected. */}
+      {typed ? <SetByHand typed={typed} gps={gps} qr={target.qr_id} protect={plant ? !!plantView(db, plant)?.endangered : true} onChange={typeSpot} /> : null}
     </Screen>
   );
 }

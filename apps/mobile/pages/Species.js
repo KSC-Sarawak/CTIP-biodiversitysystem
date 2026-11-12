@@ -9,8 +9,8 @@ import { useStore } from '../../shared/store.js';
 import { visiblePlants } from '../../shared/selectors.js';
 import { fuzzyMatch } from '../../shared/fuzzy.js';
 import { isThreatened } from '../../shared/data.js';
-import { useTheme } from '../components/Theme.js';
-import { Screen, Header, IconButton, TitleBlock, SearchField, SortBar, Row, Thumb, Sci, DotLabel, Notice, Empty } from '../components/Bits.js';
+import { Screen, Header, IconButton, TitleBlock, SearchField, SortBar, Row, Thumb, Sci, DotLabel, Notice, EmptyState, Button } from '../components/Bits.js';
+import { useShowMore } from '../hooks/useShowMore.js';
 
 const SORT_SPECIES_ADMIN = [
   { key: 'name', label: 'Name (A–Z)' },
@@ -22,7 +22,6 @@ const SORT_SPECIES_ADMIN = [
 
 export default function SpeciesAdmin({ nav }) {
   const { db, role } = useStore();
-  useTheme();
   const [q, setQ] = useState('');
   const [sort, setSort] = useState('name');
   const plants = visiblePlants(db, role);
@@ -47,6 +46,7 @@ export default function SpeciesAdmin({ nav }) {
     return (a.common_name || a.scientific_name).localeCompare(b.common_name || b.scientific_name);
   });
   const unpublished = all.filter((s) => !s.is_published).length;
+  const { shown, left, showMore } = useShowMore(sorted, `${needle}|${sort}`);
 
   return (
     <Screen header={<Header left={<IconButton name="chevL" label="Back" onPress={nav.back} />} />} top={0} gap={16}>
@@ -54,8 +54,8 @@ export default function SpeciesAdmin({ nav }) {
       <SearchField value={q} onChangeText={setQ} placeholder="Search species" />
       <SortBar items={SORT_SPECIES_ADMIN} value={sort} onChange={setSort} />
       <View>
-        {sorted.length === 0 ? <Empty icon="search">No species match.</Empty> : null}
-        {sorted.map((s, i) => (
+        <EmptyState count={sorted.length} icon="search" filtered={!!needle}>{needle ? 'No species match.' : 'No species yet.'}</EmptyState>
+        {shown.map((s, i) => (
           <Row
             key={s.id}
             left={<Thumb uri={s.photo || plants.find((p) => p.species_id === s.id && p.photos.length)?.photos[0]?.url} />}
@@ -63,9 +63,10 @@ export default function SpeciesAdmin({ nav }) {
             sub={<><Sci size={14}>{s.scientific_name}</Sci>{!s.is_published ? <DotLabel tone="neutral" label="Not published" /> : null}</>}
             right={<DotLabel status={s.conservation_status} />}
             onPress={() => nav.go('species', { id: s.id })}
-            last={i === sorted.length - 1}
+            last={i === shown.length - 1}
           />
         ))}
+        {left > 0 ? <Button label={`Show more (${left} left)`} kind="text" height={48} size={15} onPress={showMore} /> : null}
       </View>
       <Notice tone="info" title="Adding or editing a species?" body="Use the Species page on the website. You can also create a species while reviewing a record." />
     </Screen>

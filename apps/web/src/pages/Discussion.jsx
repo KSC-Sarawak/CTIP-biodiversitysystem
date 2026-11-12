@@ -6,7 +6,7 @@ import { Chip, Empty, Mono, Pills } from "../components/Bits.jsx";
 import { useStore } from "../../../shared/store.js";
 import { plantView } from "../../../shared/selectors.js";
 import { ROLE_LABEL } from "../../../shared/permissions.js";
-import { fmtDate, fmtDateTime } from "../../../shared/utils.js";
+import { fmtDate, fmtDateTime, initials } from "../../../shared/utils.js";
 import { go, useRoute } from "../useRoute.js";
 import { useConfirm } from "../useConfirm.jsx";
 
@@ -114,14 +114,20 @@ export default function Discussion({ arg }) {
 
   return (
     <Shell seg="discussion">
-      <div className="row between wrap">
-        <h2>Discussion</h2>
-        {!composing && <button className="btn" onClick={() => setComposing(true)}><Icon name="plus" size={18} /> New discussion</button>}
-      </div>
-      <p className="mute">
-        Start a thread and choose who it goes to: single people, whole groups such as all officers, or both.
-        Private threads are only seen by the people you send them to. Public threads can be read by every staff member.
-      </p>
+      <section className="dischero">
+        <ChatArt />
+        <div className="dischero-text">
+          <p className="overline">Team discussion</p>
+          <h1>Discussion, <span className="hl">in one place.</span></h1>
+          <p className="mute">Ask a question about a plant or a record, and choose who it goes to. Private threads are only seen by the people you send them to.</p>
+          {!composing && <p><button className="btn" onClick={() => setComposing(true)}><Icon name="plus" size={18} /> New discussion</button></p>}
+        </div>
+        <p className="disc-stats" aria-label="Your discussions">
+          <span><b>{unreadIds.size}</b> new</span>
+          <span><b>{count("inbox")}</b> sent to you</span>
+          <span><b>{count("all")}</b> in total</span>
+        </p>
+      </section>
 
       {composing && (
         <Composer
@@ -158,18 +164,22 @@ export default function Discussion({ arg }) {
           return (
             <li key={t.id}>
               <button className={"record topic" + (isNew ? " unread" : "")} onClick={() => go("/discussion/" + t.id)}>
+                <Avatar person={people.byId.get(last?.author_id || t.owner_id)} />
+                <span className="topic-body">
                 <span className="row wrap topichead">
                   <b>{t.title}</b>
                   <VisibilityChip value={t.visibility} />
                   {isNew && <span className="chip chip-synced">New</span>}
                 </span>
                 <span className="block mute small">To: {audienceText(t.audience, people) || "Everyone (public)"}</span>
-                {last && <span className="block clamp2">{people.name(last.author_id)}: {last.body}</span>}
+                {last && <span className="block clamp2">{people.name(last.author_id)}: {last.deleted_at ? "Message deleted" : last.body}</span>}
                 <span className="meta">
                   <span>Started by {t.owner_id === me?.id ? "you" : people.name(t.owner_id)}</span>
                   <span>{t.posts.length} {t.posts.length === 1 ? "message" : "messages"}</span>
                   {last && <span>Last {fmtDateTime(last.created_at)}</span>}
                 </span>
+                </span>
+                <Icon name="chevR" size={18} />
               </button>
             </li>
           );
@@ -177,21 +187,64 @@ export default function Discussion({ arg }) {
         {shownRecords.map((t) => (
           <li key={t.obs.id}>
             <button className="record topic" onClick={() => go("/discussion/" + t.obs.id)}>
-              <b>{t.plant.name}</b> <Mono className="mute">{t.plant.qr_id}</Mono>
-              <span className="block clamp2">{t.posts[0].body}</span>
-              <span className="meta">
-                <span>{t.posts.length} {t.posts.length === 1 ? "comment" : "comments"}</span>
-                <span>Last {fmtDateTime(t.posts.at(-1).created_at)}</span>
+              <span className="avatar disc-av leafav" aria-hidden="true"><Icon name="leaf" size={18} /></span>
+              <span className="topic-body">
+                <span className="row wrap topichead"><b>{t.plant.name}</b> <Mono className="mute">{t.plant.qr_id}</Mono></span>
+                <span className="block clamp2">{t.posts[0].body}</span>
+                <span className="meta">
+                  <span>{t.posts.length} {t.posts.length === 1 ? "comment" : "comments"}</span>
+                  <span>Last {fmtDateTime(t.posts.at(-1).created_at)}</span>
+                </span>
               </span>
+              <Icon name="chevR" size={18} />
             </button>
           </li>
         ))}
       </ul>
       {box !== "records" && !shown.length && (
-        <Empty icon="chat">{needle ? "No discussions match your search." : "No discussions here yet. Start one with New discussion."}</Empty>
+        <div className="disc-empty">
+          <ChatArt small />
+          <p className="mute">{needle ? "No discussions match your search." : "No discussions here yet. Start one with New discussion."}</p>
+        </div>
       )}
       {box === "records" && !shownRecords.length && <Empty icon="chat">No record comments{needle ? " match your search" : " yet"}.</Empty>}
     </Shell>
+  );
+}
+
+// A round badge with someone's initials, coloured by their role.
+function Avatar({ person }) {
+  return (
+    <span className={"avatar disc-av role-" + (person?.role || "none")} aria-hidden="true" title={person?.full_name}>
+      {person ? initials(person.full_name || "") : "?"}
+    </span>
+  );
+}
+
+// Two speech bubbles with leaves: the picture at the top of the discussion page.
+function ChatArt({ small = false }) {
+  return (
+    <svg className={"chatart" + (small ? " small" : "")} viewBox="0 0 240 180" aria-hidden="true" focusable="false">
+      <circle className="ca-glow" cx="120" cy="92" r="80" />
+      <g className="ca-b1">
+        <path className="ca-bubble" d="M34 40h112a18 18 0 0 1 18 18v40a18 18 0 0 1-18 18H84l-24 20v-20H34a18 18 0 0 1-18-18V58a18 18 0 0 1 18-18z" />
+        <rect className="ca-line" x="38" y="62" width="88" height="8" rx="4" />
+        <rect className="ca-line" x="38" y="80" width="62" height="8" rx="4" />
+      </g>
+      <g className="ca-b2">
+        <path className="ca-bubble2" d="M206 86H118a16 16 0 0 0-16 16v32a16 16 0 0 0 16 16h56l20 16v-16h12a16 16 0 0 0 16-16v-32a16 16 0 0 0-16-16z" />
+        <circle className="ca-dot" cx="138" cy="118" r="5" />
+        <circle className="ca-dot" cx="160" cy="118" r="5" />
+        <circle className="ca-dot" cx="182" cy="118" r="5" />
+      </g>
+      <g className="ca-leaf">
+        <path d="M196 20c18 10 22 32 6 46-16-10-20-32-6-46z" />
+        <path className="ca-vein" d="M199 26v38" />
+      </g>
+      <g className="ca-leaf ca-leaf2">
+        <path d="M22 140c14 2 22 16 14 30-14-2-22-16-14-30z" />
+      </g>
+    </svg>
   );
 }
 
@@ -340,12 +393,18 @@ function AudiencePicker({ people, users, roles, onUsers, onRoles, visibility }) 
   }, [open]);
 
   const needle = find.trim().toLowerCase();
+  const membersOf = (r) => people.all.filter((p) => p.role === r && p.id !== me?.id);
+  // People in a chosen group already get it, so they are not offered again under People.
   const matches = people.all
-    .filter((p) => p.id !== me?.id && !users.includes(p.id))
+    .filter((p) => p.id !== me?.id && !users.includes(p.id) && !roles.includes(p.role))
     .filter((p) => !needle || `${p.full_name} ${p.username || ""} ${ROLE_LABEL[p.role] || ""}`.toLowerCase().includes(needle))
     .slice(0, 8);
-  const sizeOf = (r) => people.all.filter((p) => p.role === r && p.id !== me?.id).length;
-  const toggleRole = (r) => onRoles(roles.includes(r) ? roles.filter((x) => x !== r) : [...roles, r]);
+  const toggleRole = (r) => {
+    if (roles.includes(r)) return onRoles(roles.filter((x) => x !== r));
+    onRoles([...roles, r]);
+    // Anyone picked one by one who is in this group is now covered by it.
+    onUsers(users.filter((id) => people.byId.get(id)?.role !== r));
+  };
   // Back to the search box after a pick, so the next person can be typed straight away.
   const add = (id) => { onUsers([...users, id]); setFind(""); inputRef.current?.focus(); };
 
@@ -357,10 +416,22 @@ function AudiencePicker({ people, users, roles, onUsers, onRoles, visibility }) 
       <div className="pills" role="group" aria-label="Send to groups">
         {GROUPS.map((g) => (
           <button key={g.role} type="button" className={"pill" + (roles.includes(g.role) ? " on" : "")} aria-pressed={roles.includes(g.role)} onClick={() => toggleRole(g.role)}>
-            {roles.includes(g.role) && <Icon name="check" size={14} />} {g.label}<b>{sizeOf(g.role)}</b>
+            {roles.includes(g.role) && <Icon name="check" size={14} />} {g.label}<b>{membersOf(g.role).length}</b>
           </button>
         ))}
       </div>
+      {/* Who each chosen group reaches, side by side. */}
+      {GROUPS.filter((g) => roles.includes(g.role)).map((g) => {
+        const members = membersOf(g.role);
+        return (
+          <div key={g.role} className="groupmembers">
+            <p className="mute small">{g.label} ({members.length}):</p>
+            {members.length
+              ? <ul className="plain tokens" aria-label={`People in ${g.label}`}>{members.map((p) => <li key={p.id} className="token member">{p.full_name}</li>)}</ul>
+              : <p className="mute small">Nobody else is in this group yet.</p>}
+          </div>
+        );
+      })}
 
       <p className="overline gap-top">People</p>
       {users.length > 0 && (
@@ -405,6 +476,14 @@ function AudiencePicker({ people, users, roles, onUsers, onRoles, visibility }) 
   );
 }
 
+// Ctrl + Enter (Cmd + Enter on a Mac) sends the form the text box is in.
+function sendOnCtrlEnter(e) {
+  if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey)) return false;
+  e.preventDefault();
+  e.currentTarget.form?.requestSubmit();
+  return true;
+}
+
 // A textarea that suggests people after "@". Picking one writes "@Full Name"
 // and remembers their id, so the API can notify them.
 function MentionBox({ label, value, onChange, mentions, onMentions, candidates, placeholder, rows = 4 }) {
@@ -436,6 +515,7 @@ function MentionBox({ label, value, onChange, mentions, onMentions, candidates, 
   };
 
   const onKeyDown = (e) => {
+    if (sendOnCtrlEnter(e)) return;
     if (!options.length) return;
     if (e.key === "ArrowDown") { e.preventDefault(); setPick((pick + 1) % options.length); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setPick((pick - 1 + options.length) % options.length); }
@@ -471,6 +551,7 @@ function MentionBox({ label, value, onChange, mentions, onMentions, candidates, 
         </ul>
       )}
       {query !== null && !options.length && <p className="mute small">Nobody to tag by that name{candidates.length ? "" : ": only people who can read this thread can be tagged"}.</p>}
+      <p className="mute small">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send.</p>
     </div>
   );
 }
@@ -573,19 +654,7 @@ function Thread({ thread, people }) {
       )}
 
       <ul className="posts">
-        {thread.posts.map((p) => {
-          const author = people.byId.get(p.author_id);
-          return (
-            <li key={p.id} className={"post" + (p.author_id === me?.id ? " mine" : "")}>
-              <header>
-                <b>{author?.full_name || "Former member"}</b>
-                {author && <Chip value={author.role}>{ROLE_LABEL[author.role]}</Chip>}
-                <small className="mute">{fmtDateTime(p.created_at)}</small>
-              </header>
-              <Body text={p.body} mentions={p.mentions} people={people} />
-            </li>
-          );
-        })}
+        {thread.posts.map((p) => <Post key={p.id} post={p} threadId={thread.id} people={people} readers={readers} ask={ask} />)}
       </ul>
 
       <form onSubmit={send}>
@@ -603,6 +672,107 @@ function Thread({ thread, people }) {
       </form>
       {confirmDialog}
     </>
+  );
+}
+
+// One message. The author can edit or delete it, an admin can delete it
+// (moderation), and whoever deleted it can undo that. Every change is kept
+// in the thread's private history (discussion_post_versions): only people in
+// the thread can read it, not admins outside it, and never the audit log.
+function Post({ post, threadId, people, readers, ask }) {
+  const { me, role, editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost } = useStore();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(post.body);
+  const [mentions, setMentions] = useState(post.mentions || []);
+  const [busy, setBusy] = useState(false);
+  const author = people.byId.get(post.author_id);
+  const mine = post.author_id === me?.id;
+  const deleted = !!post.deleted_at;
+  const canDelete = !deleted && (mine || role === "admin");
+
+  const startEdit = () => { setText(post.body); setMentions(post.mentions || []); setEditing(true); };
+
+  const save = async (e) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setBusy(true);
+    const readerIds = new Set(readers.map((p) => p.id));
+    const ok = await editDiscussionPost(threadId, post.id, text.trim(), keptMentions(text, mentions, people).filter((m) => readerIds.has(m)));
+    setBusy(false);
+    if (ok) setEditing(false);
+  };
+
+  const remove = async () => {
+    // Your own message can be undone, so no question. Someone else's (admin): ask first.
+    if (!mine) {
+      const ok = await ask({
+        title: "Delete this message?",
+        body: `The message from ${author?.full_name || "this person"} will show as deleted for everyone. Its text is kept in this thread's private history, so it can be undone.`,
+        confirmLabel: "Delete",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setBusy(true);
+    await deleteDiscussionPost(threadId, post.id);
+    setBusy(false);
+  };
+
+  const undo = async () => {
+    setBusy(true);
+    await restoreDiscussionPost(threadId, post.id);
+    setBusy(false);
+  };
+
+  return (
+    <li className={"post" + (mine ? " mine" : "") + (deleted ? " deleted" : "")}>
+      <Avatar person={author} />
+      <div className="post-bubble">
+      <header>
+        <b>{author?.full_name || "Former member"}</b>
+        {author && <Chip value={author.role}>{ROLE_LABEL[author.role]}</Chip>}
+        <small className="mute">{fmtDateTime(post.created_at)}</small>
+        {post.edited_at && !deleted && <small className="mute" title={"Edited " + fmtDateTime(post.edited_at)}>(edited)</small>}
+        {!editing && (mine || canDelete) && (
+          <span className="postactions">
+            {mine && !deleted && (
+              <button type="button" className="ic" onClick={startEdit} disabled={busy} aria-label="Edit message" title="Edit"><Icon name="pencil" size={16} /></button>
+            )}
+            {canDelete && (
+              <button type="button" className="ic" onClick={remove} disabled={busy} aria-label="Delete message" title="Delete"><Icon name="trash" size={16} /></button>
+            )}
+          </span>
+        )}
+      </header>
+      {deleted ? (
+        <p className="mute">
+          <i>Message deleted{post.deleted_by && post.deleted_by !== post.author_id ? " by an admin" : ""}.</i>{" "}
+          {post.deleted_by === me?.id && (
+            <button type="button" className="textlink" onClick={undo} disabled={busy}><Icon name="undo" size={14} /> Undo</button>
+          )}
+        </p>
+      ) : editing ? (
+        <form onSubmit={save}>
+          <MentionBox
+            label="Edit message"
+            value={text}
+            onChange={setText}
+            mentions={mentions}
+            onMentions={setMentions}
+            candidates={readers.filter((p) => p.id !== me?.id)}
+            rows={3}
+          />
+          <p className="row wrap">
+            <button className="btn" type="submit" disabled={busy || !text.trim()}><Icon name="check" size={16} /> {busy ? "Saving…" : "Save"}</button>
+            <button className="btn ghost" type="button" onClick={() => setEditing(false)}>Cancel</button>
+            <span className="mute small">The earlier text is kept in this thread's private history.</span>
+          </p>
+        </form>
+      ) : (
+        <Body text={post.body} mentions={post.mentions} people={people} />
+      )}
+      </div>
+    </li>
   );
 }
 
@@ -680,7 +850,8 @@ function RecordTopic({ topic }) {
       </ul>
 
       <form onSubmit={send}>
-        <label>{posts.length ? "Reply" : "Comment"}<textarea rows="3" value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Write a reply" /></label>
+        <label>{posts.length ? "Reply" : "Comment"}<textarea rows="3" value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={sendOnCtrlEnter} placeholder="Write a reply" /></label>
+        <p className="mute small">Press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send.</p>
         <p><button className="btn" type="submit"><Icon name="send" size={18} /> {posts.length ? "Reply" : "Post"}</button></p>
       </form>
     </>

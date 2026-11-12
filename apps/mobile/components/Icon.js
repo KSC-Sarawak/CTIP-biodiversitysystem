@@ -4,7 +4,7 @@
 import React from 'react';
 import {
   Activity, ArrowRight, ArrowUpDown, Bell, Camera, ChartColumn, Check, ChevronDown, ChevronLeft, ChevronRight,
-  ClipboardCheck, Droplet, Ellipsis, Eye, EyeOff, FileText, Flashlight, House, Info, Keyboard, Leaf,
+  ClipboardCheck, Droplet, Ellipsis, Eye, EyeOff, FileText, Flashlight, House, Image, Info, Keyboard, Leaf,
   Lock, LogOut, Mail, Map, MapPin, MessageSquare, Plus, QrCode, RefreshCw, ScanLine, Search, Send,
   Share2, Shield, Thermometer, Undo2, Users, X, Compass, Layers, Locate, User, BookOpen,
 } from 'lucide-react-native';
@@ -12,7 +12,7 @@ import {
 const ICONS = {
   book: BookOpen, activity: Activity, arrowRight: ArrowRight, bell: Bell, camera: Camera, chart: ChartColumn, check: Check,
   chevD: ChevronDown, chevL: ChevronLeft, chevR: ChevronRight, clipboard: ClipboardCheck, drop: Droplet,
-  more: Ellipsis, eye: Eye, eyeOff: EyeOff, file: FileText, torch: Flashlight, home: House, info: Info,
+  more: Ellipsis, eye: Eye, eyeOff: EyeOff, file: FileText, torch: Flashlight, home: House, image: Image, info: Info,
   keyboard: Keyboard, leaf: Leaf, lock: Lock, logout: LogOut, mail: Mail, map: Map, pin: MapPin,
   chat: MessageSquare, plus: Plus, qr: QrCode, refresh: RefreshCw, scan: ScanLine, search: Search,
   send: Send, share: Share2, shield: Shield, sort: ArrowUpDown, thermo: Thermometer, undo: Undo2, users: Users, user: User, x: X,

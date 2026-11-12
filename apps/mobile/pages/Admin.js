@@ -11,14 +11,50 @@ import { useTheme, font } from '../components/Theme.js';
 import { AppearanceSection, VersionLine } from '../components/Chrome.js';
 import {
   Screen, Header, IconButton, TitleBlock, Section, MenuRow, Button, Avatar, Txt, Mono, SearchField, Pills, SortBar, Row, DotLabel,
-  Field, Segmented, Empty,
+  Field, Segmented, EmptyState,
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
 import { clearAllDrafts, listDrafts } from '../draftStore.js';
+import { unsentTitle } from '../../shared/offline/syncStatus.js';
+import { useShowMore } from '../hooks/useShowMore.js';
 
 export function StaffMore({ nav }) {
-  const { me, role, logout } = useStore();
-  const handleSignOut = async () => {
+  const { me, role, logout, outboxItems = [], syncNow, apiStatus } = useStore();
+
+  // UI G (CTIP-68): records saved on this phone and not sent yet. Signing out
+  // keeps them (encrypted; Product Owner decision), and they send the next time
+  // this person signs in here. Online, "Send now" tries first, then asks again
+  // with what is left; when nothing is left it carries on signing out.
+  const askAboutUnsent = (count) => {
+    const buttons = [{ text: 'Stay signed in', style: 'cancel' }];
+    if (apiStatus === 'connected') {
+      buttons.push({
+        text: 'Send now',
+        onPress: async () => {
+          const summary = await syncNow({ manual: true });
+          const left = summary ? summary.pending + summary.failed + summary.conflicts : count;
+          if (left > 0) askAboutUnsent(left);
+          else signOutWithDrafts(true);
+        },
+      });
+    }
+    buttons.push({ text: 'Sign out', style: 'destructive', onPress: () => signOutWithDrafts(true) });
+    Alert.alert(
+      unsentTitle(count),
+      'They stay on this phone, encrypted, and send the next time you sign in here. Sign out anyway?',
+      buttons,
+    );
+  };
+
+  const handleSignOut = () => {
+    if (outboxItems.length > 0) askAboutUnsent(outboxItems.length);
+    else signOutWithDrafts(false);
+  };
+
+  // Unfinished form drafts (CTIP-57) are not records: they are deleted on sign-out.
+  // `asked`: the person already said yes to signing out (the unsent-records
+  // question), so they are not asked a second time.
+  const signOutWithDrafts = async (asked) => {
     let drafts = [];
     try {
       drafts = await listDrafts();
@@ -41,8 +77,14 @@ export function StaffMore({ nav }) {
           { text: 'Delete and sign out', style: 'destructive', onPress: doSignOut },
         ]
       );
-    } else {
+    } else if (asked) {
       await doSignOut();
+    } else {
+      // Nothing would be lost, but a slip of the thumb should not sign anyone out.
+      Alert.alert('Sign out?', "You'll need your password and 6-digit code to sign in again.", [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign out', onPress: doSignOut },
+      ]);
     }
   };
   const { c } = useTheme();
@@ -118,7 +160,8 @@ export function Users({ nav }) {
   const [sort, setSort] = useState('active');
   const [inviting, setInviting] = useState(false);
   const [form, setForm] = useState({ full_name: '', email: '', role: 'botanist', password: '' });
-  const [error, setError] = useState('');
+  const [error, setError] = useState(null); // { field: 'name' | 'email' | 'password', text }
+  const [sending, setSending] = useState(false);
   const needle = q.trim().toLowerCase();
   const rows = db.profiles
     .filter((p) => (filter === 'all' ? true : filter === 'off' ? !p.is_active : p.role === filter && p.is_active))
@@ -133,6 +176,15 @@ export function Users({ nav }) {
   });
   const off = db.profiles.filter((p) => !p.is_active).length;
 
+  // A role decides what someone can see and do, so a change is asked about first.
+  const changeRole = (p, role) => {
+    if (role === (p.role || 'botanist')) return;
+    Alert.alert(`Change ${p.full_name || p.email || 'this user'} to ${ROLE_LABEL[role] || role}?`, 'Their access changes straight away.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Change role', onPress: () => updateUser(p.id, { role }) },
+    ]);
+  };
+
   const setActive = (p) => {
     if (!p.is_active) return updateUser(p.id, { is_active: true });
     Alert.alert(`Deactivate ${p.full_name || p.email || 'this user'}?`, 'They will not be able to sign in. Their records stay.', [
@@ -141,31 +193,40 @@ export function Users({ nav }) {
     ]);
   };
 
+  const problem = (field) => (error?.field === field ? error.text : undefined);
   const invite = async () => {
-    if (!form.full_name.trim() || !/^\S+@\S+\.\S+$/.test(form.email.trim())) return setError('Enter a name and a valid email.');
-    if (form.password && form.password.length < 8) return setError('A temporary password needs at least 8 characters.');
-    const res = await addUser({ ...form, full_name: form.full_name.trim(), password: form.password || undefined }); // says what happened itself
-    if (!res?.ok) return setError(res?.message || 'Someone already uses this email.');
+    if (sending) return; // a second tap must not make a second account
+    if (!form.full_name.trim()) return setError({ field: 'name', text: 'Enter their name.' });
+    if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return setError({ field: 'email', text: 'Enter a valid email.' });
+    if (form.password && form.password.length < 8) return setError({ field: 'password', text: 'A temporary password needs at least 8 characters.' });
+    setSending(true);
+    let res;
+    try {
+      res = await addUser({ ...form, full_name: form.full_name.trim(), password: form.password || undefined }); // says what happened itself
+    } finally {
+      setSending(false);
+    }
+    if (!res?.ok) return setError({ field: 'email', text: res?.message || 'Someone already uses this email.' });
     setInviting(false);
     setForm({ full_name: '', email: '', role: 'botanist', password: '' });
-    setError('');
+    setError(null);
   };
 
   return (
-    <Screen gap={14}>
+    <Screen gap={14} refresh={!inviting}>
       <TitleBlock title="Users" sub={`${db.profiles.length} accounts · ${off} deactivated`}
-        right={!inviting ? <Button label="Invite member" icon="plus" height={44} size={15} onPress={() => setInviting(true)} /> : null} />
+        right={!inviting ? <Button label="Invite member" icon="plus" height={48} size={15} onPress={() => setInviting(true)} /> : null} />
       {inviting ? (
         <View style={{ gap: 14, padding: 16, borderRadius: 14, backgroundColor: c.bg }}>
           <Txt v="title3">Invite member</Txt>
-          <Field label="Full name" value={form.full_name} onChangeText={(v) => setForm({ ...form, full_name: v })} />
-          <Field label="Email" value={form.email} onChangeText={(v) => setForm({ ...form, email: v })} keyboardType="email-address" error={error || undefined} />
+          <Field label="Full name" value={form.full_name} onChangeText={(v) => setForm({ ...form, full_name: v })} error={problem('name')} />
+          <Field label="Email" value={form.email} onChangeText={(v) => setForm({ ...form, email: v })} keyboardType="email-address" error={problem('email')} />
           <Segmented value={form.role} onChange={(v) => setForm({ ...form, role: v })} items={[{ key: 'botanist', label: 'Botanist' }, { key: 'officer', label: 'Officer' }, { key: 'admin', label: 'Admin' }]} />
-          <Field label="Temporary password" optional secure value={form.password} onChangeText={(v) => setForm({ ...form, password: v })}
+          <Field label="Temporary password" optional secure value={form.password} onChangeText={(v) => setForm({ ...form, password: v })} error={problem('password')}
             hint="Leave blank to send an email invitation, or set one so they can sign in straight away." />
           <View style={{ flexDirection: 'row', gap: 10 }}>
-            <Button label="Cancel" kind="secondary" flex={1} onPress={() => { setInviting(false); setError(''); }} />
-            <Button label={form.password ? 'Create account' : 'Send invite'} flex={1.4} onPress={invite} />
+            <Button label="Cancel" kind="secondary" flex={1} disabled={sending} onPress={() => { setInviting(false); setError(null); }} />
+            <Button label={sending ? (form.password ? 'Creating…' : 'Sending…') : form.password ? 'Create account' : 'Send invite'} flex={1.4} disabled={sending} onPress={invite} />
           </View>
         </View>
       ) : null}
@@ -173,7 +234,7 @@ export function Users({ nav }) {
       <Pills value={filter} onChange={setFilter} items={ROLE_FILTERS} />
       <SortBar items={SORT_USERS} value={sort} onChange={setSort} />
       <View>
-        {sorted.length === 0 ? <Empty icon="users">No one matches.</Empty> : null}
+        <EmptyState count={sorted.length} icon="users" filtered={db.profiles.length > 0}>No one matches.</EmptyState>
         {sorted.map((p, i) => (
           <View key={p.id}>
             <Row serif={false} left={<Avatar name={p.full_name || p.email || 'Member'} size={44} muted={!p.is_active} />} title={`${p.full_name || p.email || 'Unnamed member'}${p.id === me?.id ? ' (you)' : ''}`}
@@ -185,8 +246,8 @@ export function Users({ nav }) {
             {openId === p.id ? (
               <View style={{ gap: 10, padding: 14, marginBottom: 8, borderRadius: 14, backgroundColor: c.bg }}>
                 <Txt v="label">Role</Txt>
-                <Segmented value={p.role || 'botanist'} onChange={(role) => updateUser(p.id, { role })} items={[{ key: 'botanist', label: 'Botanist' }, { key: 'officer', label: 'Officer' }, { key: 'admin', label: 'Admin' }]} />
-                <Button label={p.is_active ? 'Deactivate account' : 'Turn account back on'} kind={p.is_active ? 'dangerText' : 'secondary'} height={44} size={15} onPress={() => setActive(p)} />
+                <Segmented value={p.role || 'botanist'} onChange={(role) => changeRole(p, role)} items={[{ key: 'botanist', label: 'Botanist' }, { key: 'officer', label: 'Officer' }, { key: 'admin', label: 'Admin' }]} />
+                <Button label={p.is_active ? 'Deactivate account' : 'Turn account back on'} kind={p.is_active ? 'dangerText' : 'secondary'} height={48} size={15} onPress={() => setActive(p)} />
               </View>
             ) : null}
           </View>
@@ -226,18 +287,18 @@ export function Audit({ nav }) {
   const { db } = useStore();
   const { c } = useTheme();
   const [filter, setFilter] = useState('all');
-  const [sort, setSort] = useState('active');
   const rows = db.audit
     .filter((a) => filter === 'all' || (filter === 'accounts' ? a.table_name === 'profiles' : a.table_name !== 'profiles'))
     .sort((a, b) => b.changed_at.localeCompare(a.changed_at));
+  const { shown, left, showMore } = useShowMore(rows, filter);
   return (
     <Screen header={<Header left={<IconButton name="chevL" label="Back" onPress={nav.back} />} />} top={0} gap={16}>
       <TitleBlock title="Audit log" sub="Every change to records and accounts" />
       <Pills value={filter} onChange={setFilter} items={[{ key: 'all', label: 'All' }, { key: 'records', label: 'Records' }, { key: 'accounts', label: 'Accounts' }]} />
       <View>
-        {rows.length === 0 ? <Empty icon="shield">No changes recorded.</Empty> : null}
-        {rows.map((a, i) => (
-          <View key={a.id} style={{ gap: 6, paddingVertical: 14, borderBottomWidth: i === rows.length - 1 ? 0 : 1, borderBottomColor: c.line }}>
+        <EmptyState count={rows.length} icon="shield" filtered={db.audit.length > 0}>No changes recorded.</EmptyState>
+        {shown.map((a, i) => (
+          <View key={a.id} style={{ gap: 6, paddingVertical: 14, borderBottomWidth: i === shown.length - 1 ? 0 : 1, borderBottomColor: c.line }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
               <Txt v="label">{nameOf(db, a.changed_by)}</Txt>
               <Txt v="caption" color={c.ink3} style={{ fontFamily: font('text', 600) }}>{shortDate(a.changed_at)}</Txt>
@@ -250,6 +311,7 @@ export function Audit({ nav }) {
             ) : null}
           </View>
         ))}
+        {left > 0 ? <Button label={`Show more (${left} left)`} kind="text" height={48} size={15} onPress={showMore} /> : null}
       </View>
     </Screen>
   );

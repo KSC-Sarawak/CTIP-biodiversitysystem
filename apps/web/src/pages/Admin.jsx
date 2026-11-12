@@ -2,7 +2,8 @@
 import { useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
-import { Chip } from "../components/Bits.jsx";
+import PageHead from "../components/PageHead.jsx";
+import { Chip, PasswordInput } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
 import { fuzzyMatch } from "../../../shared/fuzzy.js";
@@ -63,6 +64,8 @@ export function Users() {
   // Deleted ones first, soonest to be removed at the top.
   const inactiveUsers = sortedUsers.filter((u) => !u.is_active || u.deleted_at)
     .sort((a, b) => (!!b.deleted_at - !!a.deleted_at) || (a.deleted_at && b.deleted_at ? a.deleted_at.localeCompare(b.deleted_at) : 0));
+
+  const waitingUsers = inactiveUsers.filter((u) => !u.deleted_at);
 
   const add = async (e) => {
     e.preventDefault();
@@ -136,7 +139,17 @@ export function Users() {
 
   return (
     <Shell seg="users">
-      <h2>Users</h2>
+      <PageHead
+        overline="Admin dashboard"
+        title="Users"
+        lead={waitingUsers.length ? `${waitingUsers.length} ${waitingUsers.length === 1 ? "account is" : "accounts are"} turned off and may be waiting for access.` : `All ${activeUsers.length} accounts are active.`}
+        tone={waitingUsers.length ? "warn" : "ok"}
+        stats={[
+          { label: "Active", value: activeUsers.length },
+          ...Object.entries(ROLE_LABEL).map(([r, text]) => ({ label: text, value: activeUsers.filter((u) => u.role === r).length })),
+          { label: "Not active", value: inactiveUsers.length, tone: "warn" },
+        ]}
+      />
       {confirmDialog}
 
       {/* noValidate: our own checks say why a value is wrong, instead of the browser's bubble */}
@@ -145,7 +158,7 @@ export function Users() {
         <div className="row wrap invite">
           <label>Name<input id="invite-name" value={name} onChange={edit("name", setName)} autoComplete="off" {...fieldProps("name")} />{fieldError("name")}</label>
           <label>Email<input id="invite-email" type="email" value={email} onChange={edit("email", setEmail)} autoComplete="off" {...fieldProps("email")} />{fieldError("email")}</label>
-          <label>Temporary Password<input id="invite-password" type="password" value={password} onChange={edit("password", setPassword)} placeholder="At least 8 characters" autoComplete="new-password" {...fieldProps("password")} />{fieldError("password")}</label>
+          <label>Temporary Password<PasswordInput id="invite-password" value={password} onChange={edit("password", setPassword)} placeholder="At least 8 characters" autoComplete="new-password" {...fieldProps("password")} />{fieldError("password")}</label>
           <label>Role
             <select value={newRole} onChange={(e) => setNewRole(e.target.value)}>
               {Object.entries(ROLE_LABEL).map(([r, text]) => <option key={r} value={r}>{text}</option>)}
@@ -243,8 +256,12 @@ export function Audit() {
   const { db } = useStore();
   return (
     <Shell seg="audit">
-      <h2>Audit log</h2>
-      <p className="mute">Who changed what. Entries cannot be edited.</p>
+      <PageHead
+        overline="Admin dashboard"
+        title="Audit log"
+        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited.`}
+        tone="info"
+      />
 
       <div className="tablewrap">
         <table>

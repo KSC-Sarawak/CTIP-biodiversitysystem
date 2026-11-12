@@ -139,7 +139,9 @@ function sessionFromOtherTab() {
 
 const expiresAt = (session) => session?.expires_at || tokenClaims(session?.access_token)?.exp || null;
 
-// Called when a refresh is refused, so the app can show the signed-out state.
+// Called when a refresh is refused, or the API says an admin turned the account
+// off, so the app can show the signed-out state. Listeners get
+// { reason: "expired" | "disabled", message }.
 const endedListeners = new Set();
 export function onSessionEnded(fn) {
   endedListeners.add(fn);
@@ -178,7 +180,7 @@ export async function freshAuthToken({ force = false } = {}) {
       // Lost the race with another tab: its new session is still good.
       if (sessionFromOtherTab()) return getSession().access_token;
       setSession(null);
-      endedListeners.forEach((fn) => fn());
+      endedListeners.forEach((fn) => fn({ reason: "expired" }));
       return null;
     }
     return session.access_token;
@@ -293,6 +295,13 @@ export async function apiFetch(path, options = {}) {
     // the API itself is not running. Treat it like a network failure.
     if (!json && (res.status === 502 || res.status === 504)) {
       return { ok: false, offline: true, status: res.status, code: "API_UNREACHABLE", message: "Cannot reach the API server" };
+    }
+
+    // An admin turned this account off (sign-in, refresh or the workspace load):
+    // forget the session and tell the app, which signs out and shows why.
+    if (json?.code === "ACCOUNT_DISABLED" && getSession()) {
+      setSession(null);
+      endedListeners.forEach((fn) => fn({ reason: "disabled", message: json.message }));
     }
 
     // Backend returned an error envelope (e.g. { code, message, details })
@@ -559,6 +568,12 @@ export const findSpecimenByQrApi = (qrId, { token } = {}) => apiFetch(`/specimen
 export const createSpecimenApi = (specimen, { token } = {}) => send("POST", "/specimens", specimen, token);
 export const updateSpecimenApi = (id, changes, { token } = {}) => send("PATCH", `/specimens/${enc(id)}`, changes, token);
 export const createObservationApi = (obs, { token } = {}) => send("POST", "/observations", obs, token);
+export const fetchObservationApi = (id, { token } = {}) => apiFetch(`/observations/${enc(id)}`, { token });
+// Edit a draft or queued record: { height_cm?, morphology?, notes?, version }. `changes` must hold
+// the version the caller last saw; a record that changed since answers 409 VERSION_CONFLICT.
+export const updateObservationApi = (id, changes, { token } = {}) => send("PATCH", `/observations/${enc(id)}`, changes, token);
+// Records saved on the phone (CTIP-16): { device_id, observations: [...] }, up to 20 at a time.
+export const syncApi = (body, { token } = {}) => send("POST", "/sync", body, token);
 // Draft/queued: sent as it is. Returned: with fixes (height_cm, morphology, notes) and an optional comment.
 export const submitObservationApi = (id, body = {}, { token } = {}) => send("POST", `/observations/${enc(id)}/submit`, body, token);
 export const addCommentApi = (id, body, { token } = {}) => send("POST", `/observations/${enc(id)}/comments`, { body }, token);
@@ -569,6 +584,11 @@ export const fetchDiscussionApi = (id, { token } = {}) => apiFetch(`/discussions
 export const updateDiscussionApi = (id, changes, { token } = {}) => send("PATCH", `/discussions/${enc(id)}`, changes, token);
 export const deleteDiscussionApi = (id, { token } = {}) => send("DELETE", `/discussions/${enc(id)}`, undefined, token);
 export const addDiscussionPostApi = (id, post, { token } = {}) => send("POST", `/discussions/${enc(id)}/posts`, post, token);
+// One message: edit (author), delete (author or admin), undo a delete (whoever deleted it).
+const postPath = (id, postId) => `/discussions/${enc(id)}/posts/${enc(postId)}`;
+export const editDiscussionPostApi = (id, postId, changes, { token } = {}) => send("PATCH", postPath(id, postId), changes, token);
+export const deleteDiscussionPostApi = (id, postId, { token } = {}) => send("DELETE", postPath(id, postId), undefined, token);
+export const restoreDiscussionPostApi = (id, postId, { token } = {}) => send("POST", `${postPath(id, postId)}/restore`, undefined, token);
 
 // The file part of an upload. In the browser a File or Blob; in React Native / Expo,
 // standard Blob, File or WinterCG part with bytes, with fallback to legacy URI.
@@ -668,6 +688,13 @@ export const assignAlertApi = (id, assigned_to, { token } = {}) => send("POST", 
 export const acknowledgeAlertApi = (id, { token } = {}) => send("POST", `/alerts/${enc(id)}/acknowledge`, undefined, token);
 export const resolveAlertApi = (id, outcome, { token } = {}) => send("POST", `/alerts/${enc(id)}/resolve`, { outcome }, token);
 export const addAlertNoteApi = (id, note, { token } = {}) => send("POST", `/alerts/${enc(id)}/notes`, { note }, token);
+// `range` is a number of hours back from now, or { from, to } (ISO dates) for a chosen range.
+export const getNodeTelemetryApi = (nodeId, range = 24, { token } = {}) => {
+  const q = typeof range === "object" ? `from=${enc(range.from)}${range.to ? `&to=${enc(range.to)}` : ""}` : `hours=${enc(range)}`;
+  return send("GET", `/sensor-nodes/${enc(nodeId)}/telemetry?${q}`, undefined, token);
+};
+// Newest webcam photos for a node, each with a short-lived view_url (CTIP-82).
+export const getNodeImagesApi = (nodeId, limit = 12, { token } = {}) => send("GET", `/sensor-nodes/${enc(nodeId)}/images?limit=${enc(limit)}`, undefined, token);
 export const setThresholdsApi = (nodeId, thresholds, { token } = {}) => send("PATCH", `/sensor-nodes/${enc(nodeId)}`, { thresholds }, token);
 
 // Notifications (the signed-in person's own)

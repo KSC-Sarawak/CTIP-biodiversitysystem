@@ -838,6 +838,25 @@ From the team's feature list. Below the sign-in form: "Just looking around? Brow
 library or the plant map, no account needed", linking to `#/plants` and `#/map`.
 File: `apps/web/src/pages/Login.jsx`.
 
+### Later: sign-in screen improved (`#/staff`)
+
+- **"Staff sign in" (header) opens `#/staff`, which now shows the sign-in form itself.**
+  Before, it showed a short text and a "Go to login" button, so staff needed a second click.
+  Signed-in staff still get "Go to dashboard". `#/login` (and the password-reset links) show
+  the same form. Files: `apps/web/src/pages/Public.jsx`, `apps/web/src/pages/Login.jsx`.
+- One full-width **Sign in** button, which says "Signing in…" and cannot be pressed twice;
+  **Forgot password?** is a link under the password field.
+- The "Backend API: Online (/v1)" badge is gone. When the server does not answer, a notice
+  says so ("It can take up to a minute to wake up").
+- **Just looking around? No account needed.** with two clear links: *Browse the plant
+  library* (`#/plants`) and *Open the plant map* (`#/map`). Before, the words were plain text.
+- **"Sign in with API token" removed**, with its form and `loginWithToken()` in
+  `apps/shared/StoreProvider.js` (only this page used it). Staff sign in with email or
+  username and password only.
+- Styles: `.btn.full`, `.login-forgot`, `button.textlink`, `.login-browse` in `App.css`.
+- Test: `every-page.spec.js` checks the form, that there is no token option, Forgot password,
+  and both links.
+
 ## 3. Bug fixed: a visitor's QR tag page could crash
 
 `#/tag/<code>` for a visitor showed "This page hit a problem" when the API's answer had no

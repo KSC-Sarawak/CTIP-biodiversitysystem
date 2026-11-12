@@ -16,6 +16,7 @@ import Icon from '../components/Icon.js';
 import { Txt, IconButton } from '../components/Bits.js';
 import LeafletMap from '../components/LeafletMap.js';
 import PlantWindow from '../components/PlantWindow.js';
+import { useIsFocused } from '../navigation/focus.js';
 
 // One round button in the row of map tools.
 function Tool({ icon, label, a11y, on, onPress }) {
@@ -48,11 +49,17 @@ function Tool({ icon, label, a11y, on, onPress }) {
   );
 }
 
+const LOCATE_WAIT_MS = 15000;
+const NO_FIX = "Couldn't get your location. Try again in the open.";
+const toSpot = (loc) => ({ lat: loc.coords.latitude, lng: loc.coords.longitude, accuracy: loc.coords.accuracy });
+
 export default function MapPage({ nav, params = {} }) {
-  const { db, role } = useStore();
+  const { db, role, notify } = useStore();
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const mapRef = useRef(null);
+  const focused = useIsFocused();
+  const [canWatch, setCanWatch] = useState(false); // set when "Locate" is given permission, to start the live watch
 
   const [family, setFamily] = useState('all');
   const [q, setQ] = useState('');
@@ -99,31 +106,37 @@ export default function MapPage({ nav, params = {} }) {
   }, [onMap, colorMap, c.accent]);
 
   const handleLocateMe = async () => {
+    if (locating) return;
+    if (userLoc) {
+      // Already have location, pan directly
+      mapRef.current?.panToUser();
+      return;
+    }
+    setLocating(true);
     try {
-      setLocating(true);
-      if (userLoc) {
-        // Already have location, pan directly
-        mapRef.current?.panToUser();
-        setLocating(false);
-        return;
-      }
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        setLocating(false);
+        notify('Location is off for this app. Turn it on in the phone settings to see where you are.');
         return;
       }
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      if (loc && loc.coords) {
-        const here = {
-          lat: loc.coords.latitude,
-          lng: loc.coords.longitude,
-          accuracy: loc.coords.accuracy,
-        };
-        setUserLoc(here);
-        mapRef.current?.panToUser(here);
+      setCanWatch(true); // permission was just given: start following the phone
+      // getCurrentPositionAsync has no timeout of its own, and without signal it can wait a long time.
+      let timer;
+      const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), LOCATE_WAIT_MS); });
+      // A reading that fails after the wait is over must not go unhandled, so it answers null too.
+      const reading = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
+      const loc = await Promise.race([reading, timeout]);
+      clearTimeout(timer);
+      if (!loc?.coords) {
+        notify(NO_FIX);
+        return;
       }
-      setLocating(false);
-    } catch (e) {
+      const here = toSpot(loc);
+      setUserLoc(here);
+      mapRef.current?.panToUser(here);
+    } catch {
+      notify(NO_FIX);
+    } finally {
       setLocating(false);
     }
   };
@@ -132,32 +145,35 @@ export default function MapPage({ nav, params = {} }) {
     mapRef.current?.recenter();
   };
 
-  // Live GPS tracking
+  // Live GPS tracking, only while this screen is the one on show and the phone
+  // allows it. The watch is asked for, not yet given, when the screen is left
+  // quickly: `cancelled` then stops it the moment it arrives.
   useEffect(() => {
+    if (!focused) return undefined;
     let sub = null;
-    Location.getForegroundPermissionsAsync().then(({ status }) => {
-      if (status === 'granted') {
-        Location.watchPositionAsync(
+    let cancelled = false;
+    (async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+        const started = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.Balanced, distanceInterval: 5 },
           (loc) => {
-            if (loc && loc.coords) {
-              setUserLoc({
-                lat: loc.coords.latitude,
-                lng: loc.coords.longitude,
-                accuracy: loc.coords.accuracy,
-              });
-            }
+            if (loc?.coords) setUserLoc(toSpot(loc));
           },
-        ).then((s) => {
-          sub = s;
-        });
+        );
+        if (cancelled) started.remove();
+        else sub = started;
+      } catch {
+        // No location service: the map works without the "you are here" dot.
       }
-    });
+    })();
 
     return () => {
-      if (sub && sub.remove) sub.remove();
+      cancelled = true;
+      sub?.remove?.();
     };
-  }, []);
+  }, [focused, canWatch]);
 
   return (
     <View style={{ flex: 1, backgroundColor: c.mapTile }}>
@@ -292,7 +308,7 @@ export default function MapPage({ nav, params = {} }) {
             marginTop: 2,
           }}
         >
-          <Tool icon="locate" label={locating ? 'Locating...' : 'Locate'} a11y="Show my location" on={!!userLoc} onPress={handleLocateMe} />
+          <Tool icon="locate" label={locating ? 'Locating…' : 'Locate'} a11y="Show my location" on={!!userLoc} onPress={handleLocateMe} />
           <Tool
             icon="layers"
             label={layer === 'osm' ? 'Satellite' : 'Map'}
