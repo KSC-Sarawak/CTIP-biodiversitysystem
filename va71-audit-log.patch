@@ -1,0 +1,352 @@
+From 0e09e927fbc3b067f4b36d0e715cce1621e07e8c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 12 Nov 2026 23:41:47 +0000
+Subject: [PATCH] VA-71 audit log: record sign-ins, more tables, append-only
+ log
+
+- audit_logs: SIGN_IN, SIGN_IN_FAILED, MFA_FAILED, SIGN_OUT via log_auth_event()
+- audit trigger on qr_tags, sensor_nodes, zones, observation_reviews
+- audit_logs rows can no longer be updated, deleted or truncated
+- API logs sign-in/out and wrong MFA codes (email only, never password/code)
+- Admin > Audit page: filter by action, show email for sign-in rows
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017FtvikZv99RUMdiuH2y4YP
+---
+ apps/web/src/pages/Admin.jsx                  |  20 +++-
+ services/api/src/auditLog.js                  |  17 +++
+ services/api/src/mfa.js                       |   6 +-
+ services/api/src/session.js                   |  12 +-
+ services/api/test/mfa.test.js                 |   3 +
+ services/api/test/session.test.js             |  26 ++++-
+ .../20261113000000_audit_log_signins.sql      | 105 ++++++++++++++++++
+ supabase/scripts/reset.sql                    |   2 +
+ 8 files changed, 183 insertions(+), 8 deletions(-)
+ create mode 100644 services/api/src/auditLog.js
+ create mode 100644 supabase/migrations/20261113000000_audit_log_signins.sql
+
+diff --git a/apps/web/src/pages/Admin.jsx b/apps/web/src/pages/Admin.jsx
+index 29ff906..0eb5a1f 100644
+--- a/apps/web/src/pages/Admin.jsx
++++ b/apps/web/src/pages/Admin.jsx
+@@ -252,25 +252,37 @@ export function Users() {
+ }
+ 
+ // Every change recorded by the actions (audit_logs table), newest first.
++// Sign-in events (VA-71) have table "auth" and keep the email in new_value.
++const AUDIT_ACTIONS = ["INSERT", "UPDATE", "DELETE", "SIGN_IN", "SIGN_IN_FAILED", "MFA_FAILED", "SIGN_OUT"];
++
+ export function Audit() {
+   const { db } = useStore();
++  const [action, setAction] = useState("");
++  const rows = action ? db.audit.filter((a) => a.action === action) : db.audit;
+   return (
+     <Shell seg="audit">
+       <PageHead
+         overline="Admin dashboard"
+         title="Audit log"
+-        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited.`}
++        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited or deleted. Sign-ins are logged too.`}
+         tone="info"
+       />
+ 
++      <p>
++        <select value={action} onChange={(e) => setAction(e.target.value)} aria-label="Filter by action">
++          <option value="">All actions</option>
++          {AUDIT_ACTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
++        </select>
++      </p>
++
+       <div className="tablewrap">
+         <table>
+           <thead><tr><th>When</th><th>Who</th><th>Table</th><th>Action</th><th>Change</th></tr></thead>
+           <tbody>
+-            {db.audit.map((a) => (
++            {rows.map((a) => (
+               <tr key={a.id}>
+                 <td>{fmtDateTime(a.changed_at)}</td>
+-                <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || "System"}</td>
++                <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || a.new_value?.email || "System"}</td>
+                 <td>{a.table_name}</td>
+                 <td><Chip value={a.action} /></td>
+                 <td className="code">{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</td>
+@@ -279,7 +291,7 @@ export function Audit() {
+           </tbody>
+         </table>
+       </div>
+-      <p className="mute small">Showing {db.audit.length} entries.</p>
++      <p className="mute small">Showing {rows.length} of {db.audit.length} entries.</p>
+     </Shell>
+   );
+ }
+diff --git a/services/api/src/auditLog.js b/services/api/src/auditLog.js
+new file mode 100644
+index 0000000..af34bbd
+--- /dev/null
++++ b/services/api/src/auditLog.js
+@@ -0,0 +1,17 @@
++import { supabaseAnon, supabaseAs } from './supabase.js';
++
++// VA-71: writes a sign-in event to audit_logs through log_auth_event()
++// (migration 20261113000000). Events: SIGN_IN, SIGN_IN_FAILED, MFA_FAILED,
++// SIGN_OUT. Only the email is stored, never the password or the 6-digit code.
++// With the person's token the database records who they are; without one
++// (wrong password) only SIGN_IN_FAILED is accepted.
++// Never throws: if the log cannot be written, signing in still works.
++export async function logAuthEvent(event, { email, token } = {}) {
++  try {
++    const db = token ? supabaseAs({ token }) : supabaseAnon();
++    const { error } = await db.rpc('log_auth_event', { p_event: event, p_email: email ?? '' });
++    if (error) console.warn(`audit log: ${event} not written: ${error.message}`);
++  } catch (err) {
++    console.warn(`audit log: ${event} not written: ${err.message}`);
++  }
++}
+diff --git a/services/api/src/mfa.js b/services/api/src/mfa.js
+index 5be4363..e876d7e 100644
+--- a/services/api/src/mfa.js
++++ b/services/api/src/mfa.js
+@@ -2,6 +2,7 @@ import { z } from 'zod';
+ import { parseBody, fail } from './validate.js';
+ import { tooMany as overLimit } from './rateLimit.js';
+ import { ATTEMPT_LIMIT, ATTEMPT_WINDOW_MS, toSession } from './session.js';
++import { logAuthEvent } from './auditLog.js';
+ 
+ // Two-step sign-in with an authenticator app (VA-70, lecturer feedback; CTIP-50).
+ // Every signed-in role (botanist, officer, admin) must use it: an access token
+@@ -107,7 +108,10 @@ export const mfaHandlers = {
+       body: { challenge_id: challenge.data.id, code: body.code },
+     });
+     if (!checked.ok || !checked.data?.access_token) {
+-      if (checked.status === 400 || checked.status === 422) return fail(res, 401, 'WRONG_CODE', 'That code is not right. Check the time on your phone and try the newest code.');
++      if (checked.status === 400 || checked.status === 422) {
++        await logAuthEvent('MFA_FAILED', { token: req.user.token });
++        return fail(res, 401, 'WRONG_CODE', 'That code is not right. Check the time on your phone and try the newest code.');
++      }
+       return fail(res, 502, 'AUTH_ERROR', 'Two-step sign-in is not working right now. Please try again.');
+     }
+     res.json(toSession(checked.data));
+diff --git a/services/api/src/session.js b/services/api/src/session.js
+index 0c387a6..7e9a6cd 100644
+--- a/services/api/src/session.js
++++ b/services/api/src/session.js
+@@ -5,6 +5,7 @@ import { tooMany as overLimit, resetRateLimits } from './rateLimit.js';
+ import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } from './emailLimit.js';
+ import { mfaStep } from './mfa.js';
+ import { accountBlock } from './accountStatus.js';
++import { logAuthEvent } from './auditLog.js';
+ 
+ // Sign-in, session refresh and passwords (CTIP-114). The web and mobile apps
+ // never talk to Supabase directly: they send these requests to the API, and
+@@ -90,12 +91,16 @@ export const sessionHandlers = {
+     const { data, error } = await supabaseFresh().auth.signInWithPassword(body);
+     if (error) {
+       if (error.code === 'email_not_confirmed') return fail(res, 403, 'EMAIL_NOT_CONFIRMED', 'Confirm your email address first, using the link we sent you.');
+-      if (error.status === 400 || error.code === 'invalid_credentials') return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong email or password');
++      if (error.status === 400 || error.code === 'invalid_credentials') {
++        await logAuthEvent('SIGN_IN_FAILED', { email: body.email });
++        return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong email or password');
++      }
+       if (error.status === 429) return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many sign-in attempts. Wait a few minutes and try again.');
+       return fail(res, 502, 'AUTH_ERROR', 'Signing in is not working right now. Please try again.');
+     }
+     const blocked = await refuseIfDisabled(data.session);
+     if (blocked) return fail(res, 403, 'ACCOUNT_DISABLED', blocked);
++    await logAuthEvent('SIGN_IN', { token: data.session.access_token });
+     // mfa: what comes next. "verify": type the 6-digit code (POST /auth/mfa/verify).
+     // "setup": officers and admins must set up an authenticator app first
+     // (POST /auth/mfa/enroll). "none": signed in. Until then the session only
+@@ -118,7 +123,10 @@ export const sessionHandlers = {
+   // the app deletes it straight away. Always 204: signing out cannot fail for the user.
+   'post /auth/sign-out': async (req, res) => {
+     const token = bearer(req);
+-    if (token) await authRequest('/logout?scope=local', { token }).catch(() => {});
++    if (token) {
++      await logAuthEvent('SIGN_OUT', { token });
++      await authRequest('/logout?scope=local', { token }).catch(() => {});
++    }
+     res.status(204).end();
+   },
+ 
+diff --git a/services/api/test/mfa.test.js b/services/api/test/mfa.test.js
+index ae2e3bb..c26223e 100644
+--- a/services/api/test/mfa.test.js
++++ b/services/api/test/mfa.test.js
+@@ -131,6 +131,9 @@ test('verify: right code gives a new session, wrong code 401, bad format 422', a
+   let res = await request(app).post('/v1/auth/mfa/verify').set('Authorization', 'Bearer officer-aal1').send({ code: '000000' });
+   assert.equal(res.status, 401);
+   assert.equal(res.body.code, 'WRONG_CODE');
++  const log = calls.filter((c) => c.path === '/rest/v1/rpc/log_auth_event');
++  assert.deepEqual(log.map((c) => c.body.p_event), ['MFA_FAILED'], 'VA-71: wrong code is in the audit log');
++  assert.doesNotMatch(JSON.stringify(log), /000000/, 'the code itself is never logged');
+   res = await request(app).post('/v1/auth/mfa/verify').set('Authorization', 'Bearer officer-aal1').send({ code: '12ab' });
+   assert.equal(res.status, 422);
+   res = await request(app).post('/v1/auth/mfa/verify').set('Authorization', 'Bearer officer-aal1').send({ code: '123456' });
+diff --git a/services/api/test/session.test.js b/services/api/test/session.test.js
+index 426eaa9..e9915cf 100644
+--- a/services/api/test/session.test.js
++++ b/services/api/test/session.test.js
+@@ -150,7 +150,11 @@ test('refresh swaps a refresh token for a new session; an unknown one ends it',
+ test('sign-out ends that session in Supabase, and works without a token too', async () => {
+   const res = await request(app).post('/v1/auth/sign-out').set('Authorization', 'Bearer access-9');
+   assert.equal(res.status, 204);
+-  assert.deepEqual(calls.map((c) => [c.path, c.auth]), [['/auth/v1/logout?scope=local', 'Bearer access-9']]);
++  assert.deepEqual(calls.map((c) => [c.path, c.auth]), [
++    ['/rest/v1/rpc/log_auth_event', 'Bearer access-9'], // VA-71 audit log, as that person
++    ['/auth/v1/logout?scope=local', 'Bearer access-9'],
++  ]);
++  assert.deepEqual(calls[0].body, { p_event: 'SIGN_OUT', p_email: '' });
+   calls = [];
+   assert.equal((await request(app).post('/v1/auth/sign-out')).status, 204);
+   assert.equal(calls.length, 0);
+@@ -191,3 +195,23 @@ test('after a reset link (no current password) the new one is set; a weak one is
+   const short = await request(app).post('/v1/me/password').set('Authorization', 'Bearer access-1').send({ new_password: 'short' });
+   assert.equal(short.status, 422);
+ });
++
++// VA-71: sign-ins go into the audit log, with the email only.
++const logged = () => calls.filter((c) => c.path === '/rest/v1/rpc/log_auth_event');
++
++test('audit log: a right password logs SIGN_IN as that person, a wrong one SIGN_IN_FAILED, never the password', async () => {
++  await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'nope' });
++  await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' });
++  const rows = logged();
++  assert.deepEqual(rows.map((c) => c.body.p_event), ['SIGN_IN_FAILED', 'SIGN_IN']);
++  assert.equal(rows[0].body.p_email, 'officer@example.com');
++  assert.match(rows[1].auth, /^Bearer access-/, 'SIGN_IN is sent with the new token, so the database knows who');
++  assert.doesNotMatch(JSON.stringify(rows), /nope|old-password/, 'no password in the log');
++});
++
++test('audit log: if it cannot be written, signing in still works', async () => {
++  // The fake answers 404 for the log call unless told otherwise, like a missing migration.
++  const res = await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' });
++  assert.equal(res.status, 200);
++  assert.equal(logged().length, 1);
++});
+diff --git a/supabase/migrations/20261113000000_audit_log_signins.sql b/supabase/migrations/20261113000000_audit_log_signins.sql
+new file mode 100644
+index 0000000..fa0df8d
+--- /dev/null
++++ b/supabase/migrations/20261113000000_audit_log_signins.sql
+@@ -0,0 +1,105 @@
++-- VA-71 audit log: sign-ins, more tables, and a log nobody can edit.
++--
++-- 1. audit_logs also records SIGN_IN, SIGN_IN_FAILED, MFA_FAILED, SIGN_OUT.
++--    The API writes them through log_auth_event(); it never sends the
++--    password or the 6-digit code, only the email.
++-- 2. qr_tags, sensor_nodes, zones and observation_reviews get the same
++--    change trigger as species/specimens/observations/alerts/profiles.
++-- 3. Rows in audit_logs can never be edited or deleted (not even by a
++--    Supabase Owner in the SQL editor). The one exception is the database
++--    itself blanking changed_by when a purged account is removed
++--    ("on delete set null"); nothing else in the row may change.
++
++-- 1a. New action names.
++alter table public.audit_logs drop constraint if exists audit_logs_action_check;
++alter table public.audit_logs add constraint audit_logs_action_check
++  check (action in ('INSERT', 'UPDATE', 'DELETE',
++                    'SIGN_IN', 'SIGN_IN_FAILED', 'MFA_FAILED', 'SIGN_OUT'));
++
++-- 1b. Called by the API (services/api/src/auditLog.js). With a user's token, auth.uid() is that person, so
++--     nobody can log an event in someone else's name. Without a token (wrong
++--     password: there is no session yet) only SIGN_IN_FAILED is accepted.
++create or replace function public.log_auth_event(p_event text, p_email text)
++returns void language plpgsql security definer set search_path = '' as $$
++declare
++  v_uid uuid := auth.uid();
++  v_email text;
++begin
++  if p_event not in ('SIGN_IN', 'SIGN_IN_FAILED', 'MFA_FAILED', 'SIGN_OUT') then
++    raise exception 'Unknown sign-in event' using errcode = '22023';
++  end if;
++  if v_uid is null and p_event <> 'SIGN_IN_FAILED' then
++    raise exception 'Sign in first' using errcode = '42501';
++  end if;
++  -- A signed-in person's own email, never one the caller typed in.
++  if v_uid is not null then
++    select email into v_email from auth.users where id = v_uid;
++  end if;
++  v_email := left(lower(trim(coalesce(v_email, p_email, ''))), 200);
++  insert into public.audit_logs (changed_by, table_name, record_id, action, old_value, new_value)
++  values (
++    v_uid,
++    'auth',
++    coalesce(v_uid::text, 'unknown'),
++    p_event,
++    null,
++    jsonb_build_object('email', v_email)
++  );
++end;
++$$;
++revoke execute on function public.log_auth_event(text, text) from public;
++grant execute on function public.log_auth_event(text, text) to anon, authenticated;
++
++-- 2. qr_tags is keyed by qr_id, not id, so record_id falls back to it.
++create or replace function public.audit_changes()
++returns trigger language plpgsql security definer set search_path = '' as $$
++begin
++  insert into public.audit_logs (changed_by, table_name, record_id, action, old_value, new_value)
++  values (
++    auth.uid(),
++    tg_table_name,
++    coalesce(to_jsonb(new) ->> 'id', to_jsonb(old) ->> 'id',
++             to_jsonb(new) ->> 'qr_id', to_jsonb(old) ->> 'qr_id', 'unknown'),
++    tg_op,
++    case when tg_op <> 'INSERT' then to_jsonb(old) end,
++    case when tg_op <> 'DELETE' then to_jsonb(new) end
++  );
++  return coalesce(new, old);
++end;
++$$;
++revoke execute on function public.audit_changes() from public, anon, authenticated;
++
++drop trigger if exists audit_qr_tags on public.qr_tags;
++create trigger audit_qr_tags after insert or update or delete on public.qr_tags
++  for each row execute function public.audit_changes();
++drop trigger if exists audit_sensor_nodes on public.sensor_nodes;
++create trigger audit_sensor_nodes after insert or update or delete on public.sensor_nodes
++  for each row execute function public.audit_changes();
++drop trigger if exists audit_zones on public.zones;
++create trigger audit_zones after insert or update or delete on public.zones
++  for each row execute function public.audit_changes();
++drop trigger if exists audit_observation_reviews on public.observation_reviews;
++create trigger audit_observation_reviews after insert or update or delete on public.observation_reviews
++  for each row execute function public.audit_changes();
++
++-- 3. Append-only.
++create or replace function public.audit_logs_append_only()
++returns trigger language plpgsql set search_path = '' as $$
++begin
++  if tg_op = 'UPDATE' then
++    if new.changed_by is null
++       and (to_jsonb(new) - 'changed_by') = (to_jsonb(old) - 'changed_by') then
++      return new; -- account removed: "on delete set null"
++    end if;
++  end if;
++  raise exception 'audit_logs cannot be changed or deleted' using errcode = '42501';
++end;
++$$;
++revoke execute on function public.audit_logs_append_only() from public, anon, authenticated;
++
++drop trigger if exists audit_logs_no_change on public.audit_logs;
++create trigger audit_logs_no_change before update or delete on public.audit_logs
++  for each row execute function public.audit_logs_append_only();
++drop trigger if exists audit_logs_no_truncate on public.audit_logs;
++create trigger audit_logs_no_truncate before truncate on public.audit_logs
++  for each statement execute function public.audit_logs_append_only();
+diff --git a/supabase/scripts/reset.sql b/supabase/scripts/reset.sql
+index e1de658..2f7c92d 100644
+--- a/supabase/scripts/reset.sql
++++ b/supabase/scripts/reset.sql
+@@ -30,6 +30,8 @@ drop function if exists public.approve_observation(uuid, text) cascade;
+ drop function if exists public.handle_new_user() cascade;
+ drop function if exists public.set_updated_at() cascade;
+ drop function if exists public.audit_changes() cascade;
++drop function if exists public.audit_logs_append_only() cascade;
++drop function if exists public.log_auth_event(text, text) cascade;
+ drop function if exists public.my_role() cascade;
+ drop function if exists public.guard_specimen_update() cascade;
+ drop function if exists public.apply_review_decision() cascade;
+-- 
+2.43.0
+
