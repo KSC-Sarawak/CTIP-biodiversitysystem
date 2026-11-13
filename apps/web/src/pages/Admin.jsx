@@ -252,25 +252,37 @@ export function Users() {
 }
 
 // Every change recorded by the actions (audit_logs table), newest first.
+// Sign-in events (VA-71) have table "auth" and keep the email in new_value.
+const AUDIT_ACTIONS = ["INSERT", "UPDATE", "DELETE", "SIGN_IN", "SIGN_IN_FAILED", "MFA_FAILED", "SIGN_OUT"];
+
 export function Audit() {
   const { db } = useStore();
+  const [action, setAction] = useState("");
+  const rows = action ? db.audit.filter((a) => a.action === action) : db.audit;
   return (
     <Shell seg="audit">
       <PageHead
         overline="Admin dashboard"
         title="Audit log"
-        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited.`}
+        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited or deleted. Sign-ins are logged too.`}
         tone="info"
       />
+
+      <p>
+        <select value={action} onChange={(e) => setAction(e.target.value)} aria-label="Filter by action">
+          <option value="">All actions</option>
+          {AUDIT_ACTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
+        </select>
+      </p>
 
       <div className="tablewrap">
         <table>
           <thead><tr><th>When</th><th>Who</th><th>Table</th><th>Action</th><th>Change</th></tr></thead>
           <tbody>
-            {db.audit.map((a) => (
+            {rows.map((a) => (
               <tr key={a.id}>
                 <td>{fmtDateTime(a.changed_at)}</td>
-                <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || "System"}</td>
+                <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || a.new_value?.email || "System"}</td>
                 <td>{a.table_name}</td>
                 <td><Chip value={a.action} /></td>
                 <td className="code">{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</td>
@@ -279,7 +291,7 @@ export function Audit() {
           </tbody>
         </table>
       </div>
-      <p className="mute small">Showing {db.audit.length} entries.</p>
+      <p className="mute small">Showing {rows.length} of {db.audit.length} entries.</p>
     </Shell>
   );
 }

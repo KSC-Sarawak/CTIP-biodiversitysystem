@@ -5,6 +5,7 @@ import { tooMany as overLimit, resetRateLimits } from './rateLimit.js';
 import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } from './emailLimit.js';
 import { mfaStep } from './mfa.js';
 import { accountBlock } from './accountStatus.js';
+import { logAuthEvent } from './auditLog.js';
 
 // Sign-in, session refresh and passwords (CTIP-114). The web and mobile apps
 // never talk to Supabase directly: they send these requests to the API, and
@@ -90,12 +91,16 @@ export const sessionHandlers = {
     const { data, error } = await supabaseFresh().auth.signInWithPassword(body);
     if (error) {
       if (error.code === 'email_not_confirmed') return fail(res, 403, 'EMAIL_NOT_CONFIRMED', 'Confirm your email address first, using the link we sent you.');
-      if (error.status === 400 || error.code === 'invalid_credentials') return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong email or password');
+      if (error.status === 400 || error.code === 'invalid_credentials') {
+        await logAuthEvent('SIGN_IN_FAILED', { email: body.email });
+        return fail(res, 401, 'INVALID_CREDENTIALS', 'Wrong email or password');
+      }
       if (error.status === 429) return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many sign-in attempts. Wait a few minutes and try again.');
       return fail(res, 502, 'AUTH_ERROR', 'Signing in is not working right now. Please try again.');
     }
     const blocked = await refuseIfDisabled(data.session);
     if (blocked) return fail(res, 403, 'ACCOUNT_DISABLED', blocked);
+    await logAuthEvent('SIGN_IN', { token: data.session.access_token });
     // mfa: what comes next. "verify": type the 6-digit code (POST /auth/mfa/verify).
     // "setup": officers and admins must set up an authenticator app first
     // (POST /auth/mfa/enroll). "none": signed in. Until then the session only
@@ -118,7 +123,10 @@ export const sessionHandlers = {
   // the app deletes it straight away. Always 204: signing out cannot fail for the user.
   'post /auth/sign-out': async (req, res) => {
     const token = bearer(req);
-    if (token) await authRequest('/logout?scope=local', { token }).catch(() => {});
+    if (token) {
+      await logAuthEvent('SIGN_OUT', { token });
+      await authRequest('/logout?scope=local', { token }).catch(() => {});
+    }
     res.status(204).end();
   },
 

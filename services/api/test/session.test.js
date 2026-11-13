@@ -150,7 +150,11 @@ test('refresh swaps a refresh token for a new session; an unknown one ends it', 
 test('sign-out ends that session in Supabase, and works without a token too', async () => {
   const res = await request(app).post('/v1/auth/sign-out').set('Authorization', 'Bearer access-9');
   assert.equal(res.status, 204);
-  assert.deepEqual(calls.map((c) => [c.path, c.auth]), [['/auth/v1/logout?scope=local', 'Bearer access-9']]);
+  assert.deepEqual(calls.map((c) => [c.path, c.auth]), [
+    ['/rest/v1/rpc/log_auth_event', 'Bearer access-9'], // VA-71 audit log, as that person
+    ['/auth/v1/logout?scope=local', 'Bearer access-9'],
+  ]);
+  assert.deepEqual(calls[0].body, { p_event: 'SIGN_OUT', p_email: '' });
   calls = [];
   assert.equal((await request(app).post('/v1/auth/sign-out')).status, 204);
   assert.equal(calls.length, 0);
@@ -190,4 +194,24 @@ test('after a reset link (no current password) the new one is set; a weak one is
   assert.equal(weak.body.code, 'WEAK_PASSWORD');
   const short = await request(app).post('/v1/me/password').set('Authorization', 'Bearer access-1').send({ new_password: 'short' });
   assert.equal(short.status, 422);
+});
+
+// VA-71: sign-ins go into the audit log, with the email only.
+const logged = () => calls.filter((c) => c.path === '/rest/v1/rpc/log_auth_event');
+
+test('audit log: a right password logs SIGN_IN as that person, a wrong one SIGN_IN_FAILED, never the password', async () => {
+  await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'nope' });
+  await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' });
+  const rows = logged();
+  assert.deepEqual(rows.map((c) => c.body.p_event), ['SIGN_IN_FAILED', 'SIGN_IN']);
+  assert.equal(rows[0].body.p_email, 'officer@example.com');
+  assert.match(rows[1].auth, /^Bearer access-/, 'SIGN_IN is sent with the new token, so the database knows who');
+  assert.doesNotMatch(JSON.stringify(rows), /nope|old-password/, 'no password in the log');
+});
+
+test('audit log: if it cannot be written, signing in still works', async () => {
+  // The fake answers 404 for the log call unless told otherwise, like a missing migration.
+  const res = await request(app).post('/v1/auth/sign-in').send({ email: 'officer@example.com', password: 'old-password' });
+  assert.equal(res.status, 200);
+  assert.equal(logged().length, 1);
 });
