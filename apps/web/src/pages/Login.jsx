@@ -13,13 +13,14 @@ import { PARK } from "../../../shared/site.js";
 // "Forgot password" emails a reset link. The link opens #/login?reset=1 already
 // signed in (StoreProvider reads the session from the address), where the
 // person chooses a new password. #/login?expired=1: the link was used or too old.
-// After a first sign-in with the default password, staff are asked to choose a new one.
+// F-16: staff whose admin typed a temporary password must choose their own
+// before anything else (after the 6-digit step); the API refuses everything else.
 // Two-step sign-in (VA-70): after the password, every staff member types the
 // 6-digit code from their authenticator app ("mfa"). The first time, they scan
 // a QR code to set the app up ("mfa-setup").
 // Shown at #/login and on the Staff area page (#/staff) for anyone signed out.
 export default function Login() {
-  const { login, signIn, changePassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel, endedReason, clearEndedReason } = useStore();
+  const { login, signIn, changePassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, endedReason, clearEndedReason } = useStore();
   const { query } = useRoute();
   const staff = getStaffPageContent(PARK);
   const [mode, setMode] = useState(query.reset ? "reset" : query.expired ? "change" : "signin"); // signin | change | reset | first | mfa | mfa-setup
@@ -80,6 +81,10 @@ export default function Login() {
     if (!res.ok) return notify(res.message);
     setSetup(null);
     if (mode === "mfa-setup") notify("Two-step sign-in is set up");
+    if (res.first) {
+      setPending(res.id);
+      return switchTo("first");
+    }
     signIn(res.id);
     go("/dashboard");
   };
@@ -113,7 +118,13 @@ export default function Login() {
     const res = await changePassword(null, newPw);
     if (!res.ok) return notify(res.message);
     notify("Password changed");
-    if (mode === "first") signIn(pending);
+    if (mode === "first") {
+      const done = await finishFirstSignIn(pending);
+      if (!done.ok) {
+        notify(done.message);
+        return switchTo("signin");
+      }
+    }
     go("/dashboard");
   };
 
@@ -123,11 +134,6 @@ export default function Login() {
     const res = await changePassword(email, null);
     notify(res.message);
     if (res.ok) switchTo("signin");
-  };
-
-  const skip = () => {
-    signIn(pending);
-    go("/dashboard");
   };
 
   const newFields = (
@@ -251,11 +257,10 @@ export default function Login() {
       {mode === "first" && (
         <form onSubmit={change}>
           <h1>Set a new password</h1>
-          <p className="mute">You signed in with the default password. Choose a new one now, or keep it for later.</p>
+          <p className="mute">You signed in with a temporary password from your admin. Choose your own password to continue.</p>
           {newFields}
           <div className="row wrap gap-top">
             <button className="btn" type="submit"><Icon name="check" size={18} /> Change password</button>
-            <button className="btn ghost" type="button" onClick={skip}>Not now</button>
           </div>
         </form>
       )}

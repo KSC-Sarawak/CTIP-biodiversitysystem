@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { routes, PUBLIC, SENSOR } from './permissions.js';
-import { requireAuth, allow, requireMfa } from './auth/middleware.js';
+import { requireAuth, allow, requireMfa, requirePasswordChanged } from './auth/middleware.js';
 import { MFA_SETUP_ROUTES } from './mfa.js';
 import { handlers as defaultHandlers } from './handlers.js';
 import { requireHttps as httpsOnly } from './https.js';
@@ -31,7 +31,10 @@ export function createApp({ verify, handlers = defaultHandlers, corsOrigins = []
       const body = path.endsWith('/images') ? [receiveJpeg] : [];
       v1[method](path, requireSensorKey, ...body, handler);
     } else {
-      v1[method](path, requireAuth(verify), allow(...roles), requireMfa(mfaRoles, MFA_SETUP_ROUTES.has(`${method} ${path}`)), handler);
+      const key = `${method} ${path}`;
+      const setup = MFA_SETUP_ROUTES.has(key);
+      v1[method](path, requireAuth(verify), allow(...roles), requireMfa(mfaRoles, setup),
+        requirePasswordChanged(setup || key === 'post /me/password'), handler);
     }
   }
   app.use('/v1', v1);

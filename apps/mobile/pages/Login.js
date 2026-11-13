@@ -51,6 +51,11 @@ export default function SignIn({ nav }) {
         setCode('');
         return setStep('code');
       }
+      // F-16: a temporary password from an admin is changed on the website.
+      if (res.first) {
+        await mfaCancel();
+        return setError('You signed in with a temporary password. Choose your own on the website first, then sign in here.');
+      }
       signIn(res.id); // the app then opens this person's first tab
     } catch {
       setError('Sign in failed. Try again in a moment.');
@@ -67,6 +72,11 @@ export default function SignIn({ nav }) {
       if (!res.ok) return setError(res.message);
       if (step === 'setup') notify('Two-step sign-in is set up');
       setSetup(null);
+      if (res.first) {
+        await mfaCancel();
+        setStep('password');
+        return setError('You signed in with a temporary password. Choose your own on the website first, then sign in here.');
+      }
       signIn(res.id);
     } catch {
       setError('The code could not be checked. Try again in a moment.');

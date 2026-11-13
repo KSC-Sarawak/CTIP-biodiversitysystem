@@ -153,7 +153,10 @@ export const sessionHandlers = {
       // The check opened a session of its own; close it again.
       await authRequest('/logout?scope=local', { token: check.data.session.access_token }).catch(() => {});
     }
-    const updated = await authRequest('/user', { method: 'PUT', token: req.user.token, body: { password: body.new_password } });
+    // F-16: the temporary password is gone, so lift the block. The app then
+    // renews its session (POST /auth/refresh) to get a token without the flag.
+    const done = req.user.mustChangePassword ? { data: { must_change_password: false } } : {};
+    const updated = await authRequest('/user', { method: 'PUT', token: req.user.token, body: { password: body.new_password, ...done } });
     if (updated.ok) return res.status(204).end();
     const err = await updated.json().catch(() => ({}));
     if (err.error_code === 'same_password') return fail(res, 422, 'SAME_PASSWORD', 'Choose a password different from your current one');

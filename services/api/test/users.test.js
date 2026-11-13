@@ -17,7 +17,7 @@ const verify = async (who) => ({ sub: users[who], user_role: roleOf[who] });
 const app = createApp({ verify });
 const as = (who) => ({ Authorization: `Bearer ${who}` });
 
-let profiles, rpcCalls, authAnswer, authCalls;
+let profiles, rpcCalls, authAnswer, authCalls, signupBody;
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const RATE_LIMITED = () => json(429, { code: 429, error_code: 'over_email_send_rate_limit', msg: 'email rate limit exceeded' });
 
@@ -36,6 +36,7 @@ beforeEach((t) => {
     const method = init.method ?? 'GET';
     if (url.pathname.startsWith('/auth/v1/')) authCalls.push(url.pathname.replace('/auth/v1/', ''));
     if (url.pathname === '/auth/v1/signup') {
+      signupBody = JSON.parse(init.body);
       if (authAnswer.signup) return authAnswer.signup();
       const id = crypto.randomUUID();
       // handle_new_user() makes the profile row
@@ -250,4 +251,17 @@ test("Supabase refusing an address or a password is explained in plain words", a
   const weak = await create({ password: 'password123' });
   assert.equal(weak.body.code, 'WEAK_PASSWORD');
   assert.match(weak.body.message, /data leak/);
+});
+
+/* ---------- F-16: temporary passwords ---------- */
+
+test('F-16: an account made with a typed password is flagged to change it; an invitation is not', async () => {
+  const typed = await request(app).post('/v1/profiles').set(as('admin'))
+    .send({ email: 'tempstaff1@gmail.com', full_name: 'Temp', role: 'botanist', password: 'longenough1' });
+  assert.equal(typed.status, 201);
+  assert.equal(signupBody.data.must_change_password, true);
+  const invited = await request(app).post('/v1/profiles').set(as('admin'))
+    .send({ email: 'invitestaff1@gmail.com', full_name: 'Invited', role: 'botanist' });
+  assert.equal(invited.status, 201);
+  assert.equal(signupBody.data.must_change_password, undefined);
 });
