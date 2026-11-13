@@ -262,7 +262,7 @@ export function Audit() {
   const [action, setAction] = useState("");
   const [size, setSize] = useState(AUDIT_PAGE_SIZES[0]);
   const [page, setPage] = useState(0);
-  const rows = action ? db.audit.filter((a) => a.action === action) : db.audit;
+  const rows = action ? db.audit.filter((a) => String(a.action).toUpperCase() === action) : db.audit;
   const pages = Math.max(1, Math.ceil(rows.length / size));
   const at = Math.min(page, pages - 1);
   const shown = rows.slice(at * size, at * size + size);
