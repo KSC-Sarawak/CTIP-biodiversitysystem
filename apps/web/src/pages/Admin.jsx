@@ -252,25 +252,47 @@ export function Users() {
 }
 
 // Every change recorded by the actions (audit_logs table), newest first.
+// Sign-in events (VA-71) have table "auth" and keep the email in new_value.
+const AUDIT_ACTIONS = ["INSERT", "UPDATE", "DELETE", "SIGN_IN", "SIGN_IN_FAILED", "MFA_FAILED", "SIGN_OUT"];
+// Rows per page (lecturer, 13 Nov: 10, 25 or 50).
+const AUDIT_PAGE_SIZES = [10, 25, 50];
+
 export function Audit() {
   const { db } = useStore();
+  const [action, setAction] = useState("");
+  const [size, setSize] = useState(AUDIT_PAGE_SIZES[0]);
+  const [page, setPage] = useState(0);
+  const rows = action ? db.audit.filter((a) => a.action === action) : db.audit;
+  const pages = Math.max(1, Math.ceil(rows.length / size));
+  const at = Math.min(page, pages - 1);
+  const shown = rows.slice(at * size, at * size + size);
   return (
     <Shell seg="audit">
       <PageHead
         overline="Admin dashboard"
         title="Audit log"
-        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited.`}
+        lead={`Who changed what, newest first. ${db.audit.length} ${db.audit.length === 1 ? "entry" : "entries"}; entries cannot be edited or deleted. Sign-ins are logged too.`}
         tone="info"
       />
+
+      <p>
+        <select value={action} onChange={(e) => { setAction(e.target.value); setPage(0); }} aria-label="Filter by action">
+          <option value="">All actions</option>
+          {AUDIT_ACTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
+        </select>{" "}
+        <select value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(0); }} aria-label="Rows per page">
+          {AUDIT_PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
+        </select>
+      </p>
 
       <div className="tablewrap">
         <table>
           <thead><tr><th>When</th><th>Who</th><th>Table</th><th>Action</th><th>Change</th></tr></thead>
           <tbody>
-            {db.audit.map((a) => (
+            {shown.map((a) => (
               <tr key={a.id}>
                 <td>{fmtDateTime(a.changed_at)}</td>
-                <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || "System"}</td>
+                <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || a.new_value?.email || "System"}</td>
                 <td>{a.table_name}</td>
                 <td><Chip value={a.action} /></td>
                 <td className="code">{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</td>
@@ -279,7 +301,13 @@ export function Audit() {
           </tbody>
         </table>
       </div>
-      <p className="mute small">Showing {db.audit.length} entries.</p>
+      <p className="mute small">
+        Showing {rows.length ? at * size + 1 : 0} to {at * size + shown.length} of {rows.length} entries{action ? ` (${db.audit.length} in total)` : ""}. Page {at + 1} of {pages}.
+      </p>
+      <p>
+        <button type="button" className="btn ghost" onClick={() => setPage(at - 1)} disabled={at === 0}>Previous</button>{" "}
+        <button type="button" className="btn ghost" onClick={() => setPage(at + 1)} disabled={at >= pages - 1}>Next</button>
+      </p>
     </Shell>
   );
 }

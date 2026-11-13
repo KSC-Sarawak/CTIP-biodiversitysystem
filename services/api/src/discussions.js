@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { supabaseAs } from './supabase.js';
 import { parseBody, fail, dbError, UUID } from './validate.js';
+import { sendPushToUsers } from './pushNotifications.js';
 
 // Discussion board (#/discussion). Threads work like email: the owner shares
 // one with people and/or role groups and makes it public or private. Who can
@@ -123,6 +124,43 @@ export const discussionHandlers = {
     const created = await loadThread(db, newId);
     if (created.error) return dbError(res, created.error);
     if (!created.data) return dbError(res, { message: 'The new discussion could not be read back' });
+
+    // Send push notification to target audience & mentioned users
+    try {
+      const recipientIds = new Set();
+      const rolesToExpand = new Set();
+      (created.data.audience || []).forEach((a) => {
+        if (a.user_id && a.user_id !== req.user.id) recipientIds.add(a.user_id);
+        if (a.role) rolesToExpand.add(a.role);
+      });
+      (b.mentions || []).forEach((m) => {
+        if (m !== req.user.id) recipientIds.add(m);
+      });
+
+      // Expand role-targeted audiences (e.g. botanist, officer) to active user IDs
+      if (rolesToExpand.size > 0) {
+        const { data: roleUsers } = await db
+          .from('profiles')
+          .select('id')
+          .in('role', [...rolesToExpand])
+          .eq('is_active', true);
+        (roleUsers || []).forEach((u) => {
+          if (u.id !== req.user.id) recipientIds.add(u.id);
+        });
+      }
+
+      if (recipientIds.size > 0) {
+        sendPushToUsers({
+          db,
+          userIds: [...recipientIds],
+          title: `New discussion: ${b.title}`,
+          body: b.body.slice(0, 150),
+          data: { type: 'discussion', discussionId: newId },
+          channelId: 'discussions',
+        });
+      }
+    } catch {}
+
     res.status(201).json(created.data);
   },
 
@@ -198,6 +236,51 @@ export const discussionHandlers = {
     }
     if (error?.code === '42501') return notFound(res);
     if (error) return dbError(res, error);
+
+    // Send push notification to thread participants
+    try {
+      const fullThread = await loadThread(db, req.params.id);
+      if (fullThread.data) {
+        const recipients = new Set();
+        const rolesToExpand = new Set();
+        if (fullThread.data.owner_id && fullThread.data.owner_id !== req.user.id) {
+          recipients.add(fullThread.data.owner_id);
+        }
+        (fullThread.data.audience || []).forEach((a) => {
+          if (a.user_id && a.user_id !== req.user.id) recipients.add(a.user_id);
+          if (a.role) rolesToExpand.add(a.role);
+        });
+        (fullThread.data.posts || []).forEach((p) => {
+          if (p.author_id && p.author_id !== req.user.id) recipients.add(p.author_id);
+        });
+        (b.mentions || []).forEach((m) => {
+          if (m !== req.user.id) recipients.add(m);
+        });
+
+        if (rolesToExpand.size > 0) {
+          const { data: roleUsers } = await db
+            .from('profiles')
+            .select('id')
+            .in('role', [...rolesToExpand])
+            .eq('is_active', true);
+          (roleUsers || []).forEach((u) => {
+            if (u.id !== req.user.id) recipients.add(u.id);
+          });
+        }
+
+        if (recipients.size > 0) {
+          sendPushToUsers({
+            db,
+            userIds: [...recipients],
+            title: `Reply in "${fullThread.data.title}"`,
+            body: b.body.slice(0, 150),
+            data: { type: 'discussion', discussionId: req.params.id },
+            channelId: 'discussions',
+          });
+        }
+      }
+    } catch {}
+
     res.status(201).json(data);
   },
 

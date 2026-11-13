@@ -11,7 +11,7 @@ import { IconButton } from './buttons.js';
 export function SearchField({ value, onChangeText, placeholder, pill, onSubmitEditing, autoFocus }) {
   const { c } = useTheme();
   return (
-    <View style={{ height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, borderRadius: pill ? 999 : 10, backgroundColor: c.bg }}>
+    <View style={{ height: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, borderRadius: pill ? 999 : 10, backgroundColor: c.surface, borderWidth: 1, borderColor: c.line }}>
       <Icon name="search" size={20} color={c.ink3} />
       <TextInput
         accessibilityLabel={placeholder}
@@ -34,11 +34,11 @@ export function SearchField({ value, onChangeText, placeholder, pill, onSubmitEd
 // `rightLabel`: what a screen reader says for the right icon ("Show password"), when
 // the field's own label would be wrong for it. `inputRef` lets a form move the
 // cursor here (the keyboard's "next" key); `autoComplete` lets the phone fill it in.
-export function Field({ label, value, onChangeText, placeholder, mono, italic, suffix, hint, optional, width, secure, rightIcon, onRightPress, rightLabel, keyboardType, error, editable = true, maxLength, autoComplete, returnKeyType, onSubmitEditing, autoFocus, inputRef }) {
+export function Field({ label, value, onChangeText, placeholder, mono, italic, suffix, hint, optional, width, secure, rightIcon, onRightPress, rightLabel, keyboardType, error, editable = true, maxLength, autoComplete, returnKeyType, onSubmitEditing, autoFocus, inputRef, bg }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
   const family = mono ? font('mono', 500) : italic ? font('display', 500, true) : font('text', 400);
-  const border = error ? c.danger : focus ? c.accent : 'transparent';
+  const border = error ? c.danger : focus ? c.accent : c.line;
 
   return (
     <View style={{ gap: 6 }}>
@@ -46,7 +46,7 @@ export function Field({ label, value, onChangeText, placeholder, mono, italic, s
         {label}
         {optional ? <Text style={{ fontFamily: font('text', 600), color: c.ink2 }}> (optional)</Text> : null}
       </Text>
-      <View style={{ width: width || '100%', height: 48, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: c.bg, borderWidth: 2, borderColor: border }}>
+      <View style={{ width: width || '100%', height: 48, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: 10, backgroundColor: bg || c.surface, borderWidth: focus || error ? 2 : 1, borderColor: border }}>
         <TextInput
           accessibilityLabel={label}
           value={value}
@@ -82,7 +82,7 @@ export function Field({ label, value, onChangeText, placeholder, mono, italic, s
 }
 
 // `maxLength`: the most characters the API accepts for this field, if it has a limit.
-export function Area({ label, value, onChangeText, placeholder, rows = 3, optional, maxLength }) {
+export function Area({ label, value, onChangeText, placeholder, rows = 3, optional, maxLength, bg }) {
   const { c } = useTheme();
   const [focus, setFocus] = useState(false);
 
@@ -103,7 +103,7 @@ export function Area({ label, value, onChangeText, placeholder, rows = 3, option
         onFocus={() => setFocus(true)}
         onBlur={() => setFocus(false)}
         textAlignVertical="top"
-        style={{ minHeight: rows * 24 + 24, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: c.bg, borderWidth: 2, borderColor: focus ? c.accent : 'transparent', fontFamily: font('text', 400), fontSize: 16, lineHeight: 24, color: c.ink }}
+        style={{ minHeight: rows * 24 + 24, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10, backgroundColor: bg || c.surface, borderWidth: focus ? 2 : 1, borderColor: focus ? c.accent : c.line, fontFamily: font('text', 400), fontSize: 16, lineHeight: 24, color: c.ink }}
       />
     </View>
   );
@@ -154,12 +154,27 @@ export function Pills({ items, value, onChange }) {
 export function Segmented({ items, value, onChange }) {
   const { c } = useTheme();
   return (
-    <View style={{ flexDirection: 'row', gap: 4, padding: 4, borderRadius: 12, backgroundColor: c.bg }}>
+    <View style={{ flexDirection: 'row', gap: 4, padding: 4, borderRadius: 12, backgroundColor: c.bg, borderWidth: 1, borderColor: c.line }}>
       {items.map((it) => {
         const on = it.key === value;
         return (
           <Pressable key={it.key} accessibilityRole="button" accessibilityState={{ selected: on }} onPress={() => onChange(it.key)} hitSlop={{ top: 4, bottom: 4 }}
-            style={({ pressed }) => ({ flex: 1, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? c.surface : 'transparent', borderWidth: on ? 1 : 0, borderColor: c.line, opacity: pressed ? 0.7 : 1 })}>
+            style={({ pressed }) => ({
+              flex: 1,
+              height: 40,
+              borderRadius: 8,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: on ? c.surface : 'transparent',
+              borderWidth: on ? 1.5 : 0,
+              borderColor: on ? c.accent : 'transparent',
+              elevation: on ? 2 : 0,
+              shadowColor: on ? '#000000' : undefined,
+              shadowOpacity: on ? 0.08 : 0,
+              shadowOffset: { width: 0, height: 1 },
+              shadowRadius: 2,
+              opacity: pressed ? 0.7 : 1,
+            })}>
             <Text style={{ fontFamily: font('text', on ? 800 : 700), fontSize: 14, color: on ? c.ink : c.ink2 }}>{it.label}</Text>
           </Pressable>
         );

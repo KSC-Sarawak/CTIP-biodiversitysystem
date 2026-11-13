@@ -2,7 +2,7 @@
 // Species profile (one kind of plant) and the tagged-plant page (one plant in the
 // forest, what you see after scanning its tag).
 import React, { useState } from 'react';
-import { View, Text, ScrollView, Pressable, Image, useWindowDimensions } from 'react-native';
+import { View, Text, ScrollView, Pressable, Image, useWindowDimensions, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useStore } from '../../shared/store.js';
@@ -21,9 +21,10 @@ import PhotoNote from '../components/PhotoNote.js';
 import { longDate, coords } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { usePullRefresh } from '../hooks/usePullRefresh.js';
+import { SpeciesFormModal } from './Species.js';
 
 // Big photo at the top with a round back button and a photo counter. Swipe for more.
-function Hero({ photos, height = 260, onBack }) {
+function Hero({ photos, height = 260, onBack, right }) {
   const { c } = useTheme();
   const { width } = useWindowDimensions();
   const [index, setIndex] = useState(0);
@@ -47,6 +48,11 @@ function Hero({ photos, height = 260, onBack }) {
           style={({ pressed }) => ({ position: 'absolute', left: 12, top: 12, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: c.surface, opacity: pressed ? 0.7 : 1 })}>
           <Icon name="chevL" size={22} color={c.ink} />
         </Pressable>
+        {right ? (
+          <View style={{ position: 'absolute', right: 12, top: 12 }}>
+            {right}
+          </View>
+        ) : null}
         {photos.length > 1 ? (
           <View style={{ position: 'absolute', right: 12, bottom: 12, paddingHorizontal: 10, paddingVertical: 3, borderRadius: 999, backgroundColor: c.surface }}>
             <Text style={{ fontFamily: font('text', 700), fontSize: 12, color: c.ink }}>{index + 1} / {photos.length}</Text>
@@ -75,10 +81,12 @@ function Page({ hero, children }) {
 const HIDDEN_NOTE = HIDDEN_LOCATION_NOTE;
 
 export function SpeciesProfile({ nav, params }) {
-  const { db, role } = useStore();
+  const { db, role, saveSpecies, notify } = useStore();
   const { c, t } = useTheme();
+  const [editing, setEditing] = useState(false);
   const sp = db.species.find((s) => s.id === params?.id && !s.is_deleted);
   const staff = can(role, 'pending');
+  const canEdit = can(role, 'species');
   if (!sp || (!sp.is_published && !staff)) {
     return (
       <Screen header={<Header left={<IconButton name="chevL" label="Back" onPress={nav.back} />} />}>
@@ -101,9 +109,56 @@ export function SpeciesProfile({ nav, params }) {
   const onMap = plants.some((p) => shownCoords(p, role)); // at least one plant whose spot this role may see
 
   return (
-    <Page hero={<Hero photos={photos} onBack={nav.back} />}>
+    <Page
+      hero={
+        <Hero
+          photos={photos}
+          onBack={nav.back}
+          right={
+            canEdit ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Edit species"
+                onPress={() => setEditing(true)}
+                hitSlop={4}
+                style={({ pressed }) => ({
+                  height: 44,
+                  paddingHorizontal: 16,
+                  borderRadius: 22,
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  backgroundColor: c.surface,
+                  opacity: pressed ? 0.7 : 1,
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 1 },
+                  shadowOpacity: 0.15,
+                  shadowRadius: 2,
+                  elevation: 2,
+                })}
+              >
+                <Icon name="pencil" size={16} color={c.ink} />
+                <Text style={{ fontFamily: font('text', 700), fontSize: 13, color: c.ink }}>Edit</Text>
+              </Pressable>
+            ) : null
+          }
+        />
+      }
+    >
       <View style={{ gap: 6 }}>
-        <Text style={[t.overline, { color: c.accent }]}>{sp.family}</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <Text style={[t.overline, { color: c.accent }]}>{sp.family}</Text>
+          {canEdit && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Edit species"
+              onPress={() => setEditing(true)}
+              hitSlop={8}
+            >
+              <Text style={{ fontFamily: font('text', 700), fontSize: 14, color: c.accent }}>Edit species</Text>
+            </Pressable>
+          )}
+        </View>
         <Text accessibilityRole="header" style={{ fontFamily: font('display', 700), fontSize: 30, lineHeight: 36, color: c.ink }}>{sp.common_name || sp.scientific_name}</Text>
         <Sci size={17}>{sp.scientific_name}</Sci>
         <View style={{ paddingTop: 6 }}><Chip status={sp.conservation_status} /></View>
@@ -167,6 +222,23 @@ export function SpeciesProfile({ nav, params }) {
           ))}
         </Section>
       ) : null}
+
+      {/* Edit Species Modal */}
+      {editing && (
+        <SpeciesFormModal
+          species={sp}
+          onClose={() => setEditing(false)}
+          onSave={async (fields) => {
+            const res = await saveSpecies({ ...fields, id: sp.id });
+            if (res?.ok !== false) {
+              notify(`${fields.scientific_name || 'Species'} updated`);
+              setEditing(false);
+            } else {
+              Alert.alert('Error', res?.message || 'Could not save species');
+            }
+          }}
+        />
+      )}
     </Page>
   );
 }

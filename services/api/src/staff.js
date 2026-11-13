@@ -8,6 +8,7 @@ import { accountBlock } from './accountStatus.js';
 import { dbLoad } from './dbLoad.js';
 import { emailProblem, passwordProblem, nameProblem, weakPasswordMessage } from './accountRules.js';
 import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } from './emailLimit.js';
+import { sendPushToUsers } from './pushNotifications.js';
 
 // Everything else the apps used to do straight against Supabase: the start-up
 // load, accounts, QR tags, publishing, alerts, sensor thresholds and
@@ -150,6 +151,19 @@ async function updateAlert(req, res, changes) {
     .eq('id', req.params.id).select('*').maybeSingle();
   if (error) return dbError(res, error);
   if (!data) return fail(res, 404, 'NOT_FOUND', 'Alert not found');
+
+  // If assigned to a staff officer, trigger remote push notification
+  if (changes.assigned_to && changes.assigned_to !== req.user.id) {
+    sendPushToUsers({
+      db: supabaseAs(req.user),
+      userIds: changes.assigned_to,
+      title: 'Sensor Alert Assigned to You',
+      body: `You have been assigned to handle a ${data.severity || 'high'} severity alert. Tap to inspect.`,
+      data: { alertId: data.id, type: 'alert' },
+      channelId: 'alerts',
+    }).catch(() => {});
+  }
+
   res.json(data);
 }
 
@@ -403,7 +417,9 @@ export const staffHandlers = {
     const { data: created, error: authError } = await auth.signUp({
       email: body.email,
       password: body.password ?? `${crypto.randomUUID()}-${crypto.randomUUID()}`,
-      options: { data: { full_name: body.full_name, role: body.role } },
+      // F-16: a password typed by the admin is temporary. The flag makes the API
+      // refuse everything until the person has chosen their own (POST /me/password).
+      options: { data: { full_name: body.full_name, role: body.role, ...(invite ? {} : { must_change_password: true }) } },
     });
     if (authError) {
       if (authError.code === 'signup_disabled' || /signups not allowed/i.test(authError.message)) {
@@ -734,6 +750,39 @@ export const staffHandlers = {
   'post /notifications/read-all': async (req, res) => {
     const { error } = await supabaseAs(req.user).from('notifications').update({ is_read: true })
       .eq('user_id', req.user.id).eq('is_read', false);
+    if (error) return dbError(res, error);
+    res.status(204).end();
+  },
+
+  // Save or update device Expo push notification token
+  'post /me/push-token': async (req, res) => {
+    const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
+    if (!token) return fail(res, 400, 'INVALID_TOKEN', 'Expo push token is required');
+    const platform = ['android', 'ios', 'web'].includes(req.body?.platform) ? req.body.platform : 'unknown';
+    const deviceName = typeof req.body?.deviceName === 'string' ? req.body.deviceName.slice(0, 100) : null;
+
+    const db = supabaseAs(req.user);
+    const { error } = await db.from('user_push_tokens').upsert({
+      token,
+      user_id: req.user.id,
+      platform,
+      device_name: deviceName,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) return dbError(res, error);
+    res.status(200).json({ ok: true });
+  },
+
+  // Remove device Expo push notification token on sign-out
+  'delete /me/push-token': async (req, res) => {
+    const token = typeof req.body?.token === 'string'
+      ? req.body.token.trim()
+      : typeof req.query?.token === 'string'
+        ? req.query.token.trim()
+        : '';
+    if (!token) return fail(res, 400, 'INVALID_TOKEN', 'Device push token is required to unregister');
+    const db = supabaseAs(req.user);
+    const { error } = await db.from('user_push_tokens').delete().eq('user_id', req.user.id).eq('token', token);
     if (error) return dbError(res, error);
     res.status(204).end();
   },
