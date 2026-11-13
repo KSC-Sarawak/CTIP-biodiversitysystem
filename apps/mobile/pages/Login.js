@@ -17,7 +17,7 @@ import { Screen, Header, IconButton, TitleBlock, Field, Button, Txt } from '../c
 import { LogoMark } from '../components/Chrome.js';
 
 export default function SignIn({ nav }) {
-  const { login, signIn, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, changePassword, notify } = useStore();
+  const { login, signIn, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, changePassword, notify } = useStore();
   const { c } = useTheme();
 
   // Mode: 'credentials' | 'forgot' | 'first' | 'code' | 'setup'
@@ -70,6 +70,23 @@ export default function SignIn({ nav }) {
       signIn(res.id);
     } catch {
       setError('Sign in failed. Try again in a moment.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Lost phone (lecturer, 13 Nov): email a link; it opens the staff website,
+  // which removes the old app and shows the QR set-up for the new phone.
+  const lostPhone = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await mfaRecovery();
+      if (!res.ok) return setError(res.message);
+      await mfaCancel();
+      setCode('');
+      setMode('credentials');
+      notify(res.message);
     } finally {
       setBusy(false);
     }
@@ -228,7 +245,7 @@ export default function SignIn({ nav }) {
           error={error || undefined}
         />
         <Button label={busy ? 'Checking…' : 'Verify'} disabled={busy || code.length !== 6} onPress={submitCode} />
-        <Txt v="small" color={c.ink2}>Lost your phone? Ask an admin to reset your two-step sign-in.</Txt>
+        <Button label="Lost your phone? Email me a link" kind="text" disabled={busy} onPress={lostPhone} />
       </Screen>
     );
   }

@@ -524,6 +524,50 @@ paths:
         '429': { $ref: '#/components/responses/TooManyAttempts' }
         '502': { $ref: '#/components/responses/AuthUnavailable' }
 
+  /auth/mfa/recovery:
+    post:
+      tags: [Auth]
+      operationId: requestMfaRecovery
+      summary: Lost phone - email a sign-in link to reset two-step sign-in
+      description: |
+        Call with the password-only session from sign-in. Emails a sign-in
+        link to the account's own address (never to an address in the
+        request). The link opens the website (MFA_RESET_REDIRECT_URL, else
+        PASSWORD_RESET_REDIRECT_URL) with a new session; send that session to
+        POST /auth/mfa/reset. At most 3 emails per caller address every 15 minutes.
+      responses:
+        '202': { description: Email sent }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: MFA_NOT_SET_UP (no app to reset)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429': { $ref: '#/components/responses/TooManyAttempts' }
+        '502': { $ref: '#/components/responses/AuthUnavailable' }
+
+  /auth/mfa/reset:
+    post:
+      tags: [Auth]
+      operationId: resetMfa
+      summary: Lost phone - remove the old authenticator app
+      description: |
+        Only with the session the email link from POST /auth/mfa/recovery
+        made, within 15 minutes; any other session gets 403
+        EMAIL_LINK_REQUIRED. Afterwards set up the new phone with
+        POST /auth/mfa/enroll and POST /auth/mfa/verify, using the same session.
+      responses:
+        '204': { description: Old app removed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: EMAIL_LINK_REQUIRED, or the role is not allowed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '502': { $ref: '#/components/responses/AuthUnavailable' }
+        '503': { $ref: '#/components/responses/AuthUnavailable' }
+
   /me/password:
     post:
       tags: [Profiles]

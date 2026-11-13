@@ -14,7 +14,7 @@ export function requireAuth(verify) {
     try {
       const claims = await verify(token);
       req.user = {
-        id: claims.sub, email: claims.email, role: claims.user_role ?? null, aal: claims.aal ?? 'aal1', token,
+        id: claims.sub, email: claims.email, role: claims.user_role ?? null, aal: claims.aal ?? 'aal1', amr: claims.amr ?? [], token,
         // F-16: an admin made this account with a temporary password.
         mustChangePassword: claims.user_metadata?.must_change_password === true,
       };

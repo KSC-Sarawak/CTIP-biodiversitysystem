@@ -19,6 +19,9 @@ export const routes = [
   // password-only session, so the code can be set up and checked.
   ['post', '/auth/mfa/enroll', ANY_STAFF],
   ['post', '/auth/mfa/verify', ANY_STAFF],
+  // Lost phone (lecturer, 13 Nov: recover through email): ask for an email link, then reset.
+  ['post', '/auth/mfa/recovery', ANY_STAFF],
+  ['post', '/auth/mfa/reset', ANY_STAFF],
 
   // Health check for the apps' "API down" notice: no database call
   ['get', '/health', PUBLIC],
