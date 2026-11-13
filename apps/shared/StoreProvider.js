@@ -1517,9 +1517,12 @@ function collectionMatches(a = [], b = []) {
 
   const assignAlert = async (id, assignee) => {
     const res = await callApi(assignAlertApi, id, assignee || null);
-    if (!res.ok) return notify(`Failed to assign alert: ${res.message}`);
-    notify("Alert assigned");
+    if (!res.ok) {
+      notify(`Failed to assign alert: ${res.message}`);
+      return false;
+    }
     await loadFromApi(true);
+    return true;
   };
 
   const addAlertNote = async (id, note) => {
@@ -1536,9 +1539,13 @@ function collectionMatches(a = [], b = []) {
 
   const setThresholds = async (nodeId, thresholds) => {
     const res = await callApi(setThresholdsApi, nodeId, thresholds);
-    if (!res.ok) return notify(`Failed to update thresholds: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to update thresholds: ${res.message}`);
+      return false;
+    }
     setDb((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId ? { ...n, thresholds } : n)) }));
     notify("Thresholds updated");
+    return true;
   };
 
   // One node's readings over a longer range than the workspace's last 24 hours.

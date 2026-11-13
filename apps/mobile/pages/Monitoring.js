@@ -1,38 +1,83 @@
 // apps/mobile/pages/Monitoring.js
-// Sensor nodes near protected plants: open alerts first, then a 24-hour chart and
-// each node's latest reading. Alert detail lets the officer acknowledge or resolve.
-import React, { useState } from 'react';
-import { View, Text, Pressable } from 'react-native';
+// Sensor nodes near protected plants:
+// - Node map with Leaflet pin locations and live status
+// - Dual & multi sparklines (Temperature, Air Humidity, Soil Moisture)
+// - Distance to nearest object and motion detection indicators
+// - Webcam photos captured on motion events with full photo modal
+// - Open alerts and alert history (filters: open, acknowledged, resolved, all)
+// - Admin threshold limits editing (temp_max, moisture_min)
+// - Alert detail with 3-step progress pipeline (Assign -> Acknowledge -> Resolve),
+//   conservation officer assignment, investigation notes, and resolution outcome.
+import React, { useState, useEffect, useMemo } from 'react';
+import { View, Text, Pressable, ScrollView, Modal, Alert, TextInput, Image } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
-import { plantView, nameOf } from '../../shared/selectors.js';
+import { plantView, nameOf, shownCoords } from '../../shared/selectors.js';
+import { isExactProtected } from '../../shared/mapConfig.js';
 import { useTheme, font, statusText } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
-  Screen, Bar, TitleBlock, Section, Row, Thumb, Mono, Txt, DotLabel, Chip, Spark, Button, Area, Empty, EmptyState, Pills,
+  Screen, Bar, Header, IconButton, TitleBlock, Section, Row, Thumb, Mono, Txt, DotLabel, Chip, Spark, Button, Area,
+  Empty, EmptyState, Pills, Field,
 } from '../components/Bits.js';
-import { dateTime } from '../components/format.js';
+import LeafletMap from '../components/LeafletMap.js';
+import { dateTime, shortDate } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 
 const latest = (readings = []) => readings[readings.length - 1];
 
+const TIME_RANGES = [
+  { key: 6, label: '6h' },
+  { key: 12, label: '12h' },
+  { key: 24, label: '24h' },
+  { key: 168, label: '7d' },
+  { key: 720, label: '30d' },
+];
+
+const RANGE_TITLE = {
+  6: 'Last 6 hours readings',
+  12: 'Last 12 hours readings',
+  24: 'Last 24 hours readings',
+  168: 'Last 7 days readings',
+  720: 'Last 30 days readings',
+};
+
 function AlertCard({ a, node, onPress }) {
   const { c } = useTheme();
-  const tone = a.status === 'open' ? 'danger' : 'warning';
+  const tone = a.status === 'open' ? 'danger' : a.status === 'acknowledged' ? 'warning' : 'accent';
   const r = a.reading || {};
   const limit = node?.thresholds?.temp_max;
-  const what = r.temperature != null ? `${r.temperature}°C${limit != null ? `, limit ${limit}°C` : ''}` : r.motion ? 'Movement detected near the plant' : 'Unusual reading';
+  const what = r.temperature != null
+    ? `${r.temperature}°C${limit != null ? `, limit ${limit}°C` : ''}`
+    : r.motion
+    ? 'Movement detected near the plant'
+    : 'Unusual reading';
+
   return (
-    <Pressable accessibilityRole="button" onPress={onPress}
-      style={({ pressed }) => ({ flexDirection: 'row', gap: 14, padding: 16, borderRadius: 14, backgroundColor: c[tone + 'Soft'], borderWidth: 1, borderColor: c[tone + 'Line'], opacity: pressed ? 0.7 : 1 })}>
-      <Icon name={r.temperature != null ? 'thermo' : 'activity'} size={24} color={c[tone]} />
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => ({
+        flexDirection: 'row',
+        gap: 14,
+        padding: 16,
+        borderRadius: 14,
+        backgroundColor: c[tone + 'Soft'] || c.bg,
+        borderWidth: 1,
+        borderColor: c[tone + 'Line'] || c.line,
+        opacity: pressed ? 0.7 : 1,
+      })}
+    >
+      <Icon name={r.temperature != null ? 'thermo' : 'activity'} size={24} color={c[tone] || c.accent} />
       <View style={{ flex: 1, gap: 3 }}>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
           <Txt v="label" style={{ fontSize: 16, flex: 1 }}>{a.type}</Txt>
           <DotLabel status={a.severity} label={statusText(a.severity || 'unknown')} />
         </View>
-        <Txt v="body" style={{ fontSize: 15 }}>{node?.name} · {what}</Txt>
-        <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 600) }}>{dateTime(a.created_at)} · {a.status === 'open' ? 'open' : 'acknowledged'}</Txt>
+        <Txt v="body" style={{ fontSize: 15 }}>{node?.name || 'Unknown node'} · {what}</Txt>
+        <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 600) }}>
+          {dateTime(a.created_at)} · {a.status}
+        </Txt>
       </View>
       <Icon name="chevR" size={20} color={c.ink3} />
     </Pressable>
@@ -41,137 +86,843 @@ function AlertCard({ a, node, onPress }) {
 
 export function Monitor({ nav }) {
   usePolling(5000);
-  const { db } = useStore();
+  const { db, role, setThresholds, notify, loadNodeTelemetry, loadNodeImages } = useStore();
   const { c } = useTheme();
-  // The node on the chart: the one picked, else the first active one. Worked out
-  // on every render, because the nodes can arrive after this screen opens.
+
   const [picked, setPicked] = useState(null);
-  const nodeId = db.nodes.some((n) => n.id === picked) ? picked : db.nodes.find((n) => n.status === 'active')?.id || db.nodes[0]?.id;
-  const active = db.alerts.filter((a) => a.status !== 'resolved').sort((a, b) => (a.status === 'open' ? -1 : 1) - (b.status === 'open' ? -1 : 1));
-  const openCount = db.alerts.filter((a) => a.status === 'open').length;
-  const offline = db.nodes.filter((n) => n.status !== 'active').length;
-  const node = db.nodes.find((n) => n.id === nodeId);
-  const readings = db.telemetry[nodeId] || [];
+  const [historyTab, setHistoryTab] = useState('open'); // open | acknowledged | resolved | all
+  const [editingLimits, setEditingLimits] = useState(false);
+  const [newTempMax, setNewTempMax] = useState('32');
+  const [newMoistureMin, setNewMoistureMin] = useState('25');
+  const [savingLimits, setSavingLimits] = useState(false);
+
+  // Time range selection
+  const [range, setRange] = useState(24);
+  const [customTelemetry, setCustomTelemetry] = useState(null);
+  const [telemetryLoading, setTelemetryLoading] = useState(false);
+
+  // Webcam photos state
+  const [nodeImages, setNodeImages] = useState([]);
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [imagesError, setImagesError] = useState(null);
+  const [selectedImage, setSelectedImage] = useState(null);
+
+  const nodeId = (db.nodes || []).some((n) => n.id === picked)
+    ? picked
+    : (db.nodes || []).find((n) => n.status === 'active')?.id || db.nodes?.[0]?.id;
+
+  const node = (db.nodes || []).find((n) => n.id === nodeId);
+
+  // Fetch telemetry when range > 24 hours
+  useEffect(() => {
+    if (range <= 24 || !nodeId || !loadNodeTelemetry) {
+      setCustomTelemetry(null);
+      return;
+    }
+    let cancel = false;
+    setTelemetryLoading(true);
+    loadNodeTelemetry(nodeId, range).then((res) => {
+      if (cancel) return;
+      setTelemetryLoading(false);
+      if (res?.ok) {
+        setCustomTelemetry(res.rows || []);
+      } else {
+        notify(`Could not load readings: ${res?.message || 'Error'}`);
+      }
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [nodeId, range, loadNodeTelemetry]);
+
+  // Fetch webcam photos for the selected node
+  const fetchNodeImages = () => {
+    if (!nodeId || !loadNodeImages) return;
+    setImagesLoading(true);
+    setImagesError(null);
+    loadNodeImages(nodeId, 12).then((res) => {
+      setImagesLoading(false);
+      if (res?.ok) {
+        setNodeImages(res.images || []);
+      } else {
+        setImagesError(res?.message || 'Could not load photos');
+      }
+    }).catch((err) => {
+      setImagesLoading(false);
+      setImagesError(err?.message || 'Could not load photos');
+    });
+  };
+
+  useEffect(() => {
+    fetchNodeImages();
+  }, [nodeId]);
+
+  const readings = useMemo(() => {
+    if (range > 24) return customTelemetry || [];
+    const base = (db.telemetry || {})[nodeId] || [];
+    if (range === 24) return base;
+    const cutoff = Date.now() - range * 3600e3;
+    return base.filter((r) => {
+      const t = r.ts ? new Date(r.ts).getTime() : 0;
+      return !t || t >= cutoff;
+    });
+  }, [nodeId, range, db.telemetry, customTelemetry]);
+
   const now = latest(readings);
-  const limit = node?.thresholds?.temp_max; // a node may have no limit set
+  const limits = node?.thresholds || {};
+
+  const openCount = (db.alerts || []).filter((a) => a.status === 'open').length;
+  const offline = (db.nodes || []).filter((n) => n.status !== 'active').length;
+
+  // Filter alerts by history tab
+  const displayedAlerts = (db.alerts || []).filter((a) => {
+    if (historyTab === 'open') return a.status === 'open';
+    if (historyTab === 'acknowledged') return a.status === 'acknowledged';
+    if (historyTab === 'resolved') return a.status === 'resolved';
+    return true;
+  }).sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  // Node Map calculations
+  const plantRow = (n) => (db.plants || []).find((p) => p.id === n.specimen_id);
+  const whereOf = (n) => {
+    const p = plantRow(n);
+    if (n.lat != null && n.lng != null && !isNaN(Number(n.lat)) && !isNaN(Number(n.lng))) {
+      return { lat: Number(n.lat), lng: Number(n.lng), protect: p ? isExactProtected(p) : false };
+    }
+    const c = p && shownCoords(p, role);
+    return c ? { ...c, protect: isExactProtected(p) } : null;
+  };
+
+  const openAlertsByNode = useMemo(() => {
+    const counts = {};
+    for (const a of (db.alerts || [])) {
+      if (a.status === 'open') {
+        counts[a.node_id] = (counts[a.node_id] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [db.alerts]);
+
+  const nodePoints = useMemo(() => {
+    const points = [];
+    for (const n of (db.nodes || [])) {
+      const at = whereOf(n);
+      if (!at) continue;
+      const alertCount = openAlertsByNode[n.id] || 0;
+      const isAlert = alertCount > 0;
+      const isOnline = n.status === 'active';
+      const color = isAlert ? '#d9383a' : isOnline ? '#2e7d32' : '#8a8f87';
+      points.push({
+        id: n.id,
+        name: n.name,
+        family: isAlert ? 'Alert' : isOnline ? 'Online' : 'Offline',
+        color,
+        lat: at.lat,
+        lng: at.lng,
+        protect: !!at.protect,
+      });
+    }
+    return points;
+  }, [db.nodes, db.plants, role, openAlertsByNode]);
+
+  // Statistics calculation
+  const stats = (rows, key) => {
+    const vals = rows.map((r) => r[key]).filter((v) => v != null && !isNaN(Number(v))).map(Number);
+    if (!vals.length) return null;
+    return { min: Math.min(...vals), max: Math.max(...vals), avg: vals.reduce((a, b) => a + b, 0) / vals.length };
+  };
+  const tempStats = stats(readings, 'temperature');
+  const soilStats = stats(readings, 'soil_moisture');
+  const humidStats = stats(readings, 'humidity');
+  const motionCount = readings.filter((r) => r.motion_detected === true).length;
+
+  const openLimitsModal = () => {
+    setNewTempMax(String(limits.temp_max ?? 32));
+    setNewMoistureMin(String(limits.moisture_min ?? 25));
+    setEditingLimits(true);
+  };
+
+  const handleSaveLimits = async () => {
+    const tMax = parseFloat(newTempMax);
+    const mMin = parseFloat(newMoistureMin);
+    if (isNaN(tMax) || isNaN(mMin)) {
+      return Alert.alert('Invalid values', 'Please enter valid numerical thresholds.');
+    }
+    setSavingLimits(true);
+    try {
+      const ok = await setThresholds(node.id, { temp_max: tMax, moisture_min: mMin });
+      if (ok) {
+        setEditingLimits(false);
+      }
+    } finally {
+      setSavingLimits(false);
+    }
+  };
 
   return (
     <Screen gap={20}>
-      <TitleBlock title="Monitoring" sub={`${openCount} open alert${openCount === 1 ? '' : 's'} · ${offline} node${offline === 1 ? '' : 's'} offline`} />
-      {active.map((a) => <AlertCard key={a.id} a={a} node={db.nodes.find((n) => n.id === a.node_id)} onPress={() => nav.go('alert', { id: a.id })} />)}
+      <TitleBlock
+        title="IoT Monitoring"
+        sub={`${openCount} open alert${openCount === 1 ? '' : 's'} · ${offline} node${offline === 1 ? '' : 's'} offline`}
+      />
 
-      <Section title="Last 24 hours" gap={10}>
-        <Pills value={nodeId} onChange={setPicked} items={db.nodes.map((n) => ({ key: n.id, label: n.name }))} />
-        {now ? (
-          <>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 10 }}>
-              <Text style={{ fontFamily: font('display', 700), fontSize: 34, color: limit != null && now.temperature > limit ? c.danger : c.ink }}>{now.temperature}°C</Text>
-              {limit != null ? <Txt v="small" color={c.ink2}>limit {limit}°C</Txt> : null}
-            </View>
-            <Spark values={readings.map((r) => r.temperature)} limit={limit} />
-          </>
-        ) : <EmptyState count={0} icon="activity" rows={2}>No readings yet.</EmptyState>}
+      {/* Node Map Section */}
+      <Section title="Node map" gap={10}>
+        <View style={{ height: 240, borderRadius: 14, overflow: 'hidden', borderWidth: 1, borderColor: c.line }}>
+          {nodePoints.length > 0 ? (
+            <LeafletMap
+              points={nodePoints}
+              selectedId={nodeId}
+              height={240}
+              showControls={false}
+              onSelect={(id) => {
+                if (id) setPicked(id);
+              }}
+            />
+          ) : (
+            <EmptyState count={0} icon="map">No sensor nodes have coordinates recorded yet.</EmptyState>
+          )}
+        </View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', paddingVertical: 4 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#d9383a' }} />
+            <Txt v="caption">Alert ({openCount})</Txt>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#2e7d32' }} />
+            <Txt v="caption">Online ({(db.nodes || []).filter((n) => n.status === 'active' && !(openAlertsByNode[n.id] > 0)).length})</Txt>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#8a8f87' }} />
+            <Txt v="caption">Offline ({offline})</Txt>
+          </View>
+        </View>
       </Section>
 
-      <Section title="Nodes" gap={0}>
-        {db.nodes.map((n, i) => {
-          const r = latest(db.telemetry[n.id]);
-          const plant = plantView(db, db.plants.find((p) => p.id === n.specimen_id));
+      {/* Node Telemetry & Sparklines Section */}
+      <Section
+        title={RANGE_TITLE[range] || 'Telemetry readings'}
+        gap={12}
+        right={
+          role === 'admin' && node ? (
+            <Pressable onPress={openLimitsModal} hitSlop={8}>
+              <Txt v="caption" color={c.accent} style={{ fontWeight: '700' }}>Edit limits</Txt>
+            </Pressable>
+          ) : null
+        }
+      >
+        <Pills
+          value={nodeId}
+          onChange={setPicked}
+          items={(db.nodes || []).map((n) => ({ key: n.id, label: n.name }))}
+        />
+
+        {/* Time range selector */}
+        <View style={{ gap: 6 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Txt v="caption" color={c.ink2} style={{ textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700' }}>
+              Time span:
+            </Txt>
+            {telemetryLoading && (
+              <Txt v="caption" color={c.accent}>Loading readings…</Txt>
+            )}
+          </View>
+          <Pills
+            value={range}
+            onChange={setRange}
+            items={TIME_RANGES}
+          />
+        </View>
+
+        {node && (
+          <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 6 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Txt v="label" style={{ fontSize: 16 }}>{node.name}</Txt>
+              <DotLabel status={node.status} />
+            </View>
+            <Txt v="caption" color={c.ink2}>
+              Alert limits: {limits.temp_max != null ? `${limits.temp_max}°C max` : 'no max temp'}, {limits.moisture_min != null ? `${limits.moisture_min}% soil min` : 'no min soil'}
+            </Txt>
+          </View>
+        )}
+
+        {now ? (
+          <View style={{ gap: 14 }}>
+            {/* Temperature Sparkline */}
+            <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Icon name="thermo" size={18} color={c.ink} />
+                  <Txt v="label">Air Temperature</Txt>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+                  <Text style={{ fontFamily: font('display', 700), fontSize: 24, color: limits.temp_max != null && now.temperature > limits.temp_max ? c.danger : c.ink }}>
+                    {now.temperature}°C
+                  </Text>
+                  {limits.temp_max != null && <Txt v="caption" color={c.ink2}>limit {limits.temp_max}°C</Txt>}
+                </View>
+              </View>
+              <Spark values={readings.map((r) => r.temperature).filter((v) => v != null)} limit={limits.temp_max} height={70} />
+            </View>
+
+            {/* Air Humidity Sparkline */}
+            <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Icon name="humidity" size={18} color={c.ink} />
+                  <Txt v="label">Air Humidity</Txt>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+                  <Text style={{ fontFamily: font('display', 700), fontSize: 24, color: c.ink }}>
+                    {now.humidity != null ? `${Number(now.humidity).toFixed(0)}%` : '-'}
+                  </Text>
+                </View>
+              </View>
+              <Spark values={readings.map((r) => r.humidity).filter((v) => v != null)} height={70} />
+            </View>
+
+            {/* Soil Moisture Sparkline */}
+            <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 8 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Icon name="drop" size={18} color={c.ink} />
+                  <Txt v="label">Soil Moisture</Txt>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
+                  <Text style={{ fontFamily: font('display', 700), fontSize: 24, color: limits.moisture_min != null && now.soil_moisture < limits.moisture_min ? c.danger : c.ink }}>
+                    {now.soil_moisture}%
+                  </Text>
+                  {limits.moisture_min != null && <Txt v="caption" color={c.ink2}>min {limits.moisture_min}%</Txt>}
+                </View>
+              </View>
+              <Spark values={readings.map((r) => r.soil_moisture).filter((v) => v != null)} limit={limits.moisture_min} height={70} />
+            </View>
+
+            {/* Nearest Object Distance & Movement Status */}
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <View style={{ flex: 1, padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 4 }}>
+                <Txt v="caption" color={c.ink2}>Nearest object</Txt>
+                <Text style={{ fontFamily: font('display', 700), fontSize: 18, color: c.ink }}>
+                  {now.distance_cm != null ? `${now.distance_cm} cm` : '-'}
+                </Text>
+              </View>
+              <View style={{ flex: 1, padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 4 }}>
+                <Txt v="caption" color={c.ink2}>Motion</Txt>
+                <Text style={{ fontFamily: font('display', 700), fontSize: 18, color: now.motion_detected ? c.danger : c.ink }}>
+                  {now.motion_detected == null ? '-' : now.motion_detected ? 'Movement' : 'None'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Min · Avg · Max Summary Statistics */}
+            <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 10 }}>
+              <Txt v="label" style={{ fontSize: 14 }}>Reading summaries (min · avg · max)</Txt>
+              <View style={{ gap: 6 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Txt v="caption" color={c.ink2}>Temperature:</Txt>
+                  <Mono size={13}>{tempStats ? `${tempStats.min.toFixed(1)} · ${tempStats.avg.toFixed(1)} · ${tempStats.max.toFixed(1)} °C` : '-'}</Mono>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Txt v="caption" color={c.ink2}>Air Humidity:</Txt>
+                  <Mono size={13}>{humidStats ? `${humidStats.min.toFixed(0)} · ${humidStats.avg.toFixed(0)} · ${humidStats.max.toFixed(0)} %` : '-'}</Mono>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Txt v="caption" color={c.ink2}>Soil Moisture:</Txt>
+                  <Mono size={13}>{soilStats ? `${soilStats.min.toFixed(0)} · ${soilStats.avg.toFixed(0)} · ${soilStats.max.toFixed(0)} %` : '-'}</Mono>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Txt v="caption" color={c.ink2}>Motion readings:</Txt>
+                  <Mono size={13}>{motionCount} movement events</Mono>
+                </View>
+              </View>
+            </View>
+
+            <Txt v="caption" color={c.ink2} style={{ textAlign: 'right' }}>
+              {readings.length} reading{readings.length === 1 ? '' : 's'} recorded · {RANGE_TITLE[range] || ''}
+            </Txt>
+          </View>
+        ) : (
+          <EmptyState count={0} icon="activity" rows={2}>No readings available for this node.</EmptyState>
+        )}
+      </Section>
+
+      {/* Node Webcam Photos Section */}
+      <Section
+        title={`Photos from ${node?.name || 'node'}`}
+        gap={10}
+        right={
+          <Pressable onPress={fetchNodeImages} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Icon name="refresh" size={14} color={c.accent} />
+            <Txt v="caption" color={c.accent} style={{ fontWeight: '700' }}>Refresh</Txt>
+          </Pressable>
+        }
+      >
+        {imagesLoading ? (
+          <Txt v="caption" color={c.ink2}>Loading webcam photos…</Txt>
+        ) : imagesError ? (
+          <Notice tone="warning" title="Could not load photos" body={imagesError} />
+        ) : nodeImages.length === 0 ? (
+          <EmptyState count={0} icon="camera" rows={2}>
+            No webcam photos from {node?.name || 'this node'} yet. The webcam takes one when movement is detected.
+          </EmptyState>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
+            {nodeImages.map((img) => {
+              const alert = (db.alerts || []).find((a) => a.id === img.alert_id);
+              return (
+                <Pressable
+                  key={img.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Webcam photo from ${dateTime(img.captured_at)}`}
+                  onPress={() => setSelectedImage(img)}
+                  style={{ width: 140, borderRadius: 12, overflow: 'hidden', backgroundColor: c.bg, borderWidth: 1, borderColor: c.line }}
+                >
+                  <Image
+                    source={{ uri: img.view_url }}
+                    style={{ width: 140, height: 105, backgroundColor: c.raised }}
+                    resizeMode="cover"
+                  />
+                  <View style={{ padding: 8, gap: 2 }}>
+                    <Txt v="caption" color={c.ink} style={{ fontSize: 11, fontWeight: '700' }}>
+                      {dateTime(img.captured_at)}
+                    </Txt>
+                    {alert && (
+                      <Txt v="caption" color={c.danger} style={{ fontSize: 10, fontWeight: '700' }}>
+                        {alert.type}
+                      </Txt>
+                    )}
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        )}
+      </Section>
+
+      {/* Enlarged Photo Modal */}
+      {selectedImage && (
+        <Modal transparent animationType="fade" visible onRequestClose={() => setSelectedImage(null)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 16 }} onPress={() => setSelectedImage(null)}>
+            <Pressable style={{ backgroundColor: c.surface, borderRadius: 16, overflow: 'hidden', padding: 16, gap: 12 }} onPress={(e) => e.stopPropagation()}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flex: 1 }}>
+                  <Txt v="label">{node?.name || 'Sensor Node'} · Photo</Txt>
+                  <Txt v="caption" color={c.ink2}>{dateTime(selectedImage.captured_at)}</Txt>
+                </View>
+                <IconButton name="x" label="Close" onPress={() => setSelectedImage(null)} />
+              </View>
+              <Image
+                source={{ uri: selectedImage.view_url }}
+                style={{ width: '100%', height: 260, borderRadius: 12, backgroundColor: c.raised }}
+                resizeMode="contain"
+              />
+              {selectedImage.alert_id && (() => {
+                const alert = (db.alerts || []).find((a) => a.id === selectedImage.alert_id);
+                return alert ? (
+                  <Notice tone="danger" title={`Alert: ${alert.type}`} body={`Captured during alert (${alert.severity} severity).`} />
+                ) : null;
+              })()}
+              <Button label="Close" kind="secondary" height={44} onPress={() => setSelectedImage(null)} />
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
+
+      {/* Alert Feed with History Filter */}
+      <Section title="Alerts & Pipeline" gap={10}>
+        <Pills
+          value={historyTab}
+          onChange={setHistoryTab}
+          items={[
+            { key: 'open', label: `Open (${(db.alerts || []).filter((a) => a.status === 'open').length})` },
+            { key: 'acknowledged', label: 'Acknowledged' },
+            { key: 'resolved', label: 'Resolved' },
+            { key: 'all', label: 'All history' },
+          ]}
+        />
+
+        {displayedAlerts.map((a) => (
+          <AlertCard
+            key={a.id}
+            a={a}
+            node={(db.nodes || []).find((n) => n.id === a.node_id)}
+            onPress={() => nav.go('alert', { id: a.id })}
+          />
+        ))}
+
+        {displayedAlerts.length === 0 && (
+          <EmptyState count={0} icon="shield">No {historyTab === 'all' ? '' : historyTab} alerts.</EmptyState>
+        )}
+      </Section>
+
+      {/* Node list summary */}
+      <Section title="All sensor nodes" gap={0}>
+        {(db.nodes || []).map((n, i) => {
+          const r = latest((db.telemetry || {})[n.id]);
+          const plant = plantView(db, (db.plants || []).find((p) => p.id === n.specimen_id));
           return (
-            <View key={n.id} style={{ gap: 6, paddingVertical: 14, borderBottomWidth: i === db.nodes.length - 1 ? 0 : 1, borderBottomColor: c.line }}>
+            <View
+              key={n.id}
+              style={{
+                gap: 6,
+                paddingVertical: 14,
+                borderBottomWidth: i === (db.nodes || []).length - 1 ? 0 : 1,
+                borderBottomColor: c.line,
+              }}
+            >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                 <Txt v="label" style={{ fontSize: 16 }}>{n.name}</Txt>
                 <DotLabel status={n.status} />
               </View>
-              {plant ? <Txt v="small" color={c.ink2} style={{ fontFamily: font('text', 400) }}>{plant.name} · <Mono size={13} color={c.ink2}>{plant.qr_id}</Mono></Txt> : null}
+              {plant ? (
+                <Txt v="small" color={c.ink2} style={{ fontFamily: font('text', 400) }}>
+                  {plant.name} · <Mono size={13} color={c.ink2}>{plant.qr_id}</Mono>
+                </Txt>
+              ) : null}
               {n.status === 'active' && r ? (
                 <View style={{ flexDirection: 'row', gap: 16 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon name="thermo" size={16} color={c.ink2} /><Txt v="label" style={{ fontSize: 14 }}>{r.temperature}°C</Txt></View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}><Icon name="drop" size={16} color={c.ink2} /><Txt v="label" style={{ fontSize: 14 }}>{r.soil_moisture}%</Txt></View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Icon name="thermo" size={16} color={c.ink2} />
+                    <Txt v="label" style={{ fontSize: 14 }}>{r.temperature}°C</Txt>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Icon name="drop" size={16} color={c.ink2} />
+                    <Txt v="label" style={{ fontSize: 14 }}>{r.soil_moisture}%</Txt>
+                  </View>
                 </View>
               ) : (
-                <Txt v="small" color={c.ink2} style={{ fontFamily: font('text', 400) }}>No readings since {dateTime(n.last_seen)}</Txt>
+                <Txt v="small" color={c.ink2} style={{ fontFamily: font('text', 400) }}>
+                  No readings since {dateTime(n.last_seen)}
+                </Txt>
               )}
             </View>
           );
         })}
       </Section>
+
+      {/* Admin Threshold Limits Modal */}
+      {editingLimits && (
+        <Modal transparent animationType="fade" visible onRequestClose={() => setEditingLimits(false)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }} onPress={() => setEditingLimits(false)}>
+            <Pressable style={{ backgroundColor: c.surface, borderRadius: 16, padding: 20, gap: 14 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Txt v="title2">Edit alert limits for {node?.name}</Txt>
+                <IconButton name="x" label="Close" onPress={() => setEditingLimits(false)} />
+              </View>
+              <Txt v="caption" color={c.ink2}>Alerts trigger when telemetry crosses these limits.</Txt>
+              <Field
+                label="Maximum temperature (°C)"
+                value={newTempMax}
+                onChangeText={setNewTempMax}
+                keyboardType="numeric"
+                placeholder="32"
+              />
+              <Field
+                label="Minimum soil moisture (%)"
+                value={newMoistureMin}
+                onChangeText={setNewMoistureMin}
+                keyboardType="numeric"
+                placeholder="25"
+              />
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+                <Button label="Cancel" kind="secondary" flex={1} onPress={() => setEditingLimits(false)} />
+                <Button label={savingLimits ? 'Saving…' : 'Save limits'} flex={1.4} disabled={savingLimits} onPress={handleSaveLimits} />
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
     </Screen>
   );
 }
 
+// 3-step progress pipeline helper:
+// 1. Assign -> 2. Acknowledge -> 3. Resolve
+const PIPELINE_STEPS = ['Assign', 'Acknowledge', 'Resolve'];
+function stepIndexOf(alert) {
+  if (alert.status === 'resolved') return 3;
+  if (alert.status === 'acknowledged') return 2;
+  return alert.assigned_to ? 1 : 0;
+}
+
 export function AlertDetail({ nav, params = {} }) {
   usePolling(5000);
-  const { db, ackAlert, resolveAlert, addAlertNote } = useStore();
+  const { db, ackAlert, resolveAlert, assignAlert, addAlertNote, notify } = useStore();
   const { c } = useTheme();
-  const [note, setNote] = useState('');
+
+  const [investigationNote, setInvestigationNote] = useState('');
+  const [resolutionOutcome, setResolutionOutcome] = useState('');
+  const [assignPicker, setAssignPicker] = useState(false);
   const [busy, setBusy] = useState(false);
-  const a = db.alerts.find((x) => x.id === params.id);
-  if (!a) return <Screen header={<Bar title="Alert" onBack={nav.back} />}><Empty>This alert no longer exists.</Empty></Screen>;
-  const node = db.nodes.find((n) => n.id === a.node_id);
-  const plant = plantView(db, db.plants.find((p) => p.id === node?.specimen_id));
-  const readings = db.telemetry[a.node_id] || [];
+
+  const a = (db.alerts || []).find((x) => x.id === params.id);
+  if (!a) {
+    return (
+      <Screen header={<Bar title="Alert" onBack={nav.back} />}>
+        <Empty icon="shield">This alert no longer exists.</Empty>
+      </Screen>
+    );
+  }
+
+  const node = (db.nodes || []).find((n) => n.id === a.node_id);
+  const plant = plantView(db, (db.plants || []).find((p) => p.id === node?.specimen_id));
+  const readings = (db.telemetry || {})[a.node_id] || [];
   const r = a.reading || {};
-  const notes = db.alertNotes.filter((n) => n.alert_id === a.id);
+  const notes = (db.alertNotes || []).filter((n) => n.alert_id === a.id);
+  const limits = node?.thresholds || {};
 
-  const limits = node?.thresholds || {}; // a node may have no limits set
+  const officers = (db.profiles || []).filter((p) => p.role === 'officer' && p.is_active);
+  const currentStep = stepIndexOf(a);
 
-  // The screen closes only once the change is saved. The store says what
-  // happened, for success and for failure, so nothing is said here.
-  const act = async (change) => {
-    if (busy) return;
+  const handleAddNote = async () => {
+    if (!investigationNote.trim() || busy) return;
     setBusy(true);
     try {
-      if (note.trim()) await addAlertNote(a.id, note.trim());
-      if (await change()) nav.back();
+      const ok = await addAlertNote(a.id, investigationNote.trim());
+      if (ok) {
+        setInvestigationNote('');
+      }
     } finally {
       setBusy(false);
     }
   };
-  const ack = () => act(() => ackAlert(a.id));
-  const resolve = () => act(() => resolveAlert(a.id, note.trim() || 'Resolved'));
+
+  const handleAcknowledge = async () => {
+    setBusy(true);
+    try {
+      await ackAlert(a.id);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResolve = async () => {
+    if (!resolutionOutcome.trim()) {
+      return Alert.alert('Outcome required', 'Please describe the findings and resolution outcome before resolving this alert.');
+    }
+    setBusy(true);
+    try {
+      const ok = await resolveAlert(a.id, resolutionOutcome.trim());
+      if (ok) {
+        nav.back();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAssign = async (officerId) => {
+    setAssignPicker(false);
+    setBusy(true);
+    try {
+      const ok = await assignAlert(a.id, officerId);
+      if (ok) {
+        notify(`Assigned to ${nameOf(db, officerId)}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <Screen
       header={<Bar title={a.type} sub={`${node?.name} · ${dateTime(a.created_at)}`} onBack={nav.back} />}
       top={16}
       gap={18}
-      footer={a.status === 'resolved' ? null : (
-        <>
-          <Button label="Resolve" kind={a.status === 'open' ? 'secondary' : 'primary'} flex={1} disabled={busy} onPress={resolve} />
-          {a.status === 'open' ? <Button label="Acknowledge" icon="check" flex={1.4} disabled={busy} onPress={ack} /> : null}
-        </>
-      )}
+      footer={
+        a.status !== 'resolved' ? (
+          <View style={{ flexDirection: 'row', gap: 10, width: '100%' }}>
+            {a.status === 'open' && (
+              <Button label="Acknowledge" icon="check" kind="secondary" flex={1} disabled={busy} onPress={handleAcknowledge} />
+            )}
+            <Button
+              label={busy ? 'Resolving…' : 'Resolve alert'}
+              flex={1.3}
+              disabled={busy}
+              onPress={handleResolve}
+            />
+          </View>
+        ) : null
+      }
     >
-      <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Chip status={a.severity} label={statusText(a.severity || 'unknown')} />
-        <Chip status={a.status} />
+      {/* 3-Step Progress Pipeline */}
+      <View style={{ padding: 14, borderRadius: 14, backgroundColor: c.bg, gap: 8 }}>
+        <Txt v="caption" color={c.ink2} style={{ textTransform: 'uppercase', letterSpacing: 0.8 }}>
+          Progress Pipeline
+        </Txt>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          {PIPELINE_STEPS.map((stepName, i) => {
+            const isCompleted = i < currentStep;
+            const isCurrent = i === currentStep;
+            return (
+              <View key={stepName} style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                <View
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 14,
+                    backgroundColor: isCompleted ? c.accent : isCurrent ? c.warning : c.line,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ fontFamily: font('text', 700), fontSize: 12, color: isCompleted || isCurrent ? '#ffffff' : c.ink2 }}>
+                    {i + 1}
+                  </Text>
+                </View>
+                <Txt
+                  v="caption"
+                  color={isCompleted ? c.accent : isCurrent ? c.ink : c.ink3}
+                  style={{ fontWeight: isCurrent || isCompleted ? '700' : '400', marginLeft: 6 }}
+                >
+                  {stepName}
+                </Txt>
+              </View>
+            );
+          })}
+        </View>
       </View>
+
+      {/* Badges & Officer Assignment */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Chip status={a.severity} label={statusText(a.severity || 'unknown')} />
+          <Chip status={a.status} />
+        </View>
+        <Button
+          label={a.assigned_to ? `Assigned: ${nameOf(db, a.assigned_to)}` : 'Assign officer'}
+          kind={a.assigned_to ? 'quiet' : 'secondary'}
+          height={38}
+          size={13}
+          onPress={() => setAssignPicker(true)}
+        />
+      </View>
+
+      {/* Sensor Readings & Dual Sparklines */}
       <View style={{ flexDirection: 'row', gap: 12 }}>
-        {r.temperature != null ? <Reading label="Temperature" value={`${r.temperature}°C`} sub={limits.temp_max != null ? `limit ${limits.temp_max}°C` : 'no limit set'} bad={limits.temp_max != null && r.temperature > limits.temp_max} /> : null}
-        {r.soil_moisture != null ? <Reading label="Soil moisture" value={`${r.soil_moisture}%`} sub={limits.moisture_min != null ? `minimum ${limits.moisture_min}%` : 'no minimum set'} bad={limits.moisture_min != null && r.soil_moisture < limits.moisture_min} /> : null}
-        {r.motion ? <Reading label="Movement" value="Yes" sub="near the plant" bad /> : null}
+        {r.temperature != null ? (
+          <Reading
+            label="Temperature"
+            value={`${r.temperature}°C`}
+            sub={limits.temp_max != null ? `limit ${limits.temp_max}°C` : 'no limit'}
+            bad={limits.temp_max != null && r.temperature > limits.temp_max}
+          />
+        ) : null}
+        {r.soil_moisture != null ? (
+          <Reading
+            label="Soil moisture"
+            value={`${r.soil_moisture}%`}
+            sub={limits.moisture_min != null ? `minimum ${limits.moisture_min}%` : 'no limit'}
+            bad={limits.moisture_min != null && r.soil_moisture < limits.moisture_min}
+          />
+        ) : null}
+        {r.motion ? <Reading label="Movement" value="Yes" sub="near plant" bad /> : null}
       </View>
-      {readings.length ? <Section title="Last 24 hours" gap={10}><Spark values={readings.map((x) => x.temperature)} limit={limits.temp_max} height={80} /></Section> : null}
-      {plant ? (
+
+      {/* Dual Sparklines */}
+      {readings.length > 0 && (
+        <Section title="24-hour dual telemetry sparklines" gap={10}>
+          <View style={{ padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 6 }}>
+            <Txt v="caption" color={c.ink2}>Temperature (°C)</Txt>
+            <Spark values={readings.map((x) => x.temperature).filter((v) => v != null)} limit={limits.temp_max} height={60} />
+          </View>
+          <View style={{ padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 6 }}>
+            <Txt v="caption" color={c.ink2}>Soil Moisture (%)</Txt>
+            <Spark values={readings.map((x) => x.soil_moisture).filter((v) => v != null)} limit={limits.moisture_min} height={60} />
+          </View>
+        </Section>
+      )}
+
+      {/* Protected Plant */}
+      {plant && (
         <Section title="Protected plant" gap={0}>
-          <Row left={<Thumb uri={plant.photos[0]?.url} size={48} />} title={plant.name}
-            sub={<><Mono size={13}>{plant.qr_id}</Mono>{plant.endangered ? <DotLabel status="endangered" /> : null}</>}
-            onPress={() => nav.go('tag', { qr: plant.qr_id })} last />
+          <Row
+            left={<Thumb uri={plant.photos?.[0]?.url} size={48} />}
+            title={plant.name}
+            sub={
+              <>
+                <Mono size={13}>{plant.qr_id}</Mono>
+                {plant.endangered ? <DotLabel status="endangered" /> : null}
+              </>
+            }
+            onPress={() => nav.go('tag', { qr: plant.qr_id })}
+            last
+          />
         </Section>
-      ) : null}
-      {a.assigned_to ? <Txt v="small" color={c.ink2} style={{ fontFamily: font('text', 400) }}>Assigned to {nameOf(db, a.assigned_to)}</Txt> : null}
-      {notes.length ? (
-        <Section title="Notes" gap={10}>
-          {notes.map((n) => (
-            <View key={n.id} style={{ padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 2 }}>
-              <Txt v="caption" color={c.ink2}>{nameOf(db, n.author_id)} · {dateTime(n.created_at)}</Txt>
-              <Txt v="body" style={{ fontSize: 15, lineHeight: 22 }}>{n.note}</Txt>
-            </View>
-          ))}
-        </Section>
-      ) : null}
-      {a.status === 'resolved' ? <Txt v="body">Outcome: {a.outcome || '-'}</Txt> : <Area label="What did you find?" value={note} onChangeText={setNote} placeholder="Add a note for the team" />}
+      )}
+
+      {/* Investigation Notes Feed */}
+      <Section title={`Investigation notes (${notes.length})`} gap={8}>
+        {notes.map((n) => (
+          <View key={n.id} style={{ padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 4 }}>
+            <Txt v="caption" color={c.ink2}>{nameOf(db, n.author_id)} · {dateTime(n.created_at)}</Txt>
+            <Txt v="body" style={{ fontSize: 15, lineHeight: 22 }}>{n.note}</Txt>
+          </View>
+        ))}
+
+        {a.status !== 'resolved' && (
+          <View style={{ gap: 8, marginTop: 4 }}>
+            <Area
+              label="Add investigation note"
+              value={investigationNote}
+              onChangeText={setInvestigationNote}
+              placeholder="Record field observations, soil checks, battery level..."
+            />
+            <Button
+              label="Save investigation note"
+              kind="secondary"
+              height={40}
+              size={14}
+              disabled={!investigationNote.trim() || busy}
+              onPress={handleAddNote}
+            />
+          </View>
+        )}
+      </Section>
+
+      {/* Resolution Outcome Section */}
+      <Section title="Resolution outcome" gap={8}>
+        {a.status === 'resolved' ? (
+          <View style={{ padding: 14, borderRadius: 12, backgroundColor: c.bg, gap: 4 }}>
+            <Txt v="caption" color={c.ink2}>Resolved outcome</Txt>
+            <Txt v="body" style={{ fontSize: 15 }}>{a.outcome || 'Resolved without detailed note.'}</Txt>
+          </View>
+        ) : (
+          <Area
+            label="Resolution outcome (required to resolve)"
+            value={resolutionOutcome}
+            onChangeText={setResolutionOutcome}
+            placeholder="Describe action taken to resolve this alert (e.g. Cleared dry debris, watered root zone)..."
+          />
+        )}
+      </Section>
+
+      {/* Officer Assignment Picker Modal */}
+      {assignPicker && (
+        <Modal transparent animationType="fade" visible onRequestClose={() => setAssignPicker(false)}>
+          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }} onPress={() => setAssignPicker(false)}>
+            <Pressable style={{ maxHeight: '60%', backgroundColor: c.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, gap: 14 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Txt v="title2">Assign conservation officer</Txt>
+                <IconButton name="x" label="Close" onPress={() => setAssignPicker(false)} />
+              </View>
+              <ScrollView>
+                {officers.map((o) => (
+                  <Pressable
+                    key={o.id}
+                    onPress={() => handleAssign(o.id)}
+                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: c.line }}
+                  >
+                    <Txt v="body" style={{ fontWeight: a.assigned_to === o.id ? '700' : '400' }}>
+                      {o.full_name} ({o.email})
+                    </Txt>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      )}
     </Screen>
   );
 }
@@ -181,7 +932,7 @@ function Reading({ label, value, sub, bad }) {
   return (
     <View style={{ flex: 1, gap: 2, padding: 14, borderRadius: 14, backgroundColor: c.bg }}>
       <Txt v="caption" color={c.ink2}>{label}</Txt>
-      <Text style={{ fontFamily: font('display', 700), fontSize: 28, color: bad ? c.danger : c.ink }}>{value}</Text>
+      <Text style={{ fontFamily: font('display', 700), fontSize: 26, color: bad ? c.danger : c.ink }}>{value}</Text>
       <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 600) }}>{sub}</Txt>
     </View>
   );
