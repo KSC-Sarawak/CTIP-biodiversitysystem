@@ -16,8 +16,12 @@ const LOOK = {
   review_rejected: ['x', 'danger'],
   observation_submitted: ['clipboard', 'info'],
   comment_reply: ['chat', 'info'],
+  discussion_reply: ['chat', 'info'],
+  discussion_mention: ['at', 'info'],
+  discussion_post: ['chat', 'info'],
   alert_assigned: ['thermo', 'danger'],
   alert_open: ['thermo', 'danger'],
+  email_rate_limit: ['mail', 'warning'],
 };
 
 export default function Alerts({ nav }) {
@@ -29,13 +33,71 @@ export default function Alerts({ nav }) {
   const earlier = mine.filter((n) => n.is_read);
 
   const open = (n) => {
+    if (!n) return;
     markRead(n.id);
-    if (n.related_table === 'alerts') return nav.go('alert', { id: n.related_id });
-    if (n.related_table === 'observations') {
-      if (role === 'officer' && n.type === 'observation_submitted') return nav.go('reviewItem', { id: n.related_id });
-      if (role === 'botanist') return nav.go('record', { id: n.related_id });
+
+    // 1. Sensor alerts
+    if (n.related_table === 'alerts') {
+      return nav.go('alert', { id: n.related_id });
+    }
+
+    // 2. Modern discussion threads & mentions
+    if (n.related_table === 'discussions' || n.type === 'discussion_reply' || n.type === 'discussion_mention' || n.type === 'discussion_post') {
       return nav.go('discussion', { id: n.related_id });
     }
+
+    // 3. Comment replies
+    if (n.type === 'comment_reply') {
+      return nav.go('discussion', { id: n.related_id });
+    }
+
+    // 4. Observations & reviews
+    if (n.related_table === 'observations') {
+      if ((role === 'officer' || role === 'admin') && n.type === 'observation_submitted') {
+        return nav.go('reviewItem', { id: n.related_id });
+      }
+      if (role === 'botanist') {
+        return nav.go('record', { id: n.related_id });
+      }
+      if (role === 'officer') {
+        return nav.go('reviewItem', { id: n.related_id });
+      }
+      return nav.go('discussion', { id: n.related_id });
+    }
+
+    // 5. Review outcomes
+    if (n.type === 'review_returned' || n.type === 'review_rejected') {
+      if (role === 'botanist' && n.related_id) return nav.go('record', { id: n.related_id });
+      return nav.go('records');
+    }
+
+    if (n.type === 'review_approved') {
+      const obs = (db.observations || []).find((o) => o.id === n.related_id);
+      const plant = obs ? (db.plants || []).find((p) => p.id === obs.specimen_id) : (db.plants || []).find((p) => p.id === n.related_id);
+      if (plant?.qr_id) {
+        return nav.go('tag', { qr: plant.qr_id });
+      }
+      if (role === 'botanist') return nav.go('record', { id: n.related_id });
+      return nav.go('plants');
+    }
+
+    // 6. Direct plant/specimen reference
+    if (n.related_table === 'plants' || n.related_table === 'specimens') {
+      const plant = (db.plants || []).find((p) => p.id === n.related_id || p.qr_id === n.related_id);
+      if (plant?.qr_id) return nav.go('tag', { qr: plant.qr_id });
+      return nav.go('plants');
+    }
+
+    // 7. User administration / rate limit
+    if (n.related_table === 'users' || n.related_table === 'profiles' || n.type === 'email_rate_limit') {
+      if (role === 'admin') return nav.go('users');
+      return nav.go('dashboard');
+    }
+
+    // 8. General fallbacks based on role
+    if (role === 'botanist') return nav.go('records');
+    if (role === 'officer') return nav.go('review');
+    return nav.go('dashboard');
   };
 
   const Item = ({ n, last }) => {

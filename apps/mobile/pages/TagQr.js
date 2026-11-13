@@ -14,9 +14,12 @@ import * as Sharing from 'expo-sharing';
 import { tagUrl } from '../../shared/selectors.js';
 import { SITE } from '../../shared/site.js';
 import { palettes } from '../../shared/tokens.js';
-import { useTheme } from '../components/Theme.js';
+import { useStore } from '../../shared/store.js';
+import { can } from '../../shared/permissions.js';
+import { RESERVED_LABEL } from '../../shared/offline/tags.js';
+import { useTheme, statusText } from '../components/Theme.js';
 import { useBackHandler } from '../navigation/focus.js';
-import { Screen, Header, IconButton, TitleBlock, Mono, Txt, Button, Notice, Empty } from '../components/Bits.js';
+import { Screen, Header, IconButton, TitleBlock, Mono, Txt, Button, Notice, Empty, DotLabel } from '../components/Bits.js';
 
 // A QR code must stay dark on light to scan reliably, so the card always uses the
 // light theme's colours, even in dark mode.
@@ -28,8 +31,14 @@ export default function TagQr({ nav, params = {} }) {
 
 export function TagQrView({ qr, onBack }) {
   const { c } = useTheme();
+  const { db, role, retireTag, deleteTag, notify } = useStore();
   const card = useRef(null);
   const [sharing, setSharing] = useState(false);
+
+  const tag = (db?.tags || []).find((t) => t.qr_id === qr);
+  const plant = (db?.plants || []).find((p) => p.qr_id === qr);
+  const status = tag?.status || (plant ? 'assigned' : 'unused');
+  const isKept = tag?.status === 'unused' && tag?.batch_label === RESERVED_LABEL;
 
   // Android's back button closes this view first, wherever it is shown.
   useBackHandler(() => {
@@ -41,6 +50,44 @@ export function TagQrView({ qr, onBack }) {
   if (!qr) {
     return <Screen header={back}><Empty icon="qr">No tag selected.</Empty></Screen>;
   }
+
+  const handleRetire = () => {
+    const keptWarning = isKept ? "This tag is kept on a botanist's phone for making a tag offline.\n\n" : '';
+    Alert.alert(
+      'Retire QR tag',
+      `${keptWarning}Retire ${qr}? A retired tag can no longer be put on a plant or printed, and this cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Retire',
+          style: 'destructive',
+          onPress: async () => {
+            await retireTag(qr);
+            notify(`Tag ${qr} retired`);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleDelete = () => {
+    const keptWarning = isKept ? "This tag is kept on a botanist's phone for making a tag offline.\n\n" : '';
+    Alert.alert(
+      'Delete unused tag',
+      `${keptWarning}Delete ${qr}? This permanently removes this unused tag from the system.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            const ok = await deleteTag(qr);
+            if (ok && onBack) onBack();
+          },
+        },
+      ]
+    );
+  };
 
   const share = async () => {
     setSharing(true);
@@ -60,7 +107,16 @@ export function TagQrView({ qr, onBack }) {
 
   return (
     <Screen header={back} top={0} gap={20}>
-      <TitleBlock title="QR tag" sub={qr} />
+      <TitleBlock
+        title="QR tag"
+        sub={qr}
+        right={<DotLabel status={status} label={statusText(status)} />}
+      />
+      {tag?.batch_label ? (
+        <Txt v="caption" color={c.ink2} style={{ textAlign: 'center', marginTop: -12 }}>
+          {isKept ? 'Kept on phone for offline tagging' : `Batch: ${tag.batch_label}`}
+        </Txt>
+      ) : null}
       {/* collapsable={false} keeps this View on Android, so captureRef can find it. */}
       <View ref={card} collapsable={false}
         style={{ alignSelf: 'center', alignItems: 'center', gap: 12, padding: 20, borderRadius: 16, backgroundColor: PRINT.paper }}>
@@ -68,7 +124,29 @@ export function TagQrView({ qr, onBack }) {
         <Mono size={22} color={PRINT.ink}>{qr}</Mono>
         <Txt v="caption" color={PRINT.ink}>{SITE}</Txt>
       </View>
-      <Button label={sharing ? 'Preparing image…' : 'Share or save image'} icon="share" disabled={sharing} onPress={share} />
+      <View style={{ gap: 10 }}>
+        <Button label={sharing ? 'Preparing image…' : 'Share or save image'} icon="share" disabled={sharing} onPress={share} />
+        {can(role, 'tags') && (
+          <View style={{ gap: 10 }}>
+            {status !== 'retired' && (
+              <Button
+                label="Retire tag"
+                icon="x"
+                kind="secondary"
+                onPress={handleRetire}
+              />
+            )}
+            {status === 'unused' && (
+              <Button
+                label="Delete tag"
+                icon="trash"
+                kind="danger"
+                onPress={handleDelete}
+              />
+            )}
+          </View>
+        )}
+      </View>
       <Notice tone="info" title="Print it and fix it to the plant"
         body="Put the printed code in a plastic cover. Scanning it opens this record in the app, and the public plant page for visitors." />
       <Txt v="caption" color={c.ink3} style={{ textAlign: 'center' }}>{tagUrl(qr)}</Txt>

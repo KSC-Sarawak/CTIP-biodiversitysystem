@@ -15,7 +15,8 @@
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ],
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO",
@@ -39,7 +40,8 @@
             "minSdkVersion": 30
           }
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "extra": {
       "eas": {

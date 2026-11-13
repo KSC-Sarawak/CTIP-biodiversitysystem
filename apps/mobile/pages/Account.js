@@ -1,7 +1,13 @@
 // apps/mobile/pages/Account.js
-// Staff profile and account settings for mobile (counterpart to web Account.jsx).
+// Staff profile and account settings for mobile:
+// - Profile photo upload with client-side auto-crop/resize to square
+// - Remove avatar photo (reverts to user initials)
+// - Profile name, username and phone editing
+// - Password update
+// - Account details & managed status
 import React, { useState } from 'react';
-import { View } from 'react-native';
+import { View, Alert } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 
 import { useStore } from '../../shared/store.js';
 import { ROLE_LABEL } from '../../shared/permissions.js';
@@ -30,10 +36,108 @@ export default function Account({ nav }) {
       refresh={false}
     >
       <TitleBlock title="Account settings" sub="Your profile and sign-in details." />
+      <PhotoSection me={me} />
       <ProfileSection me={me} />
       <PasswordSection />
       <DetailsSection me={me} role={role} />
     </Screen>
+  );
+}
+
+function PhotoSection({ me }) {
+  const { updateProfile, notify } = useStore();
+  const { c } = useTheme();
+  const [busy, setBusy] = useState(false);
+
+  const pickPhoto = async () => {
+    if (busy) return;
+    try {
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1], // client-side square crop
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (!res.canceled && res.assets && res.assets[0]) {
+        setBusy(true);
+        const asset = res.assets[0];
+        const avatar_url = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+        const result = await updateProfile({ avatar_url });
+        if (result?.ok !== false) {
+          notify('Profile photo updated');
+        } else {
+          Alert.alert('Error', result?.message || 'Could not update photo');
+        }
+      }
+    } catch (err) {
+      Alert.alert('Error', 'Could not open image library');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removePhoto = () => {
+    Alert.alert(
+      'Remove profile photo',
+      'Remove your profile photo? Your initials will be shown instead.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove photo',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy(true);
+            try {
+              const res = await updateProfile({ avatar_url: null });
+              if (res?.ok !== false) {
+                notify('Photo removed');
+              } else {
+                Alert.alert('Error', res?.message || 'Could not remove photo');
+              }
+            } finally {
+              setBusy(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <Section title="Profile photo" gap={12}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16, borderRadius: 14, backgroundColor: c.bg }}>
+        <Avatar name={me.full_name || me.email} uri={me.avatar_url} size={70} />
+        <View style={{ flex: 1, gap: 8 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+            <Button
+              label={busy ? 'Processing…' : me.avatar_url ? 'Change photo' : 'Upload photo'}
+              icon="camera"
+              kind="secondary"
+              height={40}
+              size={13}
+              disabled={busy}
+              onPress={pickPhoto}
+            />
+            {me.avatar_url && (
+              <Button
+                label="Remove"
+                icon="trash"
+                kind="dangerText"
+                height={40}
+                size={13}
+                disabled={busy}
+                onPress={removePhoto}
+              />
+            )}
+          </View>
+          <Txt v="caption" color={c.ink2}>
+            Square JPG or PNG. Cropped to a square automatically. Without a photo, initials are shown.
+          </Txt>
+        </View>
+      </View>
+    </Section>
   );
 }
 
@@ -72,9 +176,9 @@ function ProfileSection({ me }) {
   };
 
   return (
-    <Section title="Profile" gap={12}>
+    <Section title="Personal details" gap={12}>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: 14, backgroundColor: c.bg }}>
-        <Avatar name={form.full_name || me.full_name} size={54} />
+        <Avatar name={form.full_name || me.full_name} uri={me.avatar_url} size={54} />
         <View style={{ flex: 1, gap: 2 }}>
           <Txt v="label" style={{ fontSize: 17 }}>{form.full_name || me.full_name}</Txt>
           <Txt v="small" color={c.ink2} style={{ fontFamily: font('text', 400) }}>
@@ -155,7 +259,7 @@ function PasswordSection() {
   };
 
   return (
-    <Section title="Security" gap={12}>
+    <Section title="Security & Password" gap={12}>
       <Field
         label="Current password"
         value={current}

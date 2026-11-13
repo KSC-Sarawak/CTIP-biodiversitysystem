@@ -1,6 +1,6 @@
 // apps/mobile/components/bits/lists.js
 // List item components: interactive rows, menu rows, icon tiles, plant photo thumbnails, and avatars.
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Pressable, Image } from 'react-native';
 import Icon from '../Icon.js';
 import { useTheme, font } from '../Theme.js';
@@ -46,22 +46,54 @@ export function IconTile({ name, tone = 'accent', size = 40 }) {
 
 // Plant photo. Falls back to a leaf on a soft green tile when there is no photo
 // or it cannot load (no signal, deleted file).
-export function Thumb({ uri, size = 52, radius = 10, style }) {
+export function Thumb({ uri, fallbackUri, size = 52, radius = 10, style }) {
   const { c } = useTheme();
+  const [currentUri, setCurrentUri] = useState(uri);
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setCurrentUri(uri);
+    setFailed(false);
+  }, [uri]);
+
+  const handleError = () => {
+    if (fallbackUri && currentUri !== fallbackUri) {
+      setCurrentUri(fallbackUri);
+    } else {
+      setFailed(true);
+    }
+  };
+
   const box = { width: size, height: size, borderRadius: radius };
-  if (!uri || failed) {
+  if (!currentUri || failed) {
     return (
       <View style={[box, { backgroundColor: c.accentSoft, alignItems: 'center', justifyContent: 'center' }, style]}>
         <Icon name="leaf" size={size * 0.42} color={c.accent} />
       </View>
     );
   }
-  return <Image source={{ uri }} onError={() => setFailed(true)} style={[box, { backgroundColor: c.bg }, style]} accessibilityIgnoresInvertColors />;
+  return <Image source={{ uri: currentUri }} onError={handleError} style={[box, { backgroundColor: c.bg }, style]} accessibilityIgnoresInvertColors />;
 }
 
-export function Avatar({ name, size = 40, muted }) {
+export function Avatar({ name, uri, size = 40, muted }) {
   const { c } = useTheme();
+  const [imgFailed, setImgFailed] = useState(false);
+
+  useEffect(() => {
+    setImgFailed(false);
+  }, [uri]);
+
+  if (uri && !imgFailed) {
+    return (
+      <Image
+        source={{ uri }}
+        onError={() => setImgFailed(true)}
+        style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: c.bg }}
+        accessibilityIgnoresInvertColors
+      />
+    );
+  }
+
   return (
     <View accessibilityElementsHidden importantForAccessibility="no" style={{ width: size, height: size, borderRadius: 999, alignItems: 'center', justifyContent: 'center', backgroundColor: muted ? c.bg : c.accent }}>
       <Text style={{ fontFamily: font('text', 800), fontSize: size * 0.36, color: muted ? c.ink : c.onAccent }}>{toInitials(name)}</Text>

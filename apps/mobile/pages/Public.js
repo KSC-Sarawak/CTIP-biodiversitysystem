@@ -4,9 +4,10 @@ import React, { useState } from 'react';
 import { View, Linking } from 'react-native';
 
 import { useStore } from '../../shared/store.js';
-import { visiblePlants, speciesCatalogue } from '../../shared/selectors.js';
-import { getAboutContent, getContactContent, getHomeContent } from '../../shared/publicContent.js';
+import { visiblePlants, speciesCatalogue, speciesMedia } from '../../shared/selectors.js';
+import { getAboutContent, getContactContent, getHomeContent, getStaffPageContent } from '../../shared/publicContent.js';
 import { SITE, PARK } from '../../shared/site.js';
+import { ROLE_LABEL } from '../../shared/permissions.js';
 import { useTheme } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import { LogoMark, AppearanceSection, VersionLine } from '../components/Chrome.js';
@@ -14,6 +15,17 @@ import {
   Screen, Header, TitleBlock, SearchField, Section, Row, Thumb, Sci, DotLabel, TextLink, Txt,
   MenuRow, Button, KV, IconTile, IconButton, Empty, EmptyState,
 } from '../components/Bits.js';
+
+// Resolve the best thumbnail photo URL for a plant, falling back to public species media
+function getPlantPhoto(db, p) {
+  const sm = speciesMedia(db, p.species_id || p.species?.id);
+  const smUrl = sm?.[0]?.url;
+  const specPhoto = p.species?.photo;
+  const directPhoto = p.photos?.find((ph) => ph?.url && !ph.url.includes('/object/public/observation-photos/'))?.url;
+  const primaryUri = directPhoto || smUrl || specPhoto || p.photo || p.photos?.[0]?.url;
+  const fallbackUri = smUrl || specPhoto;
+  return { uri: primaryUri, fallbackUri };
+}
 
 // Newest published plants first (the date an officer approved them), or published species
 function recentPublished(db) {
@@ -67,25 +79,28 @@ export function Home({ nav }) {
       />
       <Section title={home.recentSectionTitle} top={false} gap={0} right={<TextLink label="See all" size={14} onPress={() => nav.tab('plants')} />}>
         <EmptyState count={recent.length}>No published plants or species yet.</EmptyState>
-        {recent.map((p, i) => (
-          <Row
-            key={p.id}
-            left={<Thumb uri={p.photos?.[0]?.url || p.photo} />}
-            title={p.name}
-            sub={
-              <>
-                <Sci size={14}>{p.scientific || p.scientific_name}</Sci>
-                {p.endangered ? <DotLabel status="endangered" /> : null}
-              </>
-            }
-            onPress={() => {
-              if (p.qr_id) nav.go('tag', { qr: p.qr_id });
-              else if (p.species?.id || p.id) nav.go('species', { id: p.species?.id || p.id });
-              else nav.tab('plants');
-            }}
-            last={i === recent.length - 1}
-          />
-        ))}
+        {recent.map((p, i) => {
+          const { uri, fallbackUri } = getPlantPhoto(db, p);
+          return (
+            <Row
+              key={p.id}
+              left={<Thumb uri={uri} fallbackUri={fallbackUri} />}
+              title={p.name}
+              sub={
+                <>
+                  <Sci size={14}>{p.scientific || p.scientific_name}</Sci>
+                  {p.endangered ? <DotLabel status="endangered" /> : null}
+                </>
+              }
+              onPress={() => {
+                if (p.qr_id) nav.go('tag', { qr: p.qr_id });
+                else if (p.species?.id || p.id) nav.go('species', { id: p.species?.id || p.id });
+                else nav.tab('plants');
+              }}
+              last={i === recent.length - 1}
+            />
+          );
+        })}
       </Section>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Icon name="lock" size={16} color={c.ink2} />
@@ -162,6 +177,73 @@ export function NoAccess({ nav }) {
         {role === 'visitor' ? 'This page is for staff. Sign in to continue.' : 'Your role does not include this page.'}
       </Empty>
       {role === 'visitor' ? <Button label="Staff sign in" onPress={() => nav.go('signin')} /> : null}
+    </Screen>
+  );
+}
+
+// Staff portal landing screen (counterpart to web #/staff)
+export function StaffLanding({ nav }) {
+  const { me, role } = useStore();
+  const { c } = useTheme();
+  const staff = getStaffPageContent(PARK);
+
+  if (me && role !== 'visitor') {
+    return (
+      <Screen header={<Header left={nav.canGoBack ? <IconButton name="chevL" label="Back" onPress={nav.back} /> : null} />} top={0} gap={16}>
+        <View style={{ alignItems: 'flex-start', paddingTop: 8 }}>
+          <LogoMark size={48} />
+        </View>
+        <TitleBlock title="Staff Portal" sub={`Signed in as ${me.full_name || me.email}`} />
+        <View style={{ padding: 16, borderRadius: 14, backgroundColor: c.bg, gap: 8 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Txt v="label" style={{ fontSize: 16 }}>{me.full_name || 'Staff member'}</Txt>
+            <DotLabel status="approved" label={ROLE_LABEL[role] || role} />
+          </View>
+          <Txt v="small" color={c.ink2}>{me.email}</Txt>
+        </View>
+
+        <Button label="Go to staff dashboard" icon="dashboard" height={50} onPress={() => nav.go('dashboard')} />
+
+        <Section title="Quick actions" gap={8}>
+          {role === 'botanist' && (
+            <>
+              <Button label="My records" icon="file" kind="secondary" onPress={() => nav.go('records')} />
+              <Button label="Add plant" icon="plus" kind="secondary" onPress={() => nav.go('add')} />
+            </>
+          )}
+          {role === 'officer' && (
+            <>
+              <Button label="Review queue" icon="clipboard" kind="secondary" onPress={() => nav.go('review')} />
+              <Button label="Monitoring" icon="activity" kind="secondary" onPress={() => nav.go('monitor')} />
+            </>
+          )}
+          {role === 'admin' && (
+            <>
+              <Button label="User management" icon="users" kind="secondary" onPress={() => nav.go('users')} />
+              <Button label="Audit log" icon="shield" kind="secondary" onPress={() => nav.go('audit')} />
+            </>
+          )}
+          <Button label="More tools" icon="more" kind="quiet" onPress={() => nav.tab('staffMore')} />
+        </Section>
+      </Screen>
+    );
+  }
+
+  return (
+    <Screen header={<Header left={nav.canGoBack ? <IconButton name="chevL" label="Back" onPress={nav.back} /> : null} />} top={0} gap={18}>
+      <View style={{ alignItems: 'flex-start', paddingTop: 8 }}>
+        <LogoMark size={48} />
+      </View>
+      <TitleBlock title={staff.title} />
+      <Txt v="body" color={c.ink2}>{staff.description}</Txt>
+      <View style={{ paddingTop: 8 }}>
+        <Button label="Sign in as staff" icon="user" height={50} onPress={() => nav.go('signin')} />
+      </View>
+      <Section title="Looking around?" gap={10}>
+        <Txt v="body" color={c.ink2}>{staff.visitorHint}</Txt>
+        <Button label="Browse plant catalogue" icon="leaf" kind="secondary" onPress={() => nav.tab('plants')} />
+        <Button label="Open plant map" icon="map" kind="secondary" onPress={() => nav.tab('map')} />
+      </Section>
     </Screen>
   );
 }

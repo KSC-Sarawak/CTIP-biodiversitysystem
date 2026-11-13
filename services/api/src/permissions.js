@@ -116,10 +116,12 @@ export const routes = [
   ['delete', '/discussions/:id/posts/:postId', ANY_STAFF], // author or admin
   ['post', '/discussions/:id/posts/:postId/restore', ANY_STAFF], // whoever deleted it
 
-  // Notifications
+  // Notifications & Push Tokens
   ['get', '/notifications', ANY_STAFF],
   ['post', '/notifications/:id/read', ANY_STAFF],
   ['post', '/notifications/read-all', ANY_STAFF],
+  ['post', '/me/push-token', ANY_STAFF],
+  ['delete', '/me/push-token', ANY_STAFF],
 
   // Reports
   ['get', '/reports/observations', OFFICER_ADMIN],
