@@ -13,7 +13,11 @@ export function requireAuth(verify) {
     }
     try {
       const claims = await verify(token);
-      req.user = { id: claims.sub, email: claims.email, role: claims.user_role ?? null, aal: claims.aal ?? 'aal1', token };
+      req.user = {
+        id: claims.sub, email: claims.email, role: claims.user_role ?? null, aal: claims.aal ?? 'aal1', token,
+        // F-16: an admin made this account with a temporary password.
+        mustChangePassword: claims.user_metadata?.must_change_password === true,
+      };
       next();
     } catch (err) {
       if (err instanceof errors.JWTExpired) {
@@ -44,5 +48,15 @@ export function requireMfa(roles, setupRoute = false) {
   return (req, res, next) => {
     if (setupRoute || !roles.includes(req.user?.role) || req.user.aal === 'aal2') return next();
     return res.status(403).json({ code: 'MFA_REQUIRED', message: 'Sign in again and enter the 6-digit code from your authenticator app.' });
+  };
+}
+
+// F-16: 403 until a person whose admin typed their temporary password has chosen
+// their own. `exempt` lets the sign-in steps through (the MFA routes and
+// POST /me/password), so the change can be made at all.
+export function requirePasswordChanged(exempt = false) {
+  return (req, res, next) => {
+    if (exempt || !req.user?.mustChangePassword) return next();
+    return res.status(403).json({ code: 'PASSWORD_CHANGE_REQUIRED', message: 'Choose your own password first. Your admin gave you a temporary one.' });
   };
 }

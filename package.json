@@ -1,6 +1,7 @@
 {
   "name": "ctip-biodiversitysystem",
   "version": "1.0.0",
+  "type": "module",
   "private": true,
   "description": "Daun Sense — Smart Ground-Truthing & Digital Biodiversity System",
   "scripts": {

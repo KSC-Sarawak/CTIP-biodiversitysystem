@@ -21,6 +21,7 @@ export const NEEDS = {
   audit: "audit",
   alerts: "bell",
   discussion: "discuss",
+  dashboard: "pending",
   staffMore: "pending",
   account: "pending",
   tagQr: "pending", // any signed-in role: a tag's QR code to share or print (CTIP-27)
@@ -31,9 +32,9 @@ export const FULL_SCREEN = ["scan", "add", "submitted", "revisit", "signin"];
 
 // Core registered route names
 export const ROUTE_NAMES = [
-  "home", "about", "contact", "more", "signin",
+  "home", "about", "contact", "more", "signin", "staff",
   "plants", "species", "tag", "map", "scan",
-  "tagged", "add", "submitted", "revisit",
+  "tagged", "dashboard", "add", "submitted", "revisit",
   "records", "record", "phoneRecord", "alerts", "discussion",
   "review", "reviewItem", "monitor", "alert",
   "staffMore", "speciesAdmin", "tags", "tagQr", "reports",

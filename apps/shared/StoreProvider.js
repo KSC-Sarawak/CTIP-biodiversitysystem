@@ -88,6 +88,8 @@ const TOAST_MS = 5600;
 
 // The token to send: renewed through the API when it is about to expire.
 const sessionToken = () => freshAuthToken();
+// F-16: the admin typed this person's password, so they must choose their own first.
+const mustChangePassword = (token) => tokenClaims(token)?.user_metadata?.must_change_password === true;
 
 const staffStart = { ...seed, plants: [], observations: [] };
 
@@ -247,6 +249,16 @@ function collectionMatches(a = [], b = []) {
     // Not loaded: keep what we had. An empty plant list would show every tag as unused.
     if (!res.ok) {
       if (res.offline) markMiss();
+      // F-16: still on the temporary password an admin typed: sign out, so the
+      // sign-in page asks for a new one (the app tells them to use the website).
+      if (res.code === "PASSWORD_CHANGE_REQUIRED") {
+        sessionEpoch.current += 1;
+        setUserId(null);
+        setAuthTokenState(null);
+        await signOutApi();
+        notify(res.message);
+        return { ok: false, message: res.message };
+      }
       // VA-70: a password-only session (the 6-digit step was never finished):
       // sign out, so the person signs in again and gets the code step.
       if (res.code === "MFA_REQUIRED") {
@@ -735,6 +747,8 @@ function collectionMatches(a = [], b = []) {
     // VA-70: the 6-digit step comes first ("verify"), or setting up the
     // authenticator app ("setup"). The page shows it, then calls mfaVerify().
     if (res.data.mfa === "verify" || res.data.mfa === "setup") return { ok: true, id, mfa: res.data.mfa, first: false };
+    // F-16: a temporary password from an admin: a new one comes first (finishFirstSignIn).
+    if (mustChangePassword(res.data.access_token)) return { ok: true, id, first: true };
     setAuthTokenState(res.data.access_token);
     setUserId(id);
     await loadFromApi(true);
@@ -756,10 +770,23 @@ function collectionMatches(a = [], b = []) {
     const res = noteOffline(await mfaVerifyApi(clean));
     if (!res.ok) return { ok: false, message: res.offline ? API_DOWN : res.message };
     const id = res.data.user?.id;
+    if (mustChangePassword(res.data.access_token)) return { ok: true, id, first: true }; // F-16
     setAuthTokenState(res.data.access_token);
     setUserId(id);
     await loadFromApi(true);
     return { ok: true, id };
+  };
+
+  // F-16: the person has just replaced their temporary password. Their token
+  // still carries the old "must change" flag, so get a new one, then load as
+  // after a normal sign-in.
+  const finishFirstSignIn = async (id) => {
+    const token = await freshAuthToken({ force: true });
+    if (!token || mustChangePassword(token)) return { ok: false, message: "Sign in again with your new password." };
+    setAuthTokenState(token);
+    setUserId(id);
+    await loadFromApi(true);
+    return { ok: true };
   };
 
   // Left the 6-digit step without finishing: forget the password-only session.
@@ -1517,9 +1544,12 @@ function collectionMatches(a = [], b = []) {
 
   const assignAlert = async (id, assignee) => {
     const res = await callApi(assignAlertApi, id, assignee || null);
-    if (!res.ok) return notify(`Failed to assign alert: ${res.message}`);
-    notify("Alert assigned");
+    if (!res.ok) {
+      notify(`Failed to assign alert: ${res.message}`);
+      return false;
+    }
     await loadFromApi(true);
+    return true;
   };
 
   const addAlertNote = async (id, note) => {
@@ -1536,9 +1566,13 @@ function collectionMatches(a = [], b = []) {
 
   const setThresholds = async (nodeId, thresholds) => {
     const res = await callApi(setThresholdsApi, nodeId, thresholds);
-    if (!res.ok) return notify(`Failed to update thresholds: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to update thresholds: ${res.message}`);
+      return false;
+    }
     setDb((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId ? { ...n, thresholds } : n)) }));
     notify("Thresholds updated");
+    return true;
   };
 
   // One node's readings over a longer range than the workspace's last 24 hours.
@@ -1608,7 +1642,7 @@ function collectionMatches(a = [], b = []) {
   const value = {
     db, me, role, toast, notify,
     logout, login, signIn, changePassword, updateProfile, changeMyPassword,
-    mfaEnroll, mfaVerify, mfaCancel,
+    mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn,
     endedReason, clearEndedReason,
     setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
     syncObservation, resubmit, reviewObservation, addComment,

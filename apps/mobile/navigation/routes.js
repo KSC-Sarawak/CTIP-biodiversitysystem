@@ -1,7 +1,7 @@
 // apps/mobile/navigation/routes.js
 // Screen registry and route permissions for the Daun Sense mobile app.
-import { Home, About, Contact, More, NoAccess } from '../pages/Public.js';
-import { SpeciesList, TaggedPlants } from '../pages/Dashboard.js';
+import { Home, About, Contact, More, NoAccess, StaffLanding } from '../pages/Public.js';
+import { SpeciesList, TaggedPlants, StaffDashboard } from '../pages/Dashboard.js';
 import { SpeciesProfile, TaggedPlant } from '../pages/PlantPage.js';
 import MapPage from '../pages/MapPage.js';
 import Scan from '../pages/Scan.js';
@@ -23,9 +23,9 @@ import Account from '../pages/Account.js';
 
 // Every screen, by route name. Each screen receives { nav, params }.
 export const SCREENS = {
-  home: Home, about: About, contact: Contact, more: More, signin: SignIn,
+  home: Home, about: About, contact: Contact, more: More, signin: SignIn, staff: StaffLanding,
   plants: SpeciesList, species: SpeciesProfile, tag: TaggedPlant, map: MapPage, scan: Scan,
-  tagged: TaggedPlants, add: AddPlant, submitted: Submitted, revisit: Revisit,
+  tagged: TaggedPlants, dashboard: StaffDashboard, add: AddPlant, submitted: Submitted, revisit: Revisit,
   records: MyRecords, record: RecordDetail, phoneRecord: PhoneRecordDetail, alerts: Alerts, discussion: Discussion,
   review: ReviewQueue, reviewItem: ReviewRecord, monitor: Monitor, alert: AlertDetail,
   staffMore: StaffMore, speciesAdmin: SpeciesAdmin, tags: Tags, tagQr: TagQr, reports: Reports,

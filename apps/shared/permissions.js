@@ -22,7 +22,7 @@ const PERMS = {
   visitor: [],
   botanist: ["bell", "add", "editPhotos", "pending", "records", "discuss"],
   officer: ["bell", "editPhotos", "pending", "allPlants", "review", "reports", "species", "monitor", "tags", "discuss"],
-  admin: ["bell", "pending", "allPlants", "species", "monitor", "users", "audit", "tags", "discuss"],
+  admin: ["bell", "pending", "allPlants", "review", "reports", "species", "monitor", "users", "audit", "tags", "discuss"],
 };
 
 export const can = (role, perm) => (PERMS[role] || []).includes(perm);

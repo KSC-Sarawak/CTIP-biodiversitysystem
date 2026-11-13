@@ -48,12 +48,14 @@ export function Button({ label, onPress, kind = 'primary', icon, disabled, heigh
   );
 }
 
-export function IconButton({ name, onPress, label, color, size = 24 }) {
+export function IconButton({ name, onPress, label, color, size = 24, disabled }) {
   const { c } = useTheme();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled: !!disabled }}
+      disabled={disabled}
       onPress={onPress}
       hitSlop={4}
       style={({ pressed }) => ({
@@ -62,10 +64,10 @@ export function IconButton({ name, onPress, label, color, size = 24 }) {
         borderRadius: 10,
         alignItems: 'center',
         justifyContent: 'center',
-        opacity: pressed ? 0.6 : 1,
+        opacity: disabled ? 0.4 : pressed ? 0.6 : 1,
       })}
     >
-      <Icon name={name} size={size} color={color || c.ink} />
+      <Icon name={name} size={size} color={color || (disabled ? c.ink3 : c.ink)} />
     </Pressable>
   );
 }

@@ -702,6 +702,12 @@ export const fetchNotificationsApi = ({ token } = {}) => apiFetch("/notification
 export const markReadApi = (id, { token } = {}) => send("POST", `/notifications/${enc(id)}/read`, undefined, token);
 export const markAllReadApi = ({ token } = {}) => send("POST", "/notifications/read-all", undefined, token);
 
+// Device push token management for Expo Remote Push Notifications
+export const registerPushTokenApi = ({ token, platform, deviceName } = {}, { token: authToken } = {}) =>
+  send("POST", "/me/push-token", { token, platform, deviceName }, authToken);
+export const unregisterPushTokenApi = ({ token } = {}, { token: authToken } = {}) =>
+  send("DELETE", "/me/push-token", { token }, authToken);
+
 /**
  * Check if the backend API server is reachable and active.
  */

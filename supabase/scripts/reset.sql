@@ -30,6 +30,8 @@ drop function if exists public.approve_observation(uuid, text) cascade;
 drop function if exists public.handle_new_user() cascade;
 drop function if exists public.set_updated_at() cascade;
 drop function if exists public.audit_changes() cascade;
+drop function if exists public.audit_logs_append_only() cascade;
+drop function if exists public.log_auth_event(text, text) cascade;
 drop function if exists public.my_role() cascade;
 drop function if exists public.guard_specimen_update() cascade;
 drop function if exists public.apply_review_decision() cascade;
