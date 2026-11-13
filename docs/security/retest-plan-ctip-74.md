@@ -33,6 +33,7 @@
 | VA-70 MFA login | Michelle (#61) | Nicole | Web **Pass** 10 Nov (W1b); app M1 waits for new APK |
 | F-14 (public MQTT broker) | Michelle (#55) + Norman | Nicole, with Norman | To do (I1) |
 | F-15 (gateway trusts messages) | Norman | Michelle | To do (I2) |
+| IoT through the API (PR #72) | Michelle | Michelle, with Norman | **Pass** 12 Nov (I0: 401 without key, gateway saved + photo 201, website shows new photos) |
 | Capital-E "Endangered" bug | web team | Michelle | **Pass**, 10 Nov (W8) |
 | Legacy keys still active | Michelle | Michelle | **Done**, turned off 10 Nov (S5) |
 
