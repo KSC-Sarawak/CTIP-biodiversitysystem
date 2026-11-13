@@ -5,4 +5,3 @@ VA-19 EXIF: JPEG with GPS EXIF -> stripMetadata() output has no Exif block and n
 VA-14 alg: verifyToken.js only accepts ES256/RS256 from the project's JWKS, so alg "none" and other keys are refused. PASS
 VA-78 https images: website CSP img-src lists only 'self', data:, blob: and https:// hosts; app targets SDK 36 (cleartext http blocked); uploads always stored in Supabase (https). PASS
 VA-75 temporary password: Login.jsx shows "You signed in with the default password. Choose a new one now, or keep it for later." -> change can be skipped. FAIL (F-16)
-VA-04 CI: .github/workflows/ci.yml runs API tests, shared tests, web lint+build only; no npm audit, no secret scan. FAIL (F-17). Branch protection: screenshot still needed.
