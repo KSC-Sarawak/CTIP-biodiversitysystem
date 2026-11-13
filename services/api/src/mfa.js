@@ -3,6 +3,8 @@ import { parseBody, fail } from './validate.js';
 import { tooMany as overLimit } from './rateLimit.js';
 import { ATTEMPT_LIMIT, ATTEMPT_WINDOW_MS, toSession } from './session.js';
 import { logAuthEvent } from './auditLog.js';
+import { supabaseFresh, supabaseService } from './supabase.js';
+import { isEmailRateLimit, emailLimitInfo, emailLimitMessage, recordEmailSent } from './emailLimit.js';
 
 // Two-step sign-in with an authenticator app (VA-70, lecturer feedback; CTIP-50).
 // Every signed-in role (botanist, officer, admin) must use it: an access token
@@ -14,12 +16,29 @@ import { logAuthEvent } from './auditLog.js';
 //   setup:  POST /auth/mfa/enroll  -> QR code and set-up key for the authenticator app
 //           POST /auth/mfa/verify  -> { code } -> new session (aal2)
 //   verify: POST /auth/mfa/verify  -> { code } -> new session (aal2)
+//
+// Lost phone (lecturer, 13 Nov 2026: "through Gmail"). Needs the password AND
+// the staff member's email inbox:
+//   POST /auth/mfa/recovery (password-only session) -> emails a sign-in link
+//   the link opens the website with a new session made from the email
+//   POST /auth/mfa/reset    (that email session)    -> the old app is removed
+//   then the normal set-up: enroll + verify with the new phone
 
 // The roles that must use a second step (Tan, 5 Nov 2026: every staff account).
 export const MFA_ROLES = ['botanist', 'officer', 'admin'];
 
 // Routes an officer or admin may call before the second step: only the two below.
-export const MFA_SETUP_ROUTES = new Set(['post /auth/mfa/enroll', 'post /auth/mfa/verify']);
+export const MFA_SETUP_ROUTES = new Set(['post /auth/mfa/enroll', 'post /auth/mfa/verify', 'post /auth/mfa/recovery', 'post /auth/mfa/reset']);
+
+// How long the session from the email link may be used to reset the app.
+export const EMAIL_LINK_MAX_AGE_S = 15 * 60;
+// Supabase names the email-link sign-in "otp" or "magiclink" in the token's amr list.
+const EMAIL_LINK_METHODS = ['otp', 'magiclink'];
+
+// True when this session was made from an email link in the last 15 minutes.
+export function fromEmailLink(amr, now = Date.now()) {
+  return (amr ?? []).some((a) => EMAIL_LINK_METHODS.includes(a?.method) && now / 1000 - Number(a.timestamp) <= EMAIL_LINK_MAX_AGE_S);
+}
 
 const Verify = z.strictObject({ code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code from your authenticator app') });
 
@@ -70,16 +89,18 @@ export function qrImage(qr) {
 }
 
 const tooMany = (req) => overLimit(req, 'mfa-verify', { limit: ATTEMPT_LIMIT, windowMs: ATTEMPT_WINDOW_MS });
+const tooManyEmails = (req) => overLimit(req, 'mfa-recovery', { limit: 3, windowMs: 15 * 60 * 1000 });
+const AUTH_DOWN = 'Two-step sign-in is not working right now. Please try again.';
 
 export const mfaHandlers = {
   // A new authenticator-app factor, waiting for its first code. Refused when one
-  // is already set up: a lost phone is reset by an admin in Supabase, not here,
-  // so a stolen password cannot replace the owner's app.
+  // is already set up: a lost phone is reset through the email link below, so a
+  // stolen password alone cannot replace the owner's app.
   'post /auth/mfa/enroll': async (req, res) => {
     const factors = await totpFactors(req.user.token);
     if (!factors) return fail(res, 502, 'AUTH_ERROR', 'Two-step sign-in is not working right now. Please try again.');
     if (factors.some((f) => f.status === 'verified')) {
-      return fail(res, 409, 'MFA_ALREADY_SET_UP', 'Two-step sign-in is already set up. Ask an admin to reset it if you lost your phone.');
+      return fail(res, 409, 'MFA_ALREADY_SET_UP', 'Two-step sign-in is already set up. If you lost your phone, use "Lost your phone?" to reset it by email.');
     }
     // Earlier set-ups that were never finished: removed, so the new one can use the same name.
     for (const f of factors) await authRequest(`/factors/${f.id}`, { method: 'DELETE', token: req.user.token }).catch(() => {});
@@ -115,5 +136,45 @@ export const mfaHandlers = {
       return fail(res, 502, 'AUTH_ERROR', 'Two-step sign-in is not working right now. Please try again.');
     }
     res.json(toSession(checked.data));
+  },
+  // Lost phone, step 1: after the right password, email a sign-in link to the
+  // account's own address (never one typed in). Only for someone who has an app set up.
+  'post /auth/mfa/recovery': async (req, res) => {
+    if (tooManyEmails(req)) return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many emails asked for. Wait 15 minutes and try again.');
+    const factors = await totpFactors(req.user.token);
+    if (!factors) return fail(res, 502, 'AUTH_ERROR', AUTH_DOWN);
+    if (!factors.some((f) => f.status === 'verified')) return fail(res, 409, 'MFA_NOT_SET_UP', 'Two-step sign-in is not set up yet, so there is nothing to reset.');
+    const emailRedirectTo = process.env.MFA_RESET_REDIRECT_URL || process.env.PASSWORD_RESET_REDIRECT_URL || undefined;
+    const { error } = await supabaseFresh().auth.signInWithOtp({ email: req.user.email, options: { shouldCreateUser: false, emailRedirectTo } });
+    if (isEmailRateLimit(error)) {
+      const info = emailLimitInfo();
+      return res.status(429).json({ code: 'EMAIL_RATE_LIMIT', message: `${emailLimitMessage(info)} No email was sent.`, details: info });
+    }
+    if (error) {
+      console.warn('MFA recovery email not sent:', error.message);
+      return fail(res, 502, 'AUTH_ERROR', 'The email could not be sent. Please try again.');
+    }
+    recordEmailSent();
+    res.status(202).json({ sent: true });
+  },
+
+  // Lost phone, step 2: called with the session the email link made. Removes
+  // the old authenticator app with the secret key (a person can only remove a
+  // set-up app with aal2, which they cannot reach without the phone). The page
+  // then runs the normal set-up with the new phone.
+  'post /auth/mfa/reset': async (req, res) => {
+    if (!fromEmailLink(req.user.amr)) {
+      return fail(res, 403, 'EMAIL_LINK_REQUIRED', 'Open the link in the email we sent you (it works for 15 minutes), then try again.');
+    }
+    const admin = supabaseService()?.auth.admin.mfa;
+    if (!admin) return fail(res, 503, 'AUTH_ERROR', AUTH_DOWN);
+    const listed = await admin.listFactors({ userId: req.user.id });
+    if (listed.error) return fail(res, 502, 'AUTH_ERROR', AUTH_DOWN);
+    for (const f of listed.data?.factors ?? []) {
+      if (f.factor_type !== 'totp') continue;
+      const removed = await admin.deleteFactor({ id: f.id, userId: req.user.id });
+      if (removed.error) return fail(res, 502, 'AUTH_ERROR', AUTH_DOWN);
+    }
+    res.status(204).end();
   },
 };
