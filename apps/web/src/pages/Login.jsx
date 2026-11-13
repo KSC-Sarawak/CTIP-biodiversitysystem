@@ -1,5 +1,5 @@
 // apps/web/src/pages/Login.jsx
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useStore } from "../../../shared/store.js";
 import { go, useRoute } from "../useRoute.js";
@@ -17,13 +17,15 @@ import { PARK } from "../../../shared/site.js";
 // before anything else (after the 6-digit step); the API refuses everything else.
 // Two-step sign-in (VA-70): after the password, every staff member types the
 // 6-digit code from their authenticator app ("mfa"). The first time, they scan
-// a QR code to set the app up ("mfa-setup").
+// a QR code to set the app up ("mfa-setup"). Lost phone: "Lost your phone?"
+// emails a link (lecturer, 13 Nov: recover through email); the link opens
+// #/login?mfareset=1, which removes the old app and shows the set-up again.
 // Shown at #/login and on the Staff area page (#/staff) for anyone signed out.
 export default function Login() {
-  const { login, signIn, changePassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, endedReason, clearEndedReason } = useStore();
+  const { login, signIn, changePassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset, endedReason, clearEndedReason } = useStore();
   const { query } = useRoute();
   const staff = getStaffPageContent(PARK);
-  const [mode, setMode] = useState(query.reset ? "reset" : query.expired ? "change" : "signin"); // signin | change | reset | first | mfa | mfa-setup
+  const [mode, setMode] = useState(query.mfareset ? "mfa-reset" : query.reset ? "reset" : query.expired ? "change" : "signin"); // signin | change | reset | first | mfa | mfa-setup | mfa-reset
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [newPw, setNewPw] = useState("");
@@ -87,6 +89,34 @@ export default function Login() {
     }
     signIn(res.id);
     go("/dashboard");
+  };
+
+  // Lost-phone link opened: remove the old app once, then show the QR set-up.
+  const resetStarted = useRef(false);
+  useEffect(() => {
+    if (mode !== "mfa-reset" || resetStarted.current) return;
+    resetStarted.current = true;
+    mfaReset().then((en) => {
+      if (!en.ok) {
+        setMode("signin");
+        return setError(en.message);
+      }
+      setSetup(en);
+      setCode("");
+      setMode("mfa-setup");
+    });
+  }, [mode, mfaReset]);
+
+  // Lost phone: email the reset link, then back to sign-in (the link brings its own session).
+  const lostPhone = async () => {
+    if (busy) return;
+    setBusy(true);
+    const res = await mfaRecovery();
+    setBusy(false);
+    if (!res.ok) return notify(res.message);
+    await mfaCancel();
+    switchTo("signin");
+    notify(res.message);
   };
 
   const cancelCode = async () => {
@@ -199,7 +229,9 @@ export default function Login() {
             <button className="btn" type="submit" disabled={busy || code.length !== 6}><Icon name="check" size={18} /> {busy ? "Checking..." : "Verify"}</button>
             <button className="btn ghost" type="button" onClick={cancelCode}><Icon name="chevL" size={18} /> Back to sign in</button>
           </div>
-          <p className="mute small" style={{ marginTop: 12 }}>Lost your phone? Ask an admin to reset your two-step sign-in.</p>
+          <p className="mute small" style={{ marginTop: 12 }}>
+            <button type="button" className="textlink" onClick={lostPhone} disabled={busy}>Lost your phone? Email me a link to set up a new one</button>
+          </p>
         </form>
       )}
 
@@ -225,6 +257,13 @@ export default function Login() {
             <button className="btn ghost" type="button" onClick={cancelCode}><Icon name="chevL" size={18} /> Cancel</button>
           </div>
         </form>
+      )}
+
+      {mode === "mfa-reset" && (
+        <div role="status">
+          <h1>Set up your new phone</h1>
+          <p className="mute">Removing the old authenticator app…</p>
+        </div>
       )}
 
       {mode === "change" && (

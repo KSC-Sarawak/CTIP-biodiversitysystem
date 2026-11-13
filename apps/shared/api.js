@@ -380,6 +380,26 @@ export async function mfaVerifyApi(code) {
   return res;
 }
 
+/**
+ * Lost phone (lecturer, 13 Nov 2026: recover through email). With the
+ * password-only session, POST /v1/auth/mfa/recovery emails a sign-in link.
+ * The link opens the website with `type=magiclink`; takeSessionFromUrl() keeps
+ * that session here instead of storing it, so the start-up load does not sign
+ * it out (it is not aal2 yet). mfaResetApi() sends it to POST /v1/auth/mfa/reset,
+ * which removes the old app, and then stores it for the normal set-up.
+ */
+let mfaResetSession = null;
+export const mfaRecoveryApi = () => apiFetch("/auth/mfa/recovery", { method: "POST", token: getAuthToken() });
+
+export async function mfaResetApi() {
+  const session = mfaResetSession;
+  mfaResetSession = null;
+  if (!session) return { ok: false, status: 0, message: "Open the link in the email again." };
+  const res = await apiFetch("/auth/mfa/reset", { method: "POST", token: session.access_token });
+  if (res.ok) setSession(session);
+  return res;
+}
+
 /** POST /v1/auth/sign-out with the current token, then forgets the session. Never fails. */
 export async function signOutApi() {
   const token = getAuthToken();
@@ -408,13 +428,16 @@ export function takeSessionFromUrl() {
   const access_token = params.get("access_token");
   if (!access_token) return null;
   const claims = tokenClaims(access_token) || {};
-  setSession({
+  const session = {
     access_token,
     refresh_token: params.get("refresh_token") || undefined,
     expires_at: Number(params.get("expires_at")) || claims.exp,
     user: { id: claims.sub, email: claims.email },
-  });
-  return params.get("type") || "signin";
+  };
+  const type = params.get("type") || "signin";
+  if (type === "magiclink") mfaResetSession = session; // lost-phone link: see mfaResetApi()
+  else setSession(session);
+  return type;
 }
 
 /**

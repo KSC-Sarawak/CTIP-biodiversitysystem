@@ -15,6 +15,8 @@ import {
   signInApi,
   mfaEnrollApi,
   mfaVerifyApi,
+  mfaRecoveryApi,
+  mfaResetApi,
   signOutApi,
   passwordResetApi,
   changePasswordApi,
@@ -546,7 +548,9 @@ function collectionMatches(a = [], b = []) {
     const fromLink = takeSessionFromUrl();
     if (fromLink && typeof window !== "undefined") {
       // Out of the address and the history, then on to setting a new password.
-      const next = fromLink === "recovery" ? "#/login?reset=1" : fromLink === "expired" ? "#/login?expired=1" : "#/dashboard";
+      const next = fromLink === "recovery" ? "#/login?reset=1"
+        : fromLink === "magiclink" ? "#/login?mfareset=1" // lost-phone link
+        : fromLink === "expired" ? "#/login?expired=1" : "#/dashboard";
       window.history.replaceState(null, "", window.location.pathname + window.location.search + next);
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     }
@@ -787,6 +791,20 @@ function collectionMatches(a = [], b = []) {
     setUserId(id);
     await loadFromApi(true);
     return { ok: true };
+  };
+
+  // Lost phone: email a link that resets two-step sign-in (needs the password-only session).
+  const mfaRecovery = async () => {
+    const res = noteOffline(await mfaRecoveryApi());
+    if (!res.ok) return { ok: false, message: res.offline ? API_DOWN : res.message };
+    return { ok: true, message: "We emailed you a link. Open it within 15 minutes, on the staff website, to set up your new phone." };
+  };
+
+  // Opened the lost-phone link: remove the old app, then start the set-up (QR code) for the new phone.
+  const mfaReset = async () => {
+    const res = noteOffline(await mfaResetApi());
+    if (!res.ok) return { ok: false, message: res.offline ? API_DOWN : res.message || "That link has expired or was already used. Sign in and ask for a new one." };
+    return mfaEnroll();
   };
 
   // Left the 6-digit step without finishing: forget the password-only session.
@@ -1642,7 +1660,7 @@ function collectionMatches(a = [], b = []) {
   const value = {
     db, me, role, toast, notify,
     logout, login, signIn, changePassword, updateProfile, changeMyPassword,
-    mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn,
+    mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
     setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
     syncObservation, resubmit, reviewObservation, addComment,
