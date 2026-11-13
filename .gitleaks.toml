@@ -1,0 +1,11 @@
+# Gitleaks rules for the CI secret scan (F-17).
+# The default rules do not know Supabase's new secret key format, which is how
+# the F-06 key was missed, so one rule is added for it.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "supabase-secret-key"
+description = "Supabase secret key (sb_secret_...)"
+regex = '''sb_secret_[A-Za-z0-9_-]{20,}'''
+keywords = ["sb_secret_"]
