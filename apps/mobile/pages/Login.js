@@ -17,7 +17,7 @@ import { Screen, Header, IconButton, TitleBlock, Field, Button, Txt } from '../c
 import { LogoMark } from '../components/Chrome.js';
 
 export default function SignIn({ nav }) {
-  const { login, signIn, mfaEnroll, mfaVerify, mfaCancel, changePassword, notify } = useStore();
+  const { login, signIn, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, changePassword, notify } = useStore();
   const { c } = useTheme();
 
   // Mode: 'credentials' | 'forgot' | 'first' | 'code' | 'setup'
@@ -85,6 +85,11 @@ export default function SignIn({ nav }) {
       if (!res.ok) return setError(res.message);
       if (mode === 'setup') notify('Two-step sign-in is set up');
       setSetup(null);
+      // F-16: a temporary password from an admin must be replaced first.
+      if (res.first) {
+        setPendingUserId(res.id);
+        return setMode('first');
+      }
       signIn(res.id);
     } catch {
       setError('The code could not be checked. Try again in a moment.');
@@ -103,7 +108,12 @@ export default function SignIn({ nav }) {
       const res = await changePassword(null, newPassword);
       if (!res.ok) return setError(res.message || 'Could not change password');
       notify('Password updated');
-      signIn(pendingUserId);
+      // F-16: get a new session without the "must change" flag, then open the app.
+      const done = await finishFirstSignIn(pendingUserId);
+      if (!done.ok) {
+        setMode('credentials');
+        return setError(done.message);
+      }
     } catch {
       setError('Password change failed. Try again.');
     } finally {
@@ -226,7 +236,7 @@ export default function SignIn({ nav }) {
   // 3. First-time Password Change Screen
   if (mode === 'first') {
     return (
-      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Cancel" onPress={() => setMode('credentials')} />} />} top={0} gap={16}>
+      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Cancel" onPress={() => { mfaCancel(); setMode('credentials'); }} />} />} top={0} gap={16}>
         <TitleBlock title="Create new password" sub="First-time login setup" />
         <Txt v="body" color={c.ink2}>Please choose a new personal password before continuing to your staff dashboard.</Txt>
         <Field
