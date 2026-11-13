@@ -6,11 +6,12 @@ import PhotoGallery from "../components/PhotoGallery.jsx";
 import { Chip, Mono, Sci } from "../components/Bits.jsx";
 import { fetchPublicPlantByTag } from "../../../shared/api.js";
 import { orderedPhotos } from "../../../shared/selectors.js";
+import { HIDDEN_LOCATION_NOTE } from "../../../shared/data.js";
 
 // The page a QR tag opens for a visitor (CTIP-33). Visitors get no plants in
 // the start-up load, so the plant comes from GET /v1/public/tags/:qrId, which
-// only answers for a published plant and reduces an endangered location
-// on the server.
+// only answers for a published plant. A protected plant's location is not
+// shown at all, not even as an area.
 export default function PublicPlant({ qr }) {
   const [state, setState] = useState({ qr: null, status: "loading" });
 
@@ -49,7 +50,8 @@ export default function PublicPlant({ qr }) {
 
   const s = plant.species;
   const name = s.common_name || s.scientific_name;
-  const where = plant.lat != null && plant.lng != null
+  // Lecturer, 13 Nov: no estimated area for protected plants, so a visitor gets no map at all.
+  const where = !plant.location_reduced && plant.lat != null && plant.lng != null
     ? [{ p: { id: plant.qr_id, qr_id: plant.qr_id, name, scientific: s.scientific_name, species: s }, c: { lat: plant.lat, lng: plant.lng } }]
     : [];
 
@@ -84,12 +86,9 @@ export default function PublicPlant({ qr }) {
       <section className="glass pad gap-section-s" aria-labelledby="where">
         <h2 id="where">Where it grows</h2>
         {where.length ? (
-          <>
-            <MiniMap points={where} label={`Map of where ${name} grows`} expandable />
-            {plant.location_reduced && <p className="mute small gap-top-s">This plant is protected, so the map only shows the area it grows in (within about a kilometre), not the plant itself.</p>}
-          </>
+          <MiniMap points={where} label={`Map of where ${name} grows`} expandable />
         ) : (
-          <p className="mute">No location was recorded for this plant.</p>
+          <p className="mute">{plant.location_reduced ? HIDDEN_LOCATION_NOTE : "No location was recorded for this plant."}</p>
         )}
       </section>
     </>
