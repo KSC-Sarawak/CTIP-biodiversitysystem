@@ -417,7 +417,9 @@ export const staffHandlers = {
     const { data: created, error: authError } = await auth.signUp({
       email: body.email,
       password: body.password ?? `${crypto.randomUUID()}-${crypto.randomUUID()}`,
-      options: { data: { full_name: body.full_name, role: body.role } },
+      // F-16: a password typed by the admin is temporary. The flag makes the API
+      // refuse everything until the person has chosen their own (POST /me/password).
+      options: { data: { full_name: body.full_name, role: body.role, ...(invite ? {} : { must_change_password: true }) } },
     });
     if (authError) {
       if (authError.code === 'signup_disabled' || /signups not allowed/i.test(authError.message)) {
