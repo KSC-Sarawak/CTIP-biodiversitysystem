@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { parseBody, fail } from './validate.js';
 import { tooMany as overLimit } from './rateLimit.js';
 import { ATTEMPT_LIMIT, ATTEMPT_WINDOW_MS, toSession } from './session.js';
+import { logAuthEvent } from './auditLog.js';
 
 // Two-step sign-in with an authenticator app (VA-70, lecturer feedback; CTIP-50).
 // Every signed-in role (botanist, officer, admin) must use it: an access token
@@ -107,7 +108,10 @@ export const mfaHandlers = {
       body: { challenge_id: challenge.data.id, code: body.code },
     });
     if (!checked.ok || !checked.data?.access_token) {
-      if (checked.status === 400 || checked.status === 422) return fail(res, 401, 'WRONG_CODE', 'That code is not right. Check the time on your phone and try the newest code.');
+      if (checked.status === 400 || checked.status === 422) {
+        await logAuthEvent('MFA_FAILED', { token: req.user.token });
+        return fail(res, 401, 'WRONG_CODE', 'That code is not right. Check the time on your phone and try the newest code.');
+      }
       return fail(res, 502, 'AUTH_ERROR', 'Two-step sign-in is not working right now. Please try again.');
     }
     res.json(toSession(checked.data));
