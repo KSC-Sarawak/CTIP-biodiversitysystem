@@ -46,7 +46,7 @@ F-14 and F-15 are fixed in code. Live re-tests I1 and I2 are still to do.
 
 ## Notes
 
-- **Certificates:** the old broker certificate keys are in the history of Norman's IoT-AI repository. Norman is to make new certificates with `make_certs.py` (new CA) before the real re-test (see F-14 in the main report). MQTT passwords were changed on 10 Nov.
+- **Certificates:** the old broker certificate keys are in the history of Norman's IoT-AI repository. Norman made new certificates with `make_certs.py` (new CA) by 13 Nov and MQTT passwords were changed on 10 Nov, so the old keys no longer work.
 - **Sensor key:** one `SENSOR_KEY` for the gateway, kept in `bridge_secrets.py` (gitignored) and on Render only. It was replaced on 12 Nov after it was put in the node ID field by mistake.
 - **Supabase mode still in the gateway:** `MODE = "supabase"` and `SUPABASE_SERVICE_KEY` are still supported as a fallback. The gateway has no Supabase key (legacy keys are off and no `iot-gateway` key was made), so this mode cannot work. Recommend removing it so no one puts a Supabase key back on the laptop.
 - **Broker on the laptop hotspot:** reachable only on the hotspot network. Port 8883 must not be opened to the internet.

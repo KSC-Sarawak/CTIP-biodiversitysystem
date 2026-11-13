@@ -1,0 +1,251 @@
+main 5eb934f, 13 Nov 2026
+ok 1 - fine addresses pass
+ok 2 - 1@gmail.com: Gmail needs 6 to 30 letters or numbers
+ok 3 - each kind of bad address gets its own reason
+ok 4 - passwords and names
+ok 5 - the API and the apps use the same rules (keep the two files the same)
+ok 6 - approving a record of a species with no photos makes its first photo the cover
+ok 7 - a species that already has photos keeps them
+ok 8 - every route in permissions.js is in the contract
+ok 9 - no measurements yet: poll at the normal rate
+ok 10 - fast answers keep the normal rate
+ok 11 - slow answers slow the polling down, up to a minute
+ok 12 - once the database is quick again, polling speeds back up
+ok 13 - one slow query does not slow everyone down
+ok 14 - measurements older than a minute are ignored
+ok 15 - start a private thread shared with a group and a person: 201 with audience and first post
+ok 16 - a private thread must be shared with someone; a public one need not be
+ok 17 - bad recipients are refused: unknown role, ids that are not UUIDs, extra fields
+ok 18 - sending the same thread again (retry) returns it with 200, not a second thread
+ok 19 - a private thread is 404 to someone it is not shared with, and readable to its group
+ok 20 - a public thread can be read and replied to by any staff member
+ok 21 - replying to a thread you cannot see answers 404
+ok 22 - only the owner changes visibility and audience
+ok 23 - delete: not by another member, yes by an admin
+ok 24 - visitors cannot use the board
+ok 25 - edit: the author changes the text, it shows edited, and the private thread history has before and after
+ok 26 - edit: nobody else, not even an admin; empty text is refused; same text is not marked edited
+ok 27 - delete and undo: the text goes, then comes back exactly from the private thread history
+ok 28 - delete: someone else cannot; an admin can (moderation), and only the admin can undo it
+ok 29 - messages: bad or unknown ids, or a thread you cannot read, answer 404
+ok 30 - asks the database for approved, not-deleted observations only
+ok 31 - one point per plant, from its latest approved observation
+ok 32 - officer and admin get exact coordinates of endangered plants
+ok 33 - botanist gets reduced coordinates for endangered plants, never the exact ones
+ok 34 - the officer's endangered flag on one plant also reduces it, whatever the species status
+ok 35 - plants that are not endangered keep their coordinates for every role
+ok 36 - filter by species or family
+ok 37 - visitors (no token) cannot read the distribution data
+ok 38 - botanist registers a plant on an unused tag: 201, registered_by from the token
+ok 39 - sending the same plant again (retry) returns it with 200, not a second plant
+ok 40 - a tag already on another plant gets 409 TAG_IN_USE; an unknown tag 422 TAG_NOT_FOUND
+ok 41 - a retired or damaged tag gets 409 TAG_RETIRED, not a 500
+ok 42 - the database refusing another botanist's kept tag answers 409 TAG_RESERVED, not a 500
+ok 43 - clients cannot set registered_by or species_id when registering
+ok 44 - new observation: recorded_by from the token, version 1, waiting for review
+ok 45 - an observation cannot be created already approved
+ok 46 - submit a draft: becomes synced, version unchanged
+ok 47 - resubmit a returned record: fixes saved, version goes up, reply posted
+ok 48 - a decided record cannot be submitted again: 409 WRONG_STATUS
+ok 49 - a botanist cannot submit another botanist's record
+ok 50 - photo upload: stored at {observation_id}/{photo_id}.jpg, row saved, signed link returned
+ok 51 - a retry that overlaps the first upload of a photo keeps the file the saved row points to
+ok 52 - photo upload keeps its caption and traits, and refuses a trait not on the list
+ok 53 - a botanist cannot add a record to a plant while one is waiting for an officer
+ok 54 - photo upload rejects HEIC images to protect location privacy (CTIP-110)
+ok 55 - photo upload rejects a file that is not an image, whatever its name
+ok 56 - comment: author from the token
+ok 57 - tag batch: next ids after the highest one, created_by from the token
+ok 58 - botanist can create one tag for a plant, but not a batch
+ok 59 - a tag on a plant cannot be deleted (409); an unused one can (204)
+ok 60 - botanist releases own reserved unused tag
+ok 61 - botanist cannot release another botanist's tag
+ok 62 - botanist cannot release a printed tag
+ok 63 - an officer cannot make a batch labelled reserved
+ok 64 - POST /specimens on another botanist's reserved tag answers 409 TAG_RESERVED
+ok 65 - POST /specimens on my own reserved tag works
+ok 66 - workspace: every list, with signed links on field photos
+ok 67 - workspace: sensor readings from the last 24 hours only
+ok 68 - sensor node telemetry: readings in the asked range, oldest first; bad input refused
+ok 69 - sensor node telemetry: a chosen date range (from and to)
+ok 70 - sensor node images: newest photos with signed links, officers and admins only
+ok 71 - workspace: a side list that fails comes back empty and named; a core list fails the request
+ok 72 - visitor workspace needs no token and holds only species and their photos
+ok 73 - workspace: another botanist's endangered plant comes back reduced
+ok 74 - workspace: a reduced plant's zone names the square of its reduced point, nothing finer
+ok 75 - visitor workspace never holds zones
+ok 76 - workspace: officer sees exact
+ok 77 - workspace: own plant stays exact
+ok 78 - workspace: null coordinates stay null
+ok 79 - workspace: override and capitalised status both reduce
+ok 80 - workspace: a species the botanist cannot see (unpublished) counts as endangered
+ok 81 - by-qr reduces another botanist's endangered plant
+ok 82 - an admin cannot change their own role or turn off their own account
+ok 83 - PATCH /me cannot change role
+ok 84 - marking a notification read only touches the caller's own
+ok 85 - workspace: an account an admin turned off is told so, and gets no data
+ok 86 - workspace: the first load is full and hands back a cursor and a poll delay
+ok 87 - workspace: nothing changed since the cursor answers unchanged, with no lists
+ok 88 - workspace: a changed table sends only that list
+ok 89 - workspace: a species change also resends plants, still with endangered spots reduced
+ok 90 - workspace: someone else's cursor gets a full load
+ok 91 - workspace: a broken cursor gets a full load, not an error
+ok 92 - workspace: before the counters exist, every load is full
+ok 93 - health: answers without asking the database
+ok 94 - GET /specimens: endangered spots reduced for a botanist, own plants and staff exact, deleted left out
+ok 95 - GET /specimens: filters, paging and bad parameters
+ok 96 - GET /specimens/:id: protected like the list; a species the user cannot read fails closed; deleted is 404
+ok 97 - PATCH /observations/:id: the owner edits a draft with the version they saw; the version moves on
+ok 98 - PATCH /observations/:id: sent records, other people and bad bodies are refused
+ok 99 - DELETE /observations/:id: the owner soft-deletes an unsent record; version checked when sent
+ok 100 - photo confirm: an uploaded photo is returned as it is; a pending one is marked uploaded once its file is there
+ok 101 - POST /sync creates new observations as queued
+ok 102 - POST /sync replayed batch stores each observation once
+ok 103 - POST /sync answers another user's id with ID_TAKEN and keeps their row
+ok 104 - POST /sync leaves a plant waiting for an officer alone (botanist), and still saves the others
+ok 105 - POST /sync resend of a create the server already holds answers created, even once the plant waits for an officer
+ok 106 - POST /sync edit with the right base_version answers updated
+ok 107 - POST /sync edit with an old base_version answers conflict and changes nothing
+ok 108 - POST /sync replayed edit answers updated, not conflict
+ok 109 - POST /sync edit of a record sent for review answers conflict WRONG_STATUS
+ok 110 - POST /sync edit of a missing record answers NOT_FOUND, and another user's record looks missing too
+ok 111 - POST /sync item without id answers error and the others still save
+ok 112 - POST /sync refuses a status from the phone and unknown fields, per item
+ok 113 - POST /sync refuses 21 items, or none, with 422
+ok 114 - POST /sync needs sign-in
+ok 115 - responses have no X-Powered-By header
+ok 116 - plain HTTP is rejected with 403 HTTPS_REQUIRED, public and protected routes alike
+ok 117 - HTTPS requests go through and carry an HSTS header
+ok 118 - a client cannot fake HTTPS when the API is not told to trust a proxy
+ok 119 - local development (REQUIRE_HTTPS off) still works over http://localhost
+ok 120 - production refuses to start with a non-HTTPS Supabase URL or CORS origin
+ok 121 - every role must use MFA
+ok 122 - botanist, officer and admin with a password-only token: every normal route answers 403 MFA_REQUIRED
+ok 123 - officer and botanist with an aal2 token get through
+ok 124 - with no mfaRoles (older tests, MFA_OFF) nothing changes
+ok 125 - sign-in says what comes next: setup with no app (botanists too), verify once set up
+ok 126 - enroll works with the password-only token, removes unfinished set-ups, and answers the QR code
+ok 127 - enroll is refused once an app is set up, so a stolen password cannot replace it
+ok 128 - verify: right code gives a new session, wrong code 401, bad format 422
+ok 129 - verify with no app set up: 409 MFA_NOT_SET_UP
+ok 130 - guessing codes is limited: 429 after the limit
+ok 131 - the MFA routes still need a signed-in token
+ok 132 - the QR code is sent as a base64 picture the browser can show
+ok 133 - officer lists the pending review queue, oldest first
+ok 134 - a botanist only sees their own observations and their status
+ok 135 - officer approves: 201, status becomes approved, reviewer and time recorded
+ok 136 - reject and request changes need a reason
+ok 137 - the botanist can read why their observation was returned
+ok 138 - stale version gets 409 VERSION_CONFLICT; already reviewed or draft gets 409 WRONG_STATUS
+ok 139 - unknown observation gets 404; bad body gets 422
+ok 140 - botanists cannot review, not even their own observation
+ok 141 - approving needs a confirmed species: 422 SPECIES_REQUIRED, while return and reject still work
+ok 142 - GET /public/species/:id returns a published species without a token
+ok 143 - only published fields are returned, never internal fields or coordinates
+ok 144 - an unpublished species is 404, not shown to visitors
+ok 145 - an unknown id is 404
+ok 146 - a malformed id is 404 without querying the database
+ok 147 - a published plant opens without a token, with its species and only public fields
+ok 148 - an endangered plant never shows its exact spot
+ok 149 - the API reduces an endangered spot even if the database function did not
+ok 150 - a plant with no GPS fix keeps no location
+ok 151 - unknown, unused or unpublished tags are all the same 404
+ok 152 - a lower-case tag is looked up in capitals; a malformed one never reaches the database
+ok 153 - more than 30 lookups a minute from one address: 429 with Retry-After
+ok 154 - botanist: allowed routes pass, forbidden routes get 403
+ok 155 - officer: allowed routes pass, forbidden routes get 403
+ok 156 - admin: allowed routes pass, forbidden routes get 403
+ok 157 - visitor (no token): public routes work, every protected route gets 401
+ok 158 - expired token gets 401 TOKEN_EXPIRED so the app knows to refresh
+ok 159 - token signed by someone else gets 401
+ok 160 - token from another Supabase project gets 401
+ok 161 - malformed token gets 401
+ok 162 - role in the request body is ignored
+ok 163 - signed-in account with no active role gets 403 ACCOUNT_NOT_ACTIVE
+ok 164 - malformed JSON body gets 400 INVALID_JSON, not an HTML page
+ok 165 - a crashing handler gets 500 INTERNAL_ERROR as JSON
+ok 166 - unknown paths outside /v1 get a JSON 404
+ok 167 - sensor and alert access: botanist none, officer sees nodes and handles alerts, admin manages nodes
+ok 168 - telemetry: a right key stores the readings (202) with the secret key and updates last_seen
+ok 169 - telemetry: no key or a wrong key is 401 and nothing is stored
+ok 170 - telemetry: a bad reading is 422, an unknown or retired node 404
+ok 171 - image: a JPEG with the right key is stored (201) under <node_id>/<id>.jpg
+ok 172 - image: no key 401, not a JPEG 415, too big 413, unknown node 404
+ok 173 - sensor routes are off (503) when the server has no SENSOR_KEY
+ok 174 - sign-in returns the session the app stores
+ok 175 - wrong password: 401 INVALID_CREDENTIALS; a bad body: 422
+ok 176 - sign-in has no API limit: more than 10 tries all reach Supabase
+ok 177 - a disabled account: sign-in says so, gives no session and ends the one Supabase made
+ok 178 - a deleted account is told it was deleted; an active one signs in as usual
+ok 179 - a wrong password for a disabled account still only says wrong email or password
+ok 180 - a disabled account is refused even when its new token carries a user_role
+ok 181 - refresh for an account disabled since sign-in: 403 ACCOUNT_DISABLED
+ok 182 - refresh swaps a refresh token for a new session; an unknown one ends it
+ok 183 - sign-out ends that session in Supabase, and works without a token too
+ok 184 - password reset: 202 for any address, so it never reveals who has an account
+ok 185 - change password: needs a token; a wrong current password changes nothing
+ok 186 - change password with the right current one: 204, set as the signed-in user, check session closed
+ok 187 - after a reset link (no current password) the new one is set; a weak one is refused
+ok 188 - detects JPEG, PNG and WebP from their bytes
+ok 189 - removes location metadata from JPEG, PNG and WebP, keeping the picture
+ok 190 - officer uploads a photo with a caption: stored in species-media and recorded
+ok 191 - the stored file has no location metadata
+ok 192 - file type comes from the bytes, not the name: a renamed SVG gets 415
+ok 193 - files over 10 MB get 413
+ok 194 - missing file or bad fields get 422
+ok 195 - unknown species gets 404 and nothing is stored
+ok 196 - only Officer and Admin can upload: botanist 403, visitor 401, before any file is read
+ok 197 - a new primary photo un-marks the old one
+ok 198 - officer edits a caption and moves the cover photo, without re-uploading
+ok 199 - edit is validated: empty body, unknown fields and blank captions get 422; unknown photo gets 404
+ok 200 - delete removes the record and its file
+ok 201 - only Officer and Admin can edit or delete photos
+ok 202 - q matches part of the scientific or common name, ignoring case
+ok 203 - filter by family and conservation status, ignoring case
+ok 204 - filter by the date a species was added, both ends inclusive
+ok 205 - filters combine with paging and is_published
+ok 206 - search terms cannot inject PostgREST syntax or LIKE wildcards
+ok 207 - botanists cannot use GET /species; they search GET /public/species instead
+ok 208 - public search only returns published species
+ok 209 - public list has genus, description and one cover URL, never the media array
+ok 210 - a species with no photo has primary_image_url null
+ok 211 - without page or limit the public list returns every match (web catalogue)
+ok 212 - page and limit page the public list
+ok 213 - public list rejects limit over 100
+ok 214 - officer creates a species: 201, with created_by from the token
+ok 215 - repeating a create with the same client id returns the existing record, not a duplicate
+ok 216 - a second species with the same scientific name gets 409
+ok 217 - create is validated with Zod: 422 with the bad fields listed
+ok 218 - clients cannot set is_published, is_deleted or created_by through create
+ok 219 - botanist cannot create, update or delete species
+ok 220 - read one species, and 404 for unknown or malformed ids
+ok 221 - list is paged, counts the total, and can filter by is_published
+ok 222 - update changes only the sent fields and records who changed it
+ok 223 - conservation status must be an IUCN category, in any case
+ok 224 - update rejects an empty body and unknown fields
+ok 225 - soft delete: 204, the row stays, and it disappears from read, list and update
+ok 226 - delete: the account is switched off at once and can be restored for 30 days
+ok 227 - restore: the delete is undone, and the account stays off until turned on
+ok 228 - a deleted account cannot be turned on without restoring it first
+ok 229 - you cannot delete yourself, but another admin can while two are active
+ok 230 - the last active admin cannot be deleted
+ok 231 - deleting twice, or restoring an account that is not deleted, answers 409
+ok 232 - only admins can delete or restore
+ok 233 - an admin opening the users list removes accounts past their 30 days (at most hourly)
+ok 234 - invitation refused by the email limit: account made, admins notified with the wait
+ok 235 - account creation refused by the email limit (confirm email on): 429 EMAIL_RATE_LIMIT
+# password reset email not sent: email rate limit exceeded
+ok 236 - password reset over the limit says so and how long to wait
+ok 237 - the wait counts from the oldest email of the last hour
+ok 238 - an address already in use is refused before Supabase is asked, so no email is sent
+ok 239 - the address of a deleted account is refused, pointing to Restore
+ok 240 - a username in use is refused before Supabase is asked
+ok 241 - Supabase's hidden 'already registered' user: 409, and no invitation is sent
+ok 242 - a profile that could not be saved gets no invitation
+ok 243 - a successful invitation counts both emails it sent
+ok 244 - 1@gmail.com is refused with the reason, before Supabase is asked
+ok 245 - a short temporary password says how many characters it needs
+ok 246 - Supabase refusing an address or a password is explained in plain words
+# tests 246
+# pass 246
+# fail 0

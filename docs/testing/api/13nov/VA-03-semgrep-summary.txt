@@ -1,0 +1,30 @@
+VA-03 Semgrep (open-source JavaScript/TypeScript + secrets rules), main 5eb934f, 13 Nov 2026
+Scanned: 200 files; findings: 631
+ 576 INFO     jsx-not-internationalized
+  15 INFO     missing-template-string-indicator
+  13 WARNING  react-props-in-state
+   7 INFO     react-props-spreading
+   5 WARNING  no-replaceall
+   3 INFO     unsafe-formatstring
+   2 ERROR    spawn-shell-true
+   2 WARNING  html-in-template-string
+   2 WARNING  detect-redos
+   2 WARNING  unsafe-dynamic-method
+   2 ERROR    useless-ternary
+   1 WARNING  detect-non-literal-regexp
+   1 WARNING  raw-html-format
+
+Security-relevant hits reviewed by hand (all false positives):
+- spawn-shell-true: apps/mobile/scripts/build-apk.mjs:23
+- html-in-template-string: apps/mobile/scripts/tunnel.mjs:37
+- spawn-shell-true: apps/mobile/scripts/tunnel.mjs:59
+- detect-redos: apps/shared/accountRules.js:39
+- unsafe-dynamic-method: apps/shared/offline/syncEngine.js:209
+- unsafe-formatstring: apps/shared/offline/useOutboxSync.js:219
+- html-in-template-string: apps/web/src/components/LeafletMap.jsx:177
+- unsafe-formatstring: apps/web/src/components/RouteView.jsx:19
+- unsafe-dynamic-method: apps/web/src/pages/Admin.jsx:39
+- detect-non-literal-regexp: apps/web/src/pages/Discussion.jsx:564
+- detect-redos: services/api/src/accountRules.js:39
+- raw-html-format: services/api/src/sensors.js:93
+- unsafe-formatstring: services/api/src/staff.js:93
