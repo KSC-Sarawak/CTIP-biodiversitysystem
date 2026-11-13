@@ -6,6 +6,7 @@ import { detectImageType, stripMetadata, EXTENSIONS, receiveFile } from './image
 import { protectSpecimen } from './distribution.js';
 import { OBS_COLUMNS, findObservation } from './observationAccess.js';
 import { isFullLink, isWebLink } from './photoLinks.js';
+import { sendPushToUsers } from './pushNotifications.js';
 
 // Field work: a botanist registers a plant on a QR tag (specimen), records
 // observations of it, adds photos and comments, and sends records for review.
@@ -519,6 +520,19 @@ export const fieldHandlers = {
       .select(COMMENT_COLUMNS)
       .single();
     if (error) return dbError(res, error);
+
+    // Push notification to the observation owner
+    if (obs.recorded_by && obs.recorded_by !== req.user.id) {
+      sendPushToUsers({
+        db,
+        userIds: obs.recorded_by,
+        title: 'New comment on your observation',
+        body: body.body.slice(0, 150),
+        data: { route: 'record', params: { id: obs.id } },
+        channelId: 'discussions',
+      }).catch(() => {});
+    }
+
     res.status(201).json(data);
   },
 };

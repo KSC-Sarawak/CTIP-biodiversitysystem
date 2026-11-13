@@ -81,7 +81,7 @@ CA_CERT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ca.crt")  # 
 TELEMETRY_TOPIC = "nodes/+/telemetry"
 TRIGGER_TOPIC = "nodes/+/trigger"
 
-API_URL = "https://ctip-biodiversitysystem.onrender.com/v1"   # the team's API, used for telemetry (api mode) and images
+API_URL = os.getenv("API_URL", "https://ctip-biodiversitysystem.onrender.com/v1")   # the team's API, used for telemetry (api mode) and images
 SUPABASE_URL = "https://cgtvoirktzqjqaosslfh.supabase.co"
 HTTP_TIMEOUT_S = 10
 UPLOAD_TIMEOUT_S = 15
