@@ -366,7 +366,7 @@ export const staffHandlers = {
     if (!body) return;
     const db = supabaseAs(req.user);
     if (body.username) {
-      const taken = await db.from('profiles').select('id').ilike('username', body.username).neq('id', req.user.id).limit(1);
+      const taken = await db.from('profiles').select('id').ilike('username', escapeLike(body.username)).neq('id', req.user.id).limit(1);
       if (taken.error) return dbError(res, taken.error);
       if (taken.data.length) return fail(res, 409, 'USERNAME_TAKEN', 'This username is already taken');
     }
