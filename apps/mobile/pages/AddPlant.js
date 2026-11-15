@@ -27,6 +27,7 @@ import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation, photoPreview } from '../../shared/offline/records.js';
 import { deleteCameraFiles } from '../offline/photoFiles.js';
 import { firstStart, timingRow } from '../../shared/offline/captureTimings.js';
+import { SurveyPanel } from './Survey.js';
 import { useBackHandler } from '../navigation/focus.js';
 
 const MAX_PHOTOS = 6;
@@ -349,7 +350,9 @@ export function AddPlant({ nav, params = {} }) {
     if (!res?.ok) Alert.alert('Could not change this', res?.message || 'Try again in a moment.');
   };
   const [photos, setPhotos] = useState([]);
-  const [sp, setSp] = useState('');
+  // In a survey (CTIP-147) the species can carry over from the last plant (params.carry).
+  const [sp, setSp] = useState(params.carry?.proposed_species || '');
+  const [sameSpecies, setSameSpecies] = useState(!!params.sameSpecies);
   const [picked, setPicked] = useState(null); // species chosen from search (CTIP-63)
   const [height, setHeight] = useState('');
   const [looks, setLooks] = useState('');
@@ -638,6 +641,7 @@ export function AddPlant({ nav, params = {} }) {
         lat: gps.lat,
         lng: gps.lng,
         gps_accuracy_m: hasFix(gps) ? gps.acc : null,
+        survey_id: params.survey ?? null, // on the phone only (CTIP-147)
       });
       // addPlant reports failure instead of throwing. Keep the draft so nothing is lost:
       // it is cleared only once the record is safe (saved on the phone or sent).
@@ -654,6 +658,7 @@ export function AddPlant({ nav, params = {} }) {
         qr, name: sp.trim(), photos: photos.length, located: hasFix(gps), acc: gps.acc, cover: photoPreview(photos[0]),
         queued: !!res.queued, // saved on this phone, not sent yet
         failed: res.state === 'failed', // saved, but the first send was refused
+        survey: params.survey ?? null, sameSpecies, // quick survey mode (CTIP-147)
       });
     } catch (err) {
       Alert.alert("Couldn't submit", err?.message || 'Your draft is saved on this phone. Try again in a moment.');
@@ -698,6 +703,9 @@ export function AddPlant({ nav, params = {} }) {
         )}
       </View>
       {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
+      {params.survey ? (
+        <Check label="Next plant: same species" hint="The next plant in this survey starts with this species. Nothing else is copied." value={sameSpecies} onChange={setSameSpecies} />
+      ) : null}
 
       <Section title="Photos" right={<Txt v="caption" color={tried && problems.photos ? c.warning : c.ink3}>{tried && problems.photos ? 'Add at least one' : `${photos.length} of ${MAX_PHOTOS}`}</Txt>} gap={12}>
         <PhotoStrip
@@ -738,7 +746,9 @@ export function AddPlant({ nav, params = {} }) {
 // offline design); it is sent for review by itself, now or once the phone is back online.
 export function Submitted({ nav, params = {} }) {
   const { c } = useTheme();
-  const { apiStatus } = useStore();
+  const { apiStatus, activeSurvey } = useStore();
+  // Saved during a survey that is still open (CTIP-147): offer the next plant.
+  const inSurvey = !!params.survey && activeSurvey?.id === params.survey;
   const queued = !!params.queued;
   // Saved, but the server refused it within the first few seconds: "No
   // connection" would be wrong, and the record says why (UI D).
@@ -772,7 +782,9 @@ export function Submitted({ nav, params = {} }) {
           <Txt v="caption" color={c.ink2} style={{ fontFamily: font('text', 400) }}>{params.photos ?? 0} {params.photos === 1 ? 'photo' : 'photos'} · {!params.located ? 'location not captured' : params.acc != null ? `GPS ±${params.acc} m` : 'location set by hand'}</Txt>
         </View>
       </View>
-      {queued ? (
+      {inSurvey ? (
+        <SurveyPanel nav={nav} last={{ qr: params.qr, name: params.name, sameSpecies: !!params.sameSpecies }} />
+      ) : queued ? (
         <View style={{ gap: 10, marginTop: 'auto', alignItems: 'stretch' }}>
           <Button label="Record another plant" onPress={() => nav.replace('scan')} />
           <View style={{ alignItems: 'center' }}>
