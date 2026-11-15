@@ -94,12 +94,25 @@ same botanists.
 
 **Measured for each method**
 
+The same start and stop points for every method, so the times compare fairly. A second
+person times each plant with a stopwatch:
+
+- **Start:** the botanist turns to the next plant (picks up the tag, the sheet or the phone).
+- **Stop:** the record is finished: the paper sheet is complete (A), or the phone shows
+  "Saved on this phone" (B, C).
+
+This includes finding and scanning or picking the tag, which is the step quick survey
+mode removes.
+
 | Measure | How |
 |---|---|
-| Time per plant (field) | A: stopwatch per plant. B, C: Account › Field test timings › Export CSV (CTIP-146) |
-| Time per plant (office) | A: stopwatch while typing each record in. B, C: zero (nothing is typed in) |
+| Time per plant (field) | Stopwatch, start and stop as above, for A, B and C |
+| Time per plant (office) | A: stopwatch while typing each record into the website. B, C: zero (nothing is typed in) |
+| Form time (cross-check) | B, C: Account › Field test timings › Export CSV (CTIP-146). It times from the form opening with a tag to saving, so it is shorter than the stopwatch; use it to check the stopwatch, not as the main measure |
 | Errors | Compare each record with a reference sheet made by a second person: wrong tag, missing required field, location more than 20 m out |
 | Lost or duplicated records | After sync, count records in the system against plants recorded |
+
+Run B and C in airplane mode, so no time is spent waiting for an upload.
 
 **Proposed pass mark (to confirm with the team before the test):** method C's median
 total time per plant (field plus office) is at least **30% lower** than method A's,

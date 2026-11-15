@@ -24,7 +24,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createTagBatchApi, deleteTagApi } from "../api.js";
 import { RESERVED_LABEL, RESERVED_KEEP, nextReservedTag, outboxTagsFrom, reservedToCreate, keptTagsToRetain, tagsToRelease } from "./tags.js";
-import { SURVEY_TAG_MAX, extraKeptTags } from "./survey.js";
+import { SURVEY_TAG_MAX, extraKeptTags, keptTagRefusal } from "./survey.js";
 import { createTopUp, shouldTopUp } from "./reservedTopUp.js";
 
 /**
@@ -145,6 +145,8 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
       const res = await now.callApi(createTagBatchApi, count, RESERVED_LABEL);
       if (!res.ok) {
         console.warn("reserved tags: could not make them:", res.message || res.code);
+        const tell = keptTagRefusal(res, now.keepTarget);
+        if (tell) notify?.(tell);
       } else {
         const ids = (res.data || []).map((t) => t.qr_id);
         for (const id of ids) justMade.current.add(id);

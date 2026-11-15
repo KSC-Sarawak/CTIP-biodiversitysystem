@@ -376,7 +376,7 @@ function FieldTimingsSection({ me }) {
           ? `${sum.count} ${sum.count === 1 ? 'record' : 'records'} timed, median ${mmss(sum.medianMs)}`
           : 'No records timed yet'}
       </Txt>
-      <Txt v="caption">How long each plant record took on this phone, from opening the form to saving it. Kept only on this phone.</Txt>
+      <Txt v="caption">How long each plant record took on this phone, from opening the form for a tag to saving it. Kept only on this phone.</Txt>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
         <Button label={busy ? 'Exporting…' : 'Export CSV'} kind="secondary" height={40} size={13} disabled={busy || !rows.length} onPress={exportCsv} />
         <Button label="Clear" icon="trash" kind="dangerText" height={40} size={13} disabled={busy || !rows.length} onPress={clear} />
