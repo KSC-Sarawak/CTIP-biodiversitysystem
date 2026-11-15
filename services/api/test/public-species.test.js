@@ -16,7 +16,7 @@ const rows = {
   [PUBLISHED]: {
     id: PUBLISHED, scientific_name: 'Nepenthes rajah', common_name: 'Giant pitcher plant',
     family: 'Nepenthaceae', genus: 'Nepenthes', description: 'Largest pitcher plant.',
-    conservation_status: 'Endangered', cultural_significance: null,
+    conservation_status: 'Endangered', cultural_significance: null, ecology: null,
     is_published: true, is_deleted: false,
     species_media: [
       { id: 'm1', species_id: PUBLISHED, s3_bucket: 'species-media', s3_key: `${PUBLISHED}/m1.jpg`,
@@ -61,12 +61,13 @@ test('GET /public/species/:id returns a published species without a token', asyn
 test('only published fields are returned, never internal fields or coordinates', async () => {
   const res = await request(app).get(`/v1/public/species/${PUBLISHED}`);
   const allowed = ['id', 'scientific_name', 'common_name', 'family', 'genus', 'description',
-    'conservation_status', 'cultural_significance', 'primary_image_url', 'media'];
+    'conservation_status', 'cultural_significance', 'ecology', 'primary_image_url', 'media'];
   assert.deepEqual(Object.keys(res.body).sort(), allowed.sort());
   for (const m of res.body.media) {
     assert.ok(!('s3_key' in m) && !('s3_bucket' in m), 'storage keys stay internal');
   }
   const select = lastUrl.searchParams.get('select');
+  assert.ok(select.includes('ecology'), 'habitat and ecology is selected for visitors (CTIP-149)');
   for (const banned of ['lat', 'lng', 'specimens', 'created_by', 'is_published']) {
     assert.ok(!new RegExp(`\\b${banned}\\b`).test(select), `query must not select ${banned}`);
   }
