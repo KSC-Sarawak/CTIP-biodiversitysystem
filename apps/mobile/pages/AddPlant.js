@@ -26,6 +26,7 @@ import { revisitTarget, outboxTagsFrom, isReservedForOther } from '../../shared/
 import { OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation, photoPreview } from '../../shared/offline/records.js';
 import { deleteCameraFiles } from '../offline/photoFiles.js';
+import { firstStart, timingRow } from '../../shared/offline/captureTimings.js';
 import { useBackHandler } from '../navigation/focus.js';
 
 const MAX_PHOTOS = 6;
@@ -321,7 +322,9 @@ const TAGS_OFF = 'Offline tags are turned off. Connect to the internet, or scan 
 const KEEP_HINT = 'Keeps 3 tag IDs for you, so you can make a tag with no connection. Write the ID on a spare tag only if you run out of printed ones.';
 
 export function AddPlant({ nav, params = {} }) {
-  const { db, me, addPlant, generateTags, notify, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag } = useStore();
+  const { db, me, addPlant, generateTags, notify, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag, timings } = useStore();
+  // When the form was opened for this tag (CTIP-146); a restored draft keeps its own start.
+  const startedAt = useRef(null);
   const { c } = useTheme();
   const [qr, setQr] = useState(params.qr || '');
   // A tag a record on this phone already uses is taken, though the server does not know yet.
@@ -463,7 +466,9 @@ export function AddPlant({ nav, params = {} }) {
     fetchGps();
     // Restore crash-safe draft if present (CTIP-57)
     if (qr) {
+      startedAt.current = new Date().toISOString();
       getDraft(qr, me?.id).then((d) => {
+        startedAt.current = firstStart(d, startedAt.current);
         if (d) {
           if (d.proposed_species) setSp(d.proposed_species);
           if (d.picked_species) setPicked(d.picked_species);
@@ -482,7 +487,7 @@ export function AddPlant({ nav, params = {} }) {
   useEffect(() => {
     if (!qr) return;
     if (sp || looks || height || notes || photos.length > 0) {
-      saveDraft(qr, { user_id: me?.id, proposed_species: sp, picked_species: picked, height_cm: height, morphology: looks, notes, photos, gps });
+      saveDraft(qr, { user_id: me?.id, proposed_species: sp, picked_species: picked, height_cm: height, morphology: looks, notes, photos, gps, started_at: startedAt.current });
     }
   }, [qr, me?.id, sp, picked, looks, height, notes, photos, gps]);
 
@@ -637,6 +642,12 @@ export function AddPlant({ nav, params = {} }) {
       // addPlant reports failure instead of throwing. Keep the draft so nothing is lost:
       // it is cleared only once the record is safe (saved on the phone or sent).
       if (!res?.ok) throw new Error(res?.message || 'Failed to submit observation.');
+      // Time per record (CTIP-146), before the draft (and its start time) is cleared.
+      await timings?.recordTiming(timingRow({
+        id: uid(), userId: me?.id, surveyId: params.survey ?? null,
+        startedAt: startedAt.current, savedAt: new Date().toISOString(),
+        offline: !!res.queued, photos: photos.length, located: hasFix(gps),
+      }));
       await clearDraft(qr); // Clean up crash draft after successful submit (CTIP-57)
       deleteCameraFiles(photos); // the photos are in the encrypted outbox (or sent): drop the camera's plain copies
       nav.replace('submitted', {

@@ -111,7 +111,7 @@ const savedUserId = () => getSession()?.user?.id || tokenClaims(getAuthToken())?
 // saved on the phone first and sent by the sync engine (CTIP-16, CTIP-83).
 // `reservedTags` holds the 3 tags kept for the botanist (CTIP-116). The web
 // passes none of them and sends records straight to the API, as before.
-export default function StoreProvider({ children, deviceId = "mobile", outbox = null, tagCache = null, reservedTags = null }) {
+export default function StoreProvider({ children, deviceId = "mobile", outbox = null, tagCache = null, reservedTags = null, timings = null }) {
   // The sample plants are for visitors. Staff are recognised straight away, so
   // they would see them (no species, far from real data) until their own load.
   const [db, setDb] = useState(() => (savedUserId() ? staffStart : seed));
@@ -1669,6 +1669,7 @@ function collectionMatches(a = [], b = []) {
   };
 
   const value = {
+    timings, // time per record on the phone (CTIP-146); null on the website
     db, me, role, toast, notify,
     logout, login, signIn, changePassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
