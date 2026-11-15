@@ -165,6 +165,9 @@ export function SpeciesProfile({ nav, params }) {
       </View>
       {sp.description ? <Txt v="body" style={{ lineHeight: 25 }}>{sp.description}</Txt> : null}
       {sp.updated_at ? <Txt v="caption" color={c.ink2}>Last updated {longDate(sp.updated_at)}</Txt> : null}
+      {sp.ecology ? (
+        <Section title="Habitat and ecology"><Txt v="body" style={{ lineHeight: 25 }}>{sp.ecology}</Txt></Section>
+      ) : null}
       {sp.cultural_significance ? (
         <Section title="Cultural significance"><Txt v="body" style={{ lineHeight: 25 }}>{sp.cultural_significance}</Txt></Section>
       ) : null}

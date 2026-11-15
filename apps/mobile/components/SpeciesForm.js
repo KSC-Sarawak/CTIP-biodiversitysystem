@@ -50,6 +50,7 @@ export default function SpeciesForm({ guess, onClose, onSaved }) {
             <Pills value={form.conservation_status} onChange={set('conservation_status')} items={CONSERVATION.map((k) => ({ key: k, label: label(k) }))} />
           </View>
           <Area label="Description" optional value={form.description || ''} onChangeText={set('description')} />
+          <Area label="Habitat and ecology" optional rows={3} value={form.ecology || ''} onChangeText={set('ecology')} />
           <Area label="Cultural significance" optional rows={2} value={form.cultural_significance || ''} onChangeText={set('cultural_significance')} />
           <Check label="Publish it in the public catalogue" value={publish} onChange={setPublish} />
           <Button label={saving ? 'Saving…' : 'Save species'} icon="check" disabled={saving} onPress={save} />

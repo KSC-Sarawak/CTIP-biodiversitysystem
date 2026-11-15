@@ -321,6 +321,7 @@ export function SpeciesFormModal({ species, onClose, onSave, onManagePhotos }) {
   const [genus, setGenus] = useState(species.genus || '');
   const [conservationStatus, setConservationStatus] = useState(species.conservation_status || 'least concern');
   const [description, setDescription] = useState(species.description || '');
+  const [ecology, setEcology] = useState(species.ecology || '');
   const [culturalSignificance, setCulturalSignificance] = useState(species.cultural_significance || '');
   const [saving, setSaving] = useState(false);
 
@@ -338,6 +339,7 @@ export function SpeciesFormModal({ species, onClose, onSave, onManagePhotos }) {
         genus: genus.trim() || scientificName.trim().split(' ')[0],
         conservation_status: conservationStatus,
         description: description.trim(),
+        ecology: ecology.trim(),
         cultural_significance: culturalSignificance.trim(),
       });
     } finally {
@@ -479,6 +481,27 @@ export function SpeciesFormModal({ species, onClose, onSave, onManagePhotos }) {
               multiline
               style={{
                 minHeight: 80,
+                padding: 12,
+                borderRadius: 12,
+                backgroundColor: c.bg,
+                color: c.ink,
+                fontFamily: font('text', 400),
+                fontSize: 15,
+                textAlignVertical: 'top',
+              }}
+            />
+          </View>
+
+          <View style={{ gap: 6 }}>
+            <Txt v="label" style={{ fontSize: 15 }}>Habitat and ecology</Txt>
+            <TextInput
+              value={ecology}
+              onChangeText={setEcology}
+              placeholder="Where it grows, soil, altitude, plants it grows with..."
+              placeholderTextColor={c.ink3}
+              multiline
+              style={{
+                minHeight: 70,
                 padding: 12,
                 borderRadius: 12,
                 backgroundColor: c.bg,
