@@ -38,9 +38,10 @@ test("migrate runs each migration once and sets user_version", () => {
   const db = makeDb();
 
   assert.equal(migrate(db), LATEST);
-  assert.equal(LATEST, 5);
-  assert.equal(userVersion(db), 5);
+  assert.equal(LATEST, 6);
+  assert.equal(userVersion(db), 6);
   assert.deepEqual(tables(db), [
+    "capture_timings",
     "drafts",
     "meta",
     "outbox_photos",
@@ -50,7 +51,7 @@ test("migrate runs each migration once and sets user_version", () => {
     "tag_cache",
   ]);
 
-  // A second call finds user_version 5 and runs nothing.
+  // A second call finds user_version 6 and runs nothing.
   db.seen.length = 0;
   assert.equal(migrate(db), LATEST);
   assert.equal(db.seen.length, 0);
@@ -112,4 +113,16 @@ test("reserved_tags holds one row per kept tag, with its owner and whether this 
     { name: "user_id", type: "TEXT", pk: 0, notnull: 1 },
     { name: "made_here", type: "INTEGER", pk: 0, notnull: 1 },
   ]);
+});
+
+test("capture_timings exists after migrate, keyed by user and saved_at (CTIP-146)", () => {
+  const db = makeDb();
+  migrate(db);
+  const cols = db.raw.prepare("SELECT name FROM pragma_table_info('capture_timings') ORDER BY cid;").all().map((c) => c.name);
+  assert.deepEqual(cols, ["id", "user_id", "survey_id", "started_at", "saved_at", "duration_ms", "offline", "photos", "located"]);
+  const index = db.raw
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'capture_timings' AND sql IS NOT NULL;")
+    .get();
+  const keyed = db.raw.prepare("SELECT name FROM pragma_index_info(?) ORDER BY seqno;").all(index.name).map((r) => r.name);
+  assert.deepEqual(keyed, ["user_id", "saved_at"]);
 });
