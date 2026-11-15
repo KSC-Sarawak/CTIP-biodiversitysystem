@@ -150,7 +150,7 @@ export default function SensorOverview() {
   const nodeStateOf = (n) => nodeState(n, openByNode[n.id] || 0);
 
   return (
-    <Shell seg="monitoring" plain>
+    <Shell seg="monitoring">
       <PageHead
         overline="Sensor network"
         title="Monitoring"
@@ -174,66 +174,79 @@ export default function SensorOverview() {
         </p>
       </PageHead>
 
-      {/* 1. Every node at a glance */}
+      {/* 1. Every node at a glance: the map, then one table row per node */}
       <section className="gap-section-s" aria-labelledby="nodes">
         <h2 id="nodes">Sensor nodes</h2>
         {nodes.length === 0 ? (
-          <div className="glass pad"><Empty icon="shield">No sensor nodes have been registered yet.</Empty></div>
+          <Empty icon="shield">No sensor nodes have been registered yet.</Empty>
         ) : (
           <>
-          <div className="glass pad nodemap-card">
+            <p className="mute small">Select a pin or a row to see that node's readings and photos.</p>
             <NodeMap nodes={nodes} whereOf={whereOf} plantOf={plantOf} openByNode={openByNode} selectedId={node?.id} onSelect={pickNode} />
-          </div>
-          <p className="mute small">Select a pin or a row to see that node's readings and photos.</p>
-          <div className="nodelist">
-            {sortedNodes.map((n) => {
-              const last = latest(telemetry[n.id]);
-              const state = nodeStateOf(n);
-              const seen = last?.ts || n.last_seen;
-              return (
-                // The whole row picks the node; its button keeps it reachable by keyboard.
-                <article key={n.id} className={"glass nodecard" + (n.id === node?.id ? " on" : "") + (state === "offline" ? " down" : "") + (state === "alert" ? " alerting" : "")}
-                  onClick={() => pickNode(n.id)}>
-                  <button type="button" className="nodepick" aria-pressed={n.id === node?.id}>
-                    <b className="nodecard-name">{n.name}</b>
-                    {n.name !== n.techName && <small className="mute">Technical name: <Mono>{n.techName}</Mono></small>}
-                    <small className="mute">{plantOf(n).name} · <Mono>{plantOf(n).qr_id}</Mono></small>
-                  </button>
-                  {last ? (
-                    <dl className="readings">
-                      <div className={off(last, "temperature") ? "warntext" : ""}><dt>Temp</dt><dd><Mono>{num(last.temperature)}°C</Mono></dd></div>
-                      <div className={off(last, "humidity") ? "warntext" : ""}><dt>Humidity</dt><dd><Mono>{num(last.humidity, 0)}%</Mono></dd></div>
-                      <div className={off(last, "soil_moisture") ? "warntext" : ""}><dt>Soil</dt><dd><Mono>{num(last.soil_moisture, 0)}%</Mono></dd></div>
-                      <div><dt>Distance</dt><dd><Mono>{num(last.distance_cm)} cm</Mono></dd></div>
-                      <div className={last.motion_detected ? "warntext" : ""}><dt>Motion</dt><dd>{motionText(last.motion_detected)}</dd></div>
-                    </dl>
-                  ) : (
-                    <p className="nodecard-none warntext"><b>{n.last_seen ? `No readings since ${fmtDateTime(n.last_seen)}` : "No readings yet"}</b></p>
-                  )}
-                  <div className="nodecard-status">
-                    <span className={"dotstatus " + state}>{state === "offline" ? label(n.status) : NODE_STATE[state].text}</span>
-                    <small className="mute">{n.status !== "active" ? "Check battery or Wi-Fi" : seen ? `Updated ${ago(seen, now)}` : "Waiting for the first reading"}</small>
-                    {openByNode[n.id] > 0 && (
-                      <button type="button" className="textlink warntext" onClick={(e) => { e.stopPropagation(); pickNode(n.id); showAlerts(n); }}>
-                        {openByNode[n.id]} open alert{openByNode[n.id] === 1 ? "" : "s"} <Icon name="arrowR" size={14} />
-                      </button>
-                    )}
-                  </div>
-                  <button type="button" className="iconbtn" aria-label={`Rename ${n.name}`} title="Rename (only you see this name)"
-                    onClick={(e) => { e.stopPropagation(); setNodeId(n.id); setRenaming(n.id); goTo("readings"); }}>
-                    <Icon name="pencil" size={16} />
-                  </button>
-                </article>
-              );
-            })}
-          </div>
+            <div className="tablewrap nodetable">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Node</th><th>Status</th>
+                    <th className="num">Temp</th><th className="num">Humidity</th><th className="num">Soil</th><th className="num">Distance</th><th>Motion</th>
+                    <th>Updated</th><th><span className="sr">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedNodes.map((n) => {
+                    const last = latest(telemetry[n.id]);
+                    const state = nodeStateOf(n);
+                    const seen = last?.ts || n.last_seen;
+                    return (
+                      // The whole row picks the node; its button keeps it reachable by keyboard.
+                      <tr key={n.id} className={"noderow" + (n.id === node?.id ? " on" : "") + (state === "offline" ? " down" : "") + (state === "alert" ? " alerting" : "")}
+                        onClick={() => pickNode(n.id)}>
+                        <td>
+                          <button type="button" className="nodepick" aria-pressed={n.id === node?.id}>
+                            <b>{n.name}</b>
+                            {n.name !== n.techName && <small className="mute">Technical name: <Mono>{n.techName}</Mono></small>}
+                            <small className="mute">{plantOf(n).name} · <Mono>{plantOf(n).qr_id}</Mono></small>
+                          </button>
+                        </td>
+                        <td>
+                          <Chip value={state === "alert" ? "high" : state === "online" ? "active" : "offline"}>{state === "offline" ? label(n.status) : NODE_STATE[state].text}</Chip>
+                          {openByNode[n.id] > 0 && (
+                            <button type="button" className="textlink block" onClick={(e) => { e.stopPropagation(); pickNode(n.id); showAlerts(n); }}>
+                              {openByNode[n.id]} open alert{openByNode[n.id] === 1 ? "" : "s"} <Icon name="arrowR" size={14} />
+                            </button>
+                          )}
+                        </td>
+                        {last ? (
+                          <>
+                            <td className={"num" + (off(last, "temperature") ? " badtext" : "")}><Mono>{num(last.temperature)}°C</Mono></td>
+                            <td className={"num" + (off(last, "humidity") ? " badtext" : "")}><Mono>{num(last.humidity, 0)}%</Mono></td>
+                            <td className={"num" + (off(last, "soil_moisture") ? " badtext" : "")}><Mono>{num(last.soil_moisture, 0)}%</Mono></td>
+                            <td className="num"><Mono>{num(last.distance_cm)} cm</Mono></td>
+                            <td className={last.motion_detected ? "warntext" : ""}>{motionText(last.motion_detected)}</td>
+                          </>
+                        ) : (
+                          <td colSpan="5" className="mute">{n.last_seen ? `No readings since ${fmtDateTime(n.last_seen)}` : "No readings yet"}</td>
+                        )}
+                        <td className="mute small nowrap">{n.status !== "active" ? "Check battery or Wi-Fi" : seen ? ago(seen, now) : "Waiting"}</td>
+                        <td className="actions">
+                          <button type="button" className="ic" aria-label={`Rename ${n.name}`} title="Rename (only you see this name)"
+                            onClick={(e) => { e.stopPropagation(); setNodeId(n.id); setRenaming(n.id); goTo("readings"); }}>
+                            <Icon name="pencil" size={18} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </>
         )}
       </section>
 
       {/* 2. The chosen node in detail */}
       {node && (
-        <section className="glass pad gap-section-s nodedetail" aria-labelledby="readings">
+        <section className="gap-section-s nodedetail" aria-labelledby="readings">
           <header className="nodedetail-head">
             <div>
               <p className="overline">Selected node</p>

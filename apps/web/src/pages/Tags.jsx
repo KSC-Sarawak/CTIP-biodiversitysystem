@@ -6,6 +6,7 @@ import Icon from "../components/Icon.jsx";
 import PageHead from "../components/PageHead.jsx";
 import { Chip, Mono, Modal } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
+import { useViewMore } from "../useViewMore.jsx";
 import TagPrint from "../components/TagPrint.jsx";
 import { useStore } from "../../../shared/store.js";
 import { tagUrl } from "../../../shared/selectors.js";
@@ -51,6 +52,8 @@ export default function Tags() {
   // Kept tags are left out of printing: they live on a botanist's phone, not on paper.
   const unused = db.tags.filter((t) => t.status === "unused" && !isKept(t));
   const printable = db.tags.filter((t) => t.status !== "retired" && !isKept(t)); // assigned ones can be reprinted if a tag gets damaged
+  // Ten at a time, so a big stock of tags stays readable.
+  const [shownTags, moreTags] = useViewMore(db.tags, { step: 10, noun: "tags" });
 
   const make = async (e) => {
     e.preventDefault();
@@ -81,18 +84,23 @@ export default function Tags() {
         <button className="btn ghost" type="button" disabled={!printable.length} onClick={() => setPrinting(unused.map((t) => t.qr_id))}><Icon name="printer" size={18} /> Print tags</button>
       </form>
 
-      <div className="tablewrap">
+      <div className="tablewrap roomy">
         <table>
           <thead><tr><th>Tag</th><th>Status</th><th>Batch</th><th>Created</th><th><span className="sr">Actions</span></th></tr></thead>
           <tbody>
-            {db.tags.map((t) => (
+            {shownTags.map((t) => (
               <tr key={t.qr_id}>
-                <td><Mono>{t.qr_id}</Mono></td>
+                <td>
+                  {/* A small preview of the QR sticker; select it for the big, scannable one. */}
+                  <button type="button" className="qrthumb" onClick={() => setViewing(t)} aria-label={`Open QR code for ${t.qr_id}`}>
+                    <span className="qrthumb-code"><QRCodeSVG value={tagUrl(t.qr_id)} size={52} marginSize={1} aria-hidden="true" /></span>
+                    <Mono className="qrthumb-id">{t.qr_id}</Mono>
+                  </button>
+                </td>
                 <td><Chip value={t.status} /></td>
                 <td>{isKept(t) ? "Kept for a botanist" : t.batch_label}</td>
                 <td>{fmtDate(t.created_at)}</td>
                 <td className="actions">
-                  <button className="btn ghost small-btn" onClick={() => setViewing(t)} aria-label={`Show QR code for ${t.qr_id}`}><Icon name="qr" size={16} /> QR</button>
                   {t.status === "unused" && (
                     <>
                       <button className="btn ghost small-btn" onClick={() => retire(t)}><Icon name="x" size={16} /> Retire</button>
@@ -105,6 +113,7 @@ export default function Tags() {
           </tbody>
         </table>
       </div>
+      {moreTags}
 
       {viewing && <TagQr tag={viewing} onClose={() => setViewing(null)} onPrint={isKept(viewing) ? null : () => { setPrinting([viewing.qr_id]); setViewing(null); }} />}
       {printing && <TagPrint tags={printable} initial={printing} onClose={() => setPrinting(null)} />}

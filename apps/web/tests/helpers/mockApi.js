@@ -41,10 +41,10 @@ export function mockApi(page, state) {
       if (state.workspaceDelay) await new Promise((r) => setTimeout(r, state.workspaceDelay));
       state.workspaceLoads++;
       return json({
-        species: state.species, species_media: [], qr_tags: [], specimens: state.specimens, observations: state.observations,
+        species: state.species, species_media: [], qr_tags: state.tags || [], specimens: state.specimens, observations: state.observations,
         observation_photos: state.photos, observation_reviews: [], observation_comments: [], alerts: state.alerts || [], alert_notes: [], sensor_nodes: state.sensorNodes || [],
         telemetry: state.telemetry || [], sensor_node_nicknames: state.nicknames || [], sensor_stable_ranges: state.stableRanges || [],
-        notifications: [], audit_logs: [],
+        notifications: [], audit_logs: state.audit || [],
         profiles: [
           { id: ME, full_name: "Olive Officer", email: "officer@example.com", role: state.role || "officer", is_active: true },
           { id: BOTANIST, full_name: "Bo Tanist", email: "bo@example.com", role: "botanist", is_active: true },
@@ -87,6 +87,8 @@ export function mockApi(page, state) {
     }
     // Like the real route: 404 unless a spec gives the published plant.
     if (path.startsWith("/public/tags/")) return state.publicPlant ? json(state.publicPlant) : json({ code: "NOT_FOUND", message: "No published plant on this tag" }, 404);
+    // The staff species list, when a spec gives one (otherwise empty, as before).
+    if (path === "/species" && method === "GET" && state.staffSpecies) return json({ data: state.staffSpecies, meta: { page: 1, limit: 100, total: state.staffSpecies.length } });
     if (path === "/species" && method === "POST") {
       const made = species({ ...body, id: "44444444-4444-4444-8444-444444444444", is_published: false });
       state.species = [...state.species, made];

@@ -41,7 +41,7 @@ test("monitoring shows readings from the telemetry table, and asks the API for l
   await expect(page.getByRole("heading", { name: "Gate node", exact: true })).toBeVisible();
   await expect(page.getByText("3 readings from the last 24 hours")).toBeVisible();
   // CTIP-79: the node card shows all five latest readings.
-  const card = page.locator("article.nodecard").filter({ hasText: "Gate node" });
+  const card = page.locator("tr.noderow").filter({ hasText: "Gate node" });
   await expect(card.getByText("36.2°C")).toBeVisible();
   await expect(card.getByText("70%")).toBeVisible();
   await expect(card.getByText("18%")).toBeVisible();
@@ -92,7 +92,7 @@ test("monitoring: node map shows each state, and a node's latest webcam photos",
   await expect(key.getByRole("button", { name: "Alert 1" })).toBeVisible();
   await expect(key.getByRole("button", { name: "Offline 1" })).toBeVisible();
   await expect(page.getByText("Not on the map (no location recorded): South node.")).toBeVisible();
-  await expect(page.locator("article.nodecard").filter({ hasText: "North node" }).getByRole("button", { name: /1 open alert/ })).toBeVisible();
+  await expect(page.locator("tr.noderow").filter({ hasText: "North node" }).getByRole("button", { name: /1 open alert/ })).toBeVisible();
 
   // CTIP-82: photos for the chosen node, enlarged on click.
   await page.getByRole("button", { name: /Enlarge photo/ }).click();
@@ -132,11 +132,11 @@ test("monitoring: a person renames a node for themself, and can go back to its t
   await page.getByLabel("Your name for this node").fill("Orchid by the gate");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Orchid by the gate", exact: true })).toBeVisible();
-  await expect(page.locator("article.nodecard").getByText("Orchid by the gate")).toBeVisible();
-  await expect(page.locator("article.nodecard").getByText("ESP32-NODE-07")).toBeVisible(); // technical name still shown
+  await expect(page.locator("tr.noderow").getByText("Orchid by the gate")).toBeVisible();
+  await expect(page.locator("tr.noderow").getByText("ESP32-NODE-07")).toBeVisible(); // technical name still shown
   expect(state.writes.at(-1)).toEqual({ method: "PUT", path: `/sensor-nodes/${NODE}/nickname`, body: { nickname: "Orchid by the gate" } });
 
-  await page.locator("article.nodecard").getByRole("button", { name: "Rename Orchid by the gate" }).click();
+  await page.locator("tr.noderow").getByRole("button", { name: "Rename Orchid by the gate" }).click();
   await page.getByRole("button", { name: "Use technical name" }).click();
   await expect(page.getByRole("heading", { name: "ESP32-NODE-07", exact: true })).toBeVisible();
   expect(state.writes.at(-1).body).toEqual({ nickname: null });
@@ -183,7 +183,7 @@ test("monitoring: clicking anywhere on a node's row picks it; the map stays in v
   await open(page, state, "#/monitoring");
   await expect(page.getByRole("group", { name: "Map of sensor nodes" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Alpha node", exact: true })).toBeVisible();
-  await page.locator("article.nodecard").filter({ hasText: "Beta node" }).getByText("No readings yet").click(); // not the name
+  await page.locator("tr.noderow").filter({ hasText: "Beta node" }).getByText("No readings yet").click(); // not the name
   await expect(page.getByRole("heading", { name: "Beta node", exact: true })).toBeVisible();
 });
 

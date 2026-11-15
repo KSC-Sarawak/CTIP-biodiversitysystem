@@ -62,7 +62,7 @@ function TaggedTable() {
   const [speciesId, setSpeciesId] = useState("");
   const [by, setBy] = useState("");
   const [sort, setSort] = useState(["qr_id", 1]);
-  const [perPage, setPerPage] = useState(25);
+  const [perPage, setPerPage] = useState(10); // fewer, bigger rows read faster
   const [page, setPage] = useState(1);
 
   const nodes = new Set(db.nodes.map((n) => n.specimen_id));
@@ -153,7 +153,7 @@ function TaggedTable() {
           {!shown.length ? (
             <div className="glass pad"><Empty icon="leaf">Nothing in this view{q || speciesId || by ? " with these filters" : ""}.</Empty></div>
           ) : (
-            <div className="glass tablewrap tablecard">
+            <div className="glass tablewrap tablecard roomy">
               <table>
                 <thead>
                   <tr>

@@ -8,7 +8,7 @@ import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
 import { fuzzyMatch } from "../../../shared/fuzzy.js";
 import { ROLE_LABEL } from "../../../shared/permissions.js";
-import { fmtDate, fmtDateTime } from "../../../shared/utils.js";
+import { fmtDate, fmtDateTime, label } from "../../../shared/utils.js";
 import { emailProblem, passwordProblem, nameProblem } from "../../../shared/accountRules.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -256,12 +256,64 @@ export function Users() {
 const AUDIT_ACTIONS = ["INSERT", "UPDATE", "DELETE", "SIGN_IN", "SIGN_IN_FAILED", "MFA_FAILED", "SIGN_OUT"];
 // Rows per page (lecturer, 13 Nov: 10, 25 or 50).
 const AUDIT_PAGE_SIZES = [10, 25, 50];
+// Each kind of entry gets its own word, icon and colour, so the log scans by shape and colour.
+const AUDIT_KIND = {
+  INSERT: { text: "Created", icon: "plus", tone: "ok" },
+  UPDATE: { text: "Edited", icon: "pencil", tone: "info" },
+  DELETE: { text: "Deleted", icon: "trash", tone: "bad" },
+  SIGN_IN: { text: "Signed in", icon: "key", tone: "acc" },
+  SIGN_IN_FAILED: { text: "Sign-in failed", icon: "lock", tone: "warn" },
+  MFA_FAILED: { text: "2-step check failed", icon: "shield", tone: "warn" },
+  SIGN_OUT: { text: "Signed out", icon: "logout", tone: "neutral" },
+};
+const kindOf = (action) => AUDIT_KIND[String(action).toUpperCase()] || { text: String(action), icon: "info", tone: "neutral" };
+// What each table holds, in plain words.
+const AUDIT_TABLE = {
+  auth: "Account", profiles: "User", species: "Species", species_media: "Species photo", specimens: "Plant",
+  observations: "Plant record", observation_photos: "Record photo", observation_reviews: "Review", observation_comments: "Comment",
+  qr_tags: "QR tag", alerts: "Alert", alert_notes: "Alert note", sensor_nodes: "Sensor node", zones: "Zone",
+  discussions: "Discussion", discussion_posts: "Discussion post",
+};
+// Fields that change on every save; listed in the full view, left out of the one-line summary.
+const NOISY = new Set(["updated_at", "version", "last_synced_at"]);
+const shortText = (v, max = 48) => {
+  const t = v == null ? "empty" : typeof v === "object" ? JSON.stringify(v) : String(v);
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+};
+const fullText = (v) => (v == null ? "empty" : typeof v === "object" ? JSON.stringify(v, null, 2) : String(v));
+
+// One entry as fields: [{ key, before, after, changed }]. Edits list the changed fields first.
+function auditFields(a) {
+  const oldV = a.old_value && typeof a.old_value === "object" ? a.old_value : {};
+  const newV = a.new_value && typeof a.new_value === "object" ? a.new_value : {};
+  const keys = [...new Set([...Object.keys(oldV), ...Object.keys(newV)])];
+  const rows = keys.map((key) => ({ key, before: oldV[key], after: newV[key], changed: JSON.stringify(oldV[key]) !== JSON.stringify(newV[key]) }));
+  return rows.sort((x, y) => Number(y.changed) - Number(x.changed));
+}
+
+// The one-line summary of an entry.
+function auditSummary(a, fields) {
+  const kind = String(a.action).toUpperCase();
+  if (a.table_name === "auth") return a.new_value?.email || a.old_value?.email || "";
+  if (kind === "UPDATE") {
+    const changed = fields.filter((f) => f.changed && !NOISY.has(f.key));
+    if (!changed.length) return "No visible change";
+    const first = changed.slice(0, 2).map((f) => `${f.key}: ${shortText(f.before, 24)} → ${shortText(f.after, 24)}`).join(" · ");
+    return changed.length > 2 ? `${first} · +${changed.length - 2} more` : first;
+  }
+  const v = kind === "DELETE" ? a.old_value : a.new_value;
+  const name = v && (v.qr_id || v.scientific_name || v.full_name || v.name || v.title || v.type || v.email);
+  const count = fields.length;
+  return `${name ? `${shortText(name, 40)} · ` : ""}${count} field${count === 1 ? "" : "s"}`;
+}
 
 export function Audit() {
   const { db } = useStore();
   const [action, setAction] = useState("");
   const [size, setSize] = useState(AUDIT_PAGE_SIZES[0]);
   const [page, setPage] = useState(0);
+  const [open, setOpen] = useState(() => new Set()); // entries shown in full
+  const toggle = (id) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const rows = action ? db.audit.filter((a) => String(a.action).toUpperCase() === action) : db.audit;
   const pages = Math.max(1, Math.ceil(rows.length / size));
   const at = Math.min(page, pages - 1);
@@ -275,29 +327,33 @@ export function Audit() {
         tone="info"
       />
 
-      <p>
+      <div className="row wrap auditbar">
         <select value={action} onChange={(e) => { setAction(e.target.value); setPage(0); }} aria-label="Filter by action">
           <option value="">All actions</option>
-          {AUDIT_ACTIONS.map((x) => <option key={x} value={x}>{x}</option>)}
-        </select>{" "}
+          {AUDIT_ACTIONS.map((x) => <option key={x} value={x}>{kindOf(x).text}</option>)}
+        </select>
         <select value={size} onChange={(e) => { setSize(Number(e.target.value)); setPage(0); }} aria-label="Rows per page">
           {AUDIT_PAGE_SIZES.map((n) => <option key={n} value={n}>{n} per page</option>)}
         </select>
-      </p>
+        <ul className="plain auditkey" aria-label="What the labels mean">
+          {AUDIT_ACTIONS.map((x) => <li key={x}><AuditBadge action={x} /></li>)}
+        </ul>
+      </div>
 
-      <div className="tablewrap">
-        <table>
-          <thead><tr><th>When</th><th>Who</th><th>Table</th><th>Action</th><th>Change</th></tr></thead>
+      <div className="tablewrap roomy">
+        <table className="audittable">
+          <thead><tr><th>When</th><th>Who</th><th>What</th><th>Change</th></tr></thead>
           <tbody>
-            {shown.map((a) => (
-              <tr key={a.id}>
-                <td>{fmtDateTime(a.changed_at)}</td>
-                <td>{db.profiles.find((p) => p.id === a.changed_by)?.full_name || a.new_value?.email || "System"}</td>
-                <td>{a.table_name}</td>
-                <td><Chip value={a.action} /></td>
-                <td className="code">{a.old_value ? JSON.stringify(a.old_value) + " → " : ""}{JSON.stringify(a.new_value)}</td>
-              </tr>
-            ))}
+            {shown.map((a) => {
+              const fields = auditFields(a);
+              const isOpen = open.has(a.id);
+              const canOpen = a.table_name !== "auth" && fields.length > 0;
+              return (
+                <AuditRow key={a.id} a={a} fields={fields} isOpen={isOpen} canOpen={canOpen} onToggle={() => toggle(a.id)}
+                  who={db.profiles.find((p) => p.id === a.changed_by)?.full_name || a.new_value?.email || "System"} />
+              );
+            })}
+            {!shown.length && <tr><td colSpan="4" className="mute">No entries{action ? " of this kind" : ""} yet.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -309,5 +365,56 @@ export function Audit() {
         <button type="button" className="btn ghost" onClick={() => setPage(at + 1)} disabled={at >= pages - 1}>Next</button>
       </p>
     </Shell>
+  );
+}
+
+function AuditBadge({ action }) {
+  const k = kindOf(action);
+  return <span className={"auditbadge tone-" + k.tone}><Icon name={k.icon} size={14} /> {k.text}</span>;
+}
+
+// One entry: a short summary line, and on request every field with its value before and after.
+function AuditRow({ a, fields, isOpen, canOpen, onToggle, who }) {
+  const kind = String(a.action).toUpperCase();
+  const tableName = AUDIT_TABLE[a.table_name] || label(a.table_name || "");
+  const panelId = `audit-${a.id}`;
+  return (
+    <>
+      <tr className={"auditrow tone-" + kindOf(a.action).tone + (isOpen ? " open" : "")}>
+        <td className="nowrap">{fmtDateTime(a.changed_at)}</td>
+        <td>{who}</td>
+        <td><AuditBadge action={a.action} /><small className="mute block">{tableName}</small></td>
+        <td>
+          <div className="auditchange">
+            <span className="auditsummary">{auditSummary(a, fields)}</span>
+            {canOpen && (
+              <button type="button" className="btn ghost small-btn" aria-expanded={isOpen} aria-controls={panelId} onClick={onToggle}>
+                <Icon name={isOpen ? "chevD" : "chevR"} size={16} /> {isOpen ? "Hide" : "Expand"}
+              </button>
+            )}
+          </div>
+        </td>
+      </tr>
+      {isOpen && (
+        <tr className="auditdetail">
+          <td colSpan="4" id={panelId}>
+            <table className="auditfields">
+              <thead>
+                <tr><th>Field</th>{kind !== "INSERT" && <th>Before</th>}{kind !== "DELETE" && <th>After</th>}</tr>
+              </thead>
+              <tbody>
+                {fields.map((f) => (
+                  <tr key={f.key} className={kind === "UPDATE" && f.changed ? "changed" : ""}>
+                    <th scope="row">{f.key}</th>
+                    {kind !== "INSERT" && <td><pre>{fullText(f.before)}</pre></td>}
+                    {kind !== "DELETE" && <td><pre>{fullText(f.after)}</pre></td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
