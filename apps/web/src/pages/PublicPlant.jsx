@@ -76,6 +76,7 @@ export default function PublicPlant({ qr }) {
             {s.family && <><dt>Family</dt><dd>{s.family}</dd></>}
             {s.genus && <><dt>Genus</dt><dd>{s.genus}</dd></>}
             {s.conservation_status && <><dt>Conservation status</dt><dd><Chip value={s.conservation_status} /></dd></>}
+            {s.ecology && <><dt>Habitat and ecology</dt><dd>{s.ecology}</dd></>}
             {s.cultural_significance && <><dt>Cultural note</dt><dd>{s.cultural_significance}</dd></>}
             {s.updated_at && <><dt>Last updated</dt><dd>{fmtDate(s.updated_at)}</dd></>}
           </dl>

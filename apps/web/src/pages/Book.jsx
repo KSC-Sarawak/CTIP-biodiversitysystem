@@ -46,6 +46,7 @@ export default function Book() {
                 {e.conservation_status && <Chip value={e.conservation_status} />}
               </p>
               {e.description && <p>{e.description}</p>}
+              {e.ecology && <p><b>Habitat and ecology:</b> {e.ecology}</p>}
               {e.cultural_significance && <p><b>Cultural note:</b> {e.cultural_significance}</p>}
               {e.updated_at && <p className="mute small">Last updated {fmtDate(e.updated_at)}</p>}
             </article>

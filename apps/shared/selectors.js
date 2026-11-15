@@ -164,8 +164,8 @@ export const bookName = (s) => s.common_name || s.scientific_name;
 export function bookEntries(species = []) {
   return species
     .filter((s) => s.is_published && !s.is_deleted)
-    .map(({ id, common_name, scientific_name, family, genus, conservation_status, description, cultural_significance, updated_at }) => (
-      { id, common_name, scientific_name, family, genus, conservation_status, description, cultural_significance, updated_at }
+    .map(({ id, common_name, scientific_name, family, genus, conservation_status, description, cultural_significance, ecology, updated_at }) => (
+      { id, common_name, scientific_name, family, genus, conservation_status, description, cultural_significance, ecology, updated_at }
     ))
     .sort((a, b) => bookName(a).localeCompare(bookName(b)));
 }

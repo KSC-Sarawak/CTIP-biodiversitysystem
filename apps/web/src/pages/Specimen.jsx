@@ -184,6 +184,7 @@ export default function Specimen({ qr }) {
                 <dt>Family</dt><dd>{plant.species ? `${plant.species.family} · ${plant.species.genus}` : "Not confirmed yet"}</dd>
                 <dt>Height</dt><dd>{height(plant.height_cm)}</dd>
                 {plant.morphology && <><dt>Appearance</dt><dd>{plant.morphology}</dd></>}
+                {plant.species?.ecology && <><dt>Habitat and ecology</dt><dd>{plant.species.ecology}</dd></>}
                 {plant.species?.cultural_significance && <><dt>Cultural note</dt><dd>{plant.species.cultural_significance}</dd></>}
               </dl>
             </div>
