@@ -128,6 +128,11 @@ const ProfileCreate = z.strictObject({
   username: z.string().trim().toLowerCase().regex(/^[a-z0-9._]{3,20}$/).optional(),
 });
 
+// Kept tags for a survey (CTIP-147). Same numbers as SURVEY_TAG_MAX and
+// RESERVED_KEEP in apps/shared/offline (survey.js, tags.js).
+const SURVEY_TAG_MAX = 20;
+const KEPT_TAG_LIMIT = SURVEY_TAG_MAX + 3;
+
 const TagBatch = z.strictObject({
   count: z.number().int().min(1).max(500),
   batch_label: z.string().trim().min(1).max(100),
@@ -554,16 +559,31 @@ export const staffHandlers = {
   'post /qr-tags/batch': async (req, res) => {
     const body = parseBody(TagBatch, req, res);
     if (!body) return;
-    if (req.user.role === 'botanist' && body.count !== 1) {
-      return fail(res, 403, 'FORBIDDEN', 'Botanists can create one tag at a time. Ask an officer to print a batch.');
-    }
+    const kept = body.batch_label === 'reserved';
     // "reserved" marks a tag kept on one botanist's phone for making a tag with
     // no signal (CTIP-116); the API refuses it to everyone else (TAG_RESERVED).
     // A batch with that label from anyone else would lock it away from every botanist.
-    if (body.batch_label === 'reserved' && !(req.user.role === 'botanist' && body.count === 1)) {
+    if (kept && req.user.role !== 'botanist') {
       return fail(res, 403, 'FORBIDDEN', "Only a botanist's phone can make kept tags.");
     }
+    if (req.user.role === 'botanist' && !kept && body.count !== 1) {
+      return fail(res, 403, 'FORBIDDEN', 'Botanists can create one tag at a time. Ask an officer to print a batch.');
+    }
     const db = supabaseAs(req.user);
+    // A survey (CTIP-147) keeps up to SURVEY_TAG_MAX tags in one request, and a
+    // botanist holds at most KEPT_TAG_LIMIT unused kept tags, so no one can lock
+    // away a large part of the tag numbers.
+    if (kept) {
+      if (body.count > SURVEY_TAG_MAX) {
+        return fail(res, 403, 'FORBIDDEN', `You can keep at most ${SURVEY_TAG_MAX} tags at a time.`);
+      }
+      const held = await db.from('qr_tags').select('qr_id')
+        .eq('created_by', req.user.id).eq('batch_label', 'reserved').eq('status', 'unassigned');
+      if (held.error) return dbError(res, held.error);
+      if (held.data.length + body.count > KEPT_TAG_LIMIT) {
+        return fail(res, 403, 'TOO_MANY_KEPT_TAGS', 'Release some kept tags first.');
+      }
+    }
     for (let attempt = 0; attempt < 3; attempt++) {
       const existing = await db.from('qr_tags').select('qr_id');
       if (existing.error) return dbError(res, existing.error);
