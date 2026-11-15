@@ -49,6 +49,7 @@ export async function saveDraft(qr_id, draft) {
     notes: draft.notes || '',
     photos: draft.photos || [],
     gps: draft.gps || null,
+    started_at: draft.started_at || null, // when the form was first opened (CTIP-146)
     updated_at: new Date().toISOString(),
   };
   const json = JSON.stringify(payload);
