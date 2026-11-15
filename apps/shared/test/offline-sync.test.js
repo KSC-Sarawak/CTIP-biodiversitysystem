@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createMemoryOutbox } from "../offline/memoryOutbox.js";
 import { createSyncEngine, classify, actionFor, packBatches } from "../offline/syncEngine.js";
-import { editRecord, editSnapshot } from "../offline/records.js";
+import { editRecord, editSnapshot, newPlantRecord } from "../offline/records.js";
 import { resolveConflict, MINE_COMMENT, THEIRS_COMMENT } from "../offline/conflicts.js";
 import { createFakeServer } from "./helpers/fakeServer.js";
 
@@ -964,3 +964,17 @@ for (const at of ["createSpecimen", "sync", "uploadPhoto", "submit"]) {
     assert.equal(summary.pending, 0);
   });
 }
+
+test("a survey_id on a record is kept on the phone and never sent to the API (CTIP-147)", async () => {
+  const { outbox, server, engine } = setup();
+  const rec = newPlantRecord({
+    userId: U, qr_id: "DS-SURVEY-1", proposed_species: "Nepenthes rajah", survey_id: "survey-xyz",
+    height_cm: 12, morphology: "pitchers", notes: "", lat: 6.08, lng: 116.56, gps_accuracy_m: 8,
+  });
+  assert.equal(rec.survey_id, "survey-xyz");
+  await outbox.add(rec, photos(1));
+  await engine.run(U);
+  assert.equal(server.state.observations.length, 1);
+  const sent = JSON.stringify(server.state.calls);
+  assert.ok(!sent.includes("survey-xyz") && !sent.includes("survey_id"), "survey_id must not reach the API");
+});
