@@ -29,6 +29,8 @@ Rule keys live in `sensor_nodes.thresholds`, a JSON object of numbers or null, a
 - A failure to evaluate rules, insert an alert or send a push never fails the telemetry request: the readings are already stored. Log it and answer 202.
 - The node is marked `offline` by the silent check and set back to `active` by the next telemetry, which answers CTIP-76 "shown online again".
 - The contract (`packages/api-contract/openapi.yaml`) describes the threshold keys and alert types; that change needs a second person's review.
+- **Database before code.** Render redeploys the API from `main` on every push, so a migration must be on the live Supabase project (**Daun Sense**, `cgtvoirktzqjqaosslfh`) before the commit that uses it is pushed. Each migration is applied first to **Daun Sense Test** (`rigeicustidfeaphwqhd`), then to live, with the Supabase MCP `apply_migration`. The MCP records the migration under the time it was applied, so rename the repo file to the version `list_migrations` shows before committing, keeping repo and database history the same.
+- `pg_cron` is available on live but **not switched on** (15 Nov). Switching it on is the team's decision; without it the API fallback runs the silent check.
 - Commit straight to `main`. Commit messages carry no Claude author or session lines.
 
 ## Review Focus
@@ -137,7 +139,7 @@ Expected: the new tests FAIL; the six existing sensor tests still pass.
 Run: `npm --prefix services/api test`
 Expected: PASS, including `contract.test.js`.
 
-- [ ] **Step 5: Apply the migration to the hosted project** (`npx supabase db push`, by someone with access). Then commit and push after the contract review.
+- [ ] **Step 5: Apply the migration** with `apply_migration` (name `alert_notification_text`), test project first, then live. Rename the repo file to the live version from `list_migrations`. Then commit and push after the contract review.
 
 ```bash
 git add services/api/src supabase/migrations/20261116000000_alert_notification_text.sql packages/api-contract/openapi.yaml services/api/test/sensors.test.js
@@ -181,19 +183,12 @@ Expected: the new tests FAIL.
 Run: `npm --prefix services/api test`
 Expected: PASS.
 
-- [ ] **Step 5: Check the SQL on the local stack**
-
-```bash
-npx supabase start
-npx supabase db reset
-```
-
-Then in `psql` or Studio:
+- [ ] **Step 5: Check the SQL on Daun Sense Test** (`rigeicustidfeaphwqhd`): apply the migration there with `apply_migration` (name `silent_node_alerts`), then use `execute_sql`:
 1. Insert an active node with `last_seen = now() - interval '20 minutes'` and one with `last_seen = now()`. Also insert a retired node with an old `last_seen`.
 2. Run `select public.raise_silent_node_alerts();`. Expected: `1`. The stale node is `offline`, with one `node_silent` alert. The retired node has none.
 3. Run it again. Expected: `0`, because one is already open.
 
-- [ ] **Step 6: Apply the migration to the hosted project, switch on `pg_cron`** if the team agrees (Database → Extensions; then re-run the migration's schedule block), commit and push.
+- [ ] **Step 6: Apply the migration to live** (`cgtvoirktzqjqaosslfh`). If the team agreed to `pg_cron`, first run `create extension if not exists pg_cron;` on live, so the migration's schedule block registers the job. Rename the repo file to the live version, then commit and push.
 
 ```bash
 git add supabase/migrations/20261116000100_silent_node_alerts.sql services/api/src services/api/test/sensors.test.js
