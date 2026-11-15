@@ -2525,6 +2525,7 @@ components:
         description: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
         conservation_status: { $ref: '#/components/schemas/ConservationStatusValue' }
         cultural_significance: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
+        ecology: { type: [string, 'null'], minLength: 1, maxLength: 5000, description: Habitat and ecology (CTIP-149) }
 
     SpeciesCreate:
       description: Unknown fields (is_published, created_by, ...) are rejected with 422
@@ -2551,6 +2552,7 @@ components:
         description: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
         conservation_status: { $ref: '#/components/schemas/ConservationStatusValue' }
         cultural_significance: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
+        ecology: { type: [string, 'null'], minLength: 1, maxLength: 5000, description: Habitat and ecology (CTIP-149) }
 
     Species:
       allOf:
@@ -2577,6 +2579,7 @@ components:
         description: { type: [string, 'null'] }
         conservation_status: { type: [string, 'null'] }
         cultural_significance: { type: [string, 'null'] }
+        ecology: { type: [string, 'null'], description: Habitat and ecology (CTIP-149) }
         primary_image_url: { type: [string, 'null'], format: uri }
         media:
           type: array

@@ -7,7 +7,7 @@ import { parseBody, fail, dbError, validationError, UUID } from './validate.js';
 // ("species: staff write") checks it again because queries run as the user.
 
 const COLUMNS = `id, scientific_name, common_name, family, genus, description, conservation_status,
-  cultural_significance, is_published, is_deleted, created_by, updated_by, created_at, updated_at`;
+  cultural_significance, ecology, is_published, is_deleted, created_by, updated_by, created_at, updated_at`;
 
 // IUCN Red List categories (CTIP-46), stored lower case as the apps show them.
 // Same list as CONSERVATION in apps/shared/data.js. Any case is accepted.
@@ -23,6 +23,7 @@ const fields = {
   description: text(5000).nullable(),
   conservation_status: z.string().trim().toLowerCase().pipe(z.enum(IUCN_STATUSES)).nullable(),
   cultural_significance: text(5000).nullable(),
+  ecology: text(5000).nullable(), // habitat and ecology (CTIP-149)
 };
 
 // Strict: unknown keys such as is_published or created_by are rejected, so a
@@ -36,6 +37,7 @@ const SpeciesCreate = z.strictObject({
   description: fields.description.optional(),
   conservation_status: fields.conservation_status.optional(),
   cultural_significance: fields.cultural_significance.optional(),
+  ecology: fields.ecology.optional(),
 });
 const SpeciesUpdate = z.strictObject(fields).partial()
   .refine((body) => Object.keys(body).length > 0, 'Send at least one field to change');
