@@ -64,3 +64,25 @@ export function sessionSummary({ sessionId, timings = [], outboxItems = [], kept
     tagsLeft: keptIds.map(norm).filter((id) => !used.has(id)).length,
   };
 }
+
+/**
+ * The survey a new plant belongs to: the one in the route, else the botanist's open
+ * survey. A plant reached through Scan (a printed tag, once kept tags ran out) still
+ * belongs to the survey that is open.
+ */
+export function surveyIdFor(params, activeSurvey) {
+  return params?.survey ?? activeSurvey?.id ?? null;
+}
+
+/**
+ * What to tell the botanist when the server refuses to keep tags, or null to stay
+ * quiet. Over the holding limit is always told; during a survey any refusal is told,
+ * because they may be about to walk into no signal with too few tags. No connection
+ * stays quiet: the next connection tries again.
+ */
+export function keptTagRefusal(res, keepTargetNow = RESERVED_KEEP) {
+  if (!res || res.ok || res.offline) return null;
+  if (res.code === "TOO_MANY_KEPT_TAGS") return res.message || "Release some kept tags first.";
+  if (keepTargetNow > RESERVED_KEEP) return `Could not keep tags for the survey: ${res.message || "try again"}`;
+  return null;
+}

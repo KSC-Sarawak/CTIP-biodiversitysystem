@@ -28,6 +28,7 @@ import { LIMITS, HEIGHT_PROBLEM, heightOk, revisitLocation, photoPreview } from 
 import { deleteCameraFiles } from '../offline/photoFiles.js';
 import { firstStart, timingRow } from '../../shared/offline/captureTimings.js';
 import { SurveyPanel } from './Survey.js';
+import { surveyIdFor } from '../../shared/offline/survey.js';
 import { useBackHandler } from '../navigation/focus.js';
 
 const MAX_PHOTOS = 6;
@@ -323,7 +324,10 @@ const TAGS_OFF = 'Offline tags are turned off. Connect to the internet, or scan 
 const KEEP_HINT = 'Keeps 3 tag IDs for you, so you can make a tag with no connection. Write the ID on a spare tag only if you run out of printed ones.';
 
 export function AddPlant({ nav, params = {} }) {
-  const { db, me, addPlant, generateTags, notify, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag, timings } = useStore();
+  const { db, me, addPlant, generateTags, notify, outboxItems = [], apiStatus, keptTags = [], keepOffline = true, setKeepOffline, takeReservedTag, timings, activeSurvey } = useStore();
+  // The survey this plant belongs to (CTIP-147): from the route, or the open survey when
+  // the plant came through Scan with a printed tag.
+  const surveyId = surveyIdFor(params, activeSurvey);
   // When the form was opened for this tag (CTIP-146); a restored draft keeps its own start.
   const startedAt = useRef(null);
   const { c } = useTheme();
@@ -641,14 +645,14 @@ export function AddPlant({ nav, params = {} }) {
         lat: gps.lat,
         lng: gps.lng,
         gps_accuracy_m: hasFix(gps) ? gps.acc : null,
-        survey_id: params.survey ?? null, // on the phone only (CTIP-147)
+        survey_id: surveyId, // on the phone only (CTIP-147)
       });
       // addPlant reports failure instead of throwing. Keep the draft so nothing is lost:
       // it is cleared only once the record is safe (saved on the phone or sent).
       if (!res?.ok) throw new Error(res?.message || 'Failed to submit observation.');
       // Time per record (CTIP-146), before the draft (and its start time) is cleared.
       await timings?.recordTiming(timingRow({
-        id: uid(), userId: me?.id, surveyId: params.survey ?? null,
+        id: uid(), userId: me?.id, surveyId,
         startedAt: startedAt.current, savedAt: new Date().toISOString(),
         offline: !!res.queued, photos: photos.length, located: hasFix(gps),
       }));
@@ -658,7 +662,7 @@ export function AddPlant({ nav, params = {} }) {
         qr, name: sp.trim(), photos: photos.length, located: hasFix(gps), acc: gps.acc, cover: photoPreview(photos[0]),
         queued: !!res.queued, // saved on this phone, not sent yet
         failed: res.state === 'failed', // saved, but the first send was refused
-        survey: params.survey ?? null, sameSpecies, // quick survey mode (CTIP-147)
+        survey: surveyId, sameSpecies, // quick survey mode (CTIP-147)
       });
     } catch (err) {
       Alert.alert("Couldn't submit", err?.message || 'Your draft is saved on this phone. Try again in a moment.');
@@ -703,7 +707,7 @@ export function AddPlant({ nav, params = {} }) {
         )}
       </View>
       {apiStatus === 'offline' ? <Notice tone="neutral" icon="info" body={OFFLINE_NOTICE} /> : null}
-      {params.survey ? (
+      {surveyId ? (
         <Check label="Next plant: same species" hint="The next plant in this survey starts with this species. Nothing else is copied." value={sameSpecies} onChange={setSameSpecies} />
       ) : null}
 

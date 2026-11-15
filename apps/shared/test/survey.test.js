@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   SURVEY_TAG_DEFAULT, SURVEY_TAG_MAX, checkSurveyStart, carryOver, keepTarget, extraKeptTags, sessionSummary,
+  surveyIdFor, keptTagRefusal,
 } from "../offline/survey.js";
 import { RESERVED_KEEP } from "../offline/tags.js";
 
@@ -54,4 +55,21 @@ test("sessionSummary counts recorded, on the phone, sent and tags left", () => {
     sessionSummary({ sessionId: "s1", timings, outboxItems, keptIds: ["T-1", "T-2", "T-3", "T-4"], usedOnPhone: ["T-1"] }),
     { recorded: 3, onPhone: 1, sent: 2, tagsLeft: 3 },
   );
+});
+
+test("a plant recorded while a survey is open belongs to it, even from a scanned printed tag (review fix)", () => {
+  assert.equal(surveyIdFor({ survey: "s1" }, { id: "s1" }), "s1");
+  assert.equal(surveyIdFor({}, { id: "s1" }), "s1"); // came through Scan, no survey in the route
+  assert.equal(surveyIdFor({ qr: "NIAH-0009" }, null), null);
+  assert.equal(surveyIdFor(undefined, undefined), null);
+});
+
+test("a refused top-up is told to the botanist when it matters, and stays quiet otherwise (review fix)", () => {
+  const tooMany = { ok: false, status: 403, code: "TOO_MANY_KEPT_TAGS", message: "Release some kept tags first." };
+  assert.equal(keptTagRefusal(tooMany, 3), "Release some kept tags first.");
+  assert.equal(keptTagRefusal(tooMany, 10), "Release some kept tags first.");
+  const serverError = { ok: false, status: 500, code: "INTERNAL", message: "Something went wrong" };
+  assert.match(keptTagRefusal(serverError, 10), /Something went wrong/);
+  assert.equal(keptTagRefusal(serverError, 3), null); // the everyday top-up stays quiet, as before
+  assert.equal(keptTagRefusal({ ok: false, offline: true, message: "Cannot reach the API server" }, 10), null);
 });
