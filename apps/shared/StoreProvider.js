@@ -7,6 +7,7 @@ import { can } from "./permissions.js";
 import { uid, nowIso, photoProblem, CAPTION_MAX, withExponentialRetry, keepPhotoUrl } from "./utils.js";
 import {
   getAuthToken,
+  clearAuthToken,
   getSession,
   freshAuthToken,
   restoreSession,
@@ -251,6 +252,13 @@ function collectionMatches(a = [], b = []) {
     // Not loaded: keep what we had. An empty plant list would show every tag as unused.
     if (!res.ok) {
       if (res.offline) markMiss();
+      // The two sign-outs below only apply to the session that was refused. A
+      // slow load from an older session (Render waking up) can answer after a
+      // new sign-in, and must not sign that new session out.
+      const refusedSessionGone = !token || getAuthToken() !== token;
+      if ((res.code === "PASSWORD_CHANGE_REQUIRED" || res.code === "MFA_REQUIRED") && refusedSessionGone) {
+        return { ok: false, message: res.message };
+      }
       // F-16: still on the temporary password an admin typed: sign out, so the
       // sign-in page asks for a new one (the app tells them to use the website).
       if (res.code === "PASSWORD_CHANGE_REQUIRED") {
@@ -263,11 +271,14 @@ function collectionMatches(a = [], b = []) {
       }
       // VA-70: a password-only session (the 6-digit step was never finished):
       // sign out, so the person signs in again and gets the code step.
+      // Only on this device, with no API sign-out: every tab shares this
+      // session, and ending it would break another tab still on the code step.
+      // A password-only session can do nothing but finish the 6-digit step.
       if (res.code === "MFA_REQUIRED") {
         sessionEpoch.current += 1;
         setUserId(null);
         setAuthTokenState(null);
-        await signOutApi();
+        clearAuthToken();
         notify("Sign in again and enter the 6-digit code from your authenticator app.");
         return { ok: false, message: res.message }; // the next load shows the visitor view
       }
