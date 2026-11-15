@@ -23,12 +23,15 @@
 // No JSX and no React Native imports: it is shared code.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createTagBatchApi, deleteTagApi } from "../api.js";
-import { RESERVED_LABEL, nextReservedTag, outboxTagsFrom, reservedToCreate, keptTagsToRetain, tagsToRelease } from "./tags.js";
+import { RESERVED_LABEL, RESERVED_KEEP, nextReservedTag, outboxTagsFrom, reservedToCreate, keptTagsToRetain, tagsToRelease } from "./tags.js";
+import { SURVEY_TAG_MAX, extraKeptTags } from "./survey.js";
 import { createTopUp, shouldTopUp } from "./reservedTopUp.js";
 
 /**
- * useReservedTags({ reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi })
- * Answers { keptTags, keepOffline, setKeepOffline, topUpReservedTags, takeReservedTag }:
+ * useReservedTags({ reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi, keepTarget })
+ * `keepTarget` is how many free kept tags to hold: RESERVED_KEEP, or a survey's target while one is
+ * active (CTIP-147, survey.js keepTarget). Extra free tags beyond it are given back once online.
+ * Answers { keptTags, keepOffline, setKeepOffline, topUpReservedTags, takeReservedTag, releaseKept }:
  *   keptTags           the tag IDs kept for this person that no record on the phone has taken
  *                      (none while the switch is off)
  *   keepOffline        the "Keep tags for offline use" switch, saved on the phone per person; on by default
@@ -37,8 +40,9 @@ import { createTopUp, shouldTopUp } from "./reservedTopUp.js";
  *   topUpReservedTags  () => Promise, makes the missing tags (one run at a time; botanists, online, switch on)
  *   takeReservedTag    (except = []) => the first free tag, or null (always null while the switch is off);
  *                      `except` skips tags the screen already shows (a tag only counts as taken once its record is saved)
+ *   releaseKept        (ids) => Promise<{ released, failed }>, gives these kept tags back (online)
  */
-export function useReservedTags({ reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi }) {
+export function useReservedTags({ reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi, keepTarget = RESERVED_KEEP }) {
   const isBotanist = role === "botanist";
   // The kept tag IDs this phone made for this person (reservedTags.all). Kept tags
   // belong to the phone, not the account, so two phones signed in to one account
@@ -56,7 +60,7 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
 
   // Always the newest values, for the top-up run (it may start inside an older render).
   const latest = useRef({});
-  latest.current = { userId, isBotanist, loaded, db, usedOnPhone, apiStatus, callApi, loadFromApi, keep, saved };
+  latest.current = { userId, isBotanist, loaded, db, usedOnPhone, apiStatus, callApi, loadFromApi, keep, saved, keepTarget };
   // True while the switch is being changed, so a top-up does not make tags that are being released.
   const switching = useRef(false);
   // Tags this phone has just made, until the store's tag list shows them. Without it a
@@ -134,25 +138,30 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
     ];
     // Only this phone's own kept tags count: another phone of the same account keeps its own.
     const madeHere = [...now.saved, ...justMade.current];
-    const count = reservedToCreate(tags, now.userId, { usedOnPhone: now.usedOnPhone, madeHere });
+    const count = Math.min(SURVEY_TAG_MAX, reservedToCreate(tags, now.userId, { usedOnPhone: now.usedOnPhone, madeHere, keep: now.keepTarget }));
     let made = 0;
-    for (let i = 0; i < count; i += 1) {
-      const res = await now.callApi(createTagBatchApi, 1, RESERVED_LABEL);
+    // All the missing tags in one request (up to 20 for a survey, CTIP-147).
+    if (count > 0) {
+      const res = await now.callApi(createTagBatchApi, count, RESERVED_LABEL);
       if (!res.ok) {
-        console.warn("reserved tags: could not make one:", res.message || res.code);
-        break;
+        console.warn("reserved tags: could not make them:", res.message || res.code);
+      } else {
+        const ids = (res.data || []).map((t) => t.qr_id);
+        for (const id of ids) justMade.current.add(id);
+        try {
+          await reservedTags.add(now.userId, ids);
+        } catch (err) {
+          console.warn("reservedTags.add:", err?.message || err);
+        }
+        if (latest.current.userId === now.userId) setSaved((list) => [...new Set([...list, ...ids])]);
+        made = ids.length;
       }
-      const ids = (res.data || []).map((t) => t.qr_id);
-      for (const id of ids) justMade.current.add(id);
-      try {
-        await reservedTags.add(now.userId, ids);
-      } catch (err) {
-        console.warn("reservedTags.add:", err?.message || err);
-      }
-      if (latest.current.userId === now.userId) setSaved((list) => [...new Set([...list, ...ids])]);
-      made += 1;
     }
-    if (made) await now.loadFromApi(true);
+    // A survey has ended (the target fell back): give the extra free tags back.
+    const free = tagsToRelease(tags, now.userId, { madeHere, usedOnPhone: now.usedOnPhone, justMade: [...justMade.current] });
+    const extra = extraKeptTags(free, now.usedOnPhone, now.keepTarget);
+    if (extra.length) await releaseRef.current(extra);
+    else if (made) await now.loadFromApi(true);
     return { made };
   };
   // One guard for the provider's lifetime, so two triggers at once make one run.
@@ -168,7 +177,7 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
     if (!reservedTags) return;
     if (!shouldTopUp({ keepOffline: keep === true, role, online: apiStatus === "connected", loaded })) return;
     topUpReservedTags().catch((err) => console.warn("reserved tags top-up failed:", err?.message || err));
-  }, [reservedTags, role, loaded, apiStatus, keep, db.tags, usedOnPhone, topUpReservedTags]);
+  }, [reservedTags, role, loaded, apiStatus, keep, db.tags, usedOnPhone, keepTarget, topUpReservedTags]);
 
   const keptTags = useMemo(
     () => (isBotanist && keepOffline ? saved.filter((id) => !usedOnPhone.includes(id)) : []),
@@ -231,5 +240,37 @@ export function useReservedTags({ reservedTags, userId, role, db, outboxItems, c
     }
   }, [reservedTags, notify]);
 
-  return { keptTags, keepOffline, setKeepOffline, topUpReservedTags, takeReservedTag };
+  // Give kept tags back (a survey ended, CTIP-147). Stops at the first refusal and
+  // reloads, so the list shows what is left; the next top-up tries again.
+  const releaseKept = useCallback(async (ids = []) => {
+    const now = latest.current;
+    if (!reservedTags || !now.isBotanist || now.apiStatus !== "connected") return { released: 0, failed: ids.length };
+    let released = 0;
+    for (const id of ids) {
+      const res = await now.callApi(deleteTagApi, id);
+      if (!res.ok) {
+        console.warn("reserved tags: could not release", id, res.message || res.code);
+        break;
+      }
+      justMade.current.delete(id);
+      try {
+        await reservedTags.remove(now.userId, [id]);
+      } catch (err) {
+        console.warn("reservedTags.remove:", err?.message || err);
+      }
+      released += 1;
+    }
+    try {
+      const ids2 = await reservedTags.all(now.userId);
+      if (latest.current.userId === now.userId) setSaved(ids2);
+    } catch (err) {
+      console.warn("reservedTags.all:", err?.message || err);
+    }
+    await now.loadFromApi(true);
+    return { released, failed: ids.length - released };
+  }, [reservedTags]);
+  const releaseRef = useRef(releaseKept);
+  releaseRef.current = releaseKept;
+
+  return { keptTags, keepOffline, setKeepOffline, topUpReservedTags, takeReservedTag, releaseKept };
 }

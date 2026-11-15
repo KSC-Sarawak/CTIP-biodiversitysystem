@@ -107,6 +107,22 @@ export const MIGRATIONS = [
       CREATE INDEX IF NOT EXISTS capture_timings_user_saved ON capture_timings (user_id, saved_at);
     `,
   },
+  {
+    // Quick survey mode (CTIP-147): one row per survey a botanist started on this
+    // phone; the active one has no ended_at. Never sent to the API.
+    version: 7,
+    sql: `
+      CREATE TABLE IF NOT EXISTS survey_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        tag_target INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS survey_sessions_user_ended ON survey_sessions (user_id, ended_at);
+    `,
+  },
 ];
 
 /**
