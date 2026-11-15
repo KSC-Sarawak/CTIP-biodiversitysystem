@@ -12,7 +12,7 @@ export const CONSERVATION = [
 // A new species, before anything is typed into the form.
 export const BLANK_SPECIES = {
   scientific_name: "", common_name: "", family: "", genus: "", description: "",
-  conservation_status: "least concern", cultural_significance: "",
+  conservation_status: "least concern", cultural_significance: "", ecology: "",
 };
 
 // Statuses whose exact locations are hidden from visitors. Matches the API (distribution.js).
