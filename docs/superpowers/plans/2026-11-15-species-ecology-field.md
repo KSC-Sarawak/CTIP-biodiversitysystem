@@ -17,7 +17,7 @@
 - Visitors see it on published species only, the same rule as `cultural_significance`.
 - The migration is additive and safe to run twice (`add column if not exists`).
 - The contract changes first and needs a second person's review (`services/api/test/contract.test.js`, "contract first").
-- **Order matters:** the API selects the new column, so the migration must be applied to the hosted Supabase project **before** the API change reaches `main` (Render deploys from it). Otherwise every species read answers 500. CTIP-136 notes the same lesson.
+- **Database before code.** Render redeploys the API from `main` on every push, so a migration must be on the live Supabase project (**Daun Sense**, `cgtvoirktzqjqaosslfh`) before the commit that uses it is pushed. Each migration is applied first to **Daun Sense Test** (`rigeicustidfeaphwqhd`), then to live, with the Supabase MCP `apply_migration`. The MCP records the migration under the time it was applied, so rename the repo file to the version `list_migrations` shows before committing, keeping repo and database history the same. Here this matters doubly: the API selects the new column, so pushing first makes every species read answer 500 (CTIP-136 notes the same lesson).
 - Mobile: read the Expo v57 docs before writing mobile code (`apps/mobile/AGENTS.md`).
 - Commit straight to `main`. Commit messages carry no Claude author or session lines.
 
@@ -82,13 +82,7 @@ Expected: FAIL. The new create returns 422 for the unknown key `ecology`, and th
 Run: `npm --prefix services/api test`
 Expected: PASS, including `contract.test.js`.
 
-- [ ] **Step 5: Apply the migration to the hosted project** (needs a team member with Supabase access):
-
-```bash
-npx supabase db push
-```
-
-Then check the column exists on the hosted project (SQL editor: `select ecology from species limit 1;` runs without error). Do not push Step 6 until this succeeds.
+- [ ] **Step 5: Apply the migration, test project first, then live.** Use `apply_migration` with name `species_ecology` on `rigeicustidfeaphwqhd`, then on `cgtvoirktzqjqaosslfh`. On each, `execute_sql` `select ecology from public.species limit 1;` must run without error. Rename the repo file to the version `list_migrations` reports on live. Do not push Step 6 until both succeed.
 
 - [ ] **Step 6: Commit and push** (after the contract review)
 
