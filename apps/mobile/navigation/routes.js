@@ -20,6 +20,7 @@ import Reports from '../pages/Reports.js';
 import Book from '../pages/Book.js';
 import { StaffMore, Users, Audit } from '../pages/Admin.js';
 import Account from '../pages/Account.js';
+import Survey from '../pages/Survey.js';
 
 // Every screen, by route name. Each screen receives { nav, params }.
 export const SCREENS = {
@@ -29,7 +30,7 @@ export const SCREENS = {
   records: MyRecords, record: RecordDetail, phoneRecord: PhoneRecordDetail, alerts: Alerts, discussion: Discussion,
   review: ReviewQueue, reviewItem: ReviewRecord, monitor: Monitor, alert: AlertDetail,
   staffMore: StaffMore, speciesAdmin: SpeciesAdmin, tags: Tags, tagQr: TagQr, reports: Reports,
-  users: Users, audit: Audit, account: Account, book: Book,
+  users: Users, audit: Audit, account: Account, book: Book, survey: Survey,
 };
 
 // Pure route metadata and permission checks

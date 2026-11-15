@@ -78,6 +78,7 @@ import { newPlantRecord, revisitRecord, editRecord } from "./offline/records.js"
 import { tagCacheRows } from "./offline/tags.js";
 import { useOutboxSync } from "./offline/useOutboxSync.js";
 import { useReservedTags } from "./offline/useReservedTags.js";
+import { keepTarget as surveyKeepTarget, checkSurveyStart } from "./offline/survey.js";
 
 // Shown wherever a page needs the Express API and cannot reach it.
 export const API_DOWN = "Cannot reach the API server (Render). Please check your network connection.";
@@ -111,7 +112,7 @@ const savedUserId = () => getSession()?.user?.id || tokenClaims(getAuthToken())?
 // saved on the phone first and sent by the sync engine (CTIP-16, CTIP-83).
 // `reservedTags` holds the 3 tags kept for the botanist (CTIP-116). The web
 // passes none of them and sends records straight to the API, as before.
-export default function StoreProvider({ children, deviceId = "mobile", outbox = null, tagCache = null, reservedTags = null, timings = null }) {
+export default function StoreProvider({ children, deviceId = "mobile", outbox = null, tagCache = null, reservedTags = null, timings = null, surveys = null }) {
   // The sample plants are for visitors. Staff are recognised straight away, so
   // they would see them (no species, far from real data) until their own load.
   const [db, setDb] = useState(() => (savedUserId() ? staffStart : seed));
@@ -684,10 +685,55 @@ function collectionMatches(a = [], b = []) {
     retryRecord, discardRecord, changeRecordTag, removeRecordPhoto, fixRecord, resolveConflict,
   } = useOutboxSync({ outbox, deviceId, userId, currentUserId, callApi, loadFromApi, notify });
 
-  // The 3 tags kept for a botanist, so a new tag can be made with no signal (CTIP-116).
+  // Quick survey mode (CTIP-147): the botanist's survey still open on this phone, if any.
+  const [activeSurvey, setActiveSurvey] = useState(null);
+  useEffect(() => {
+    setActiveSurvey(null);
+    if (!surveys || !userId) return undefined;
+    let current = true;
+    surveys.activeSurvey(userId).then(
+      (s) => { if (current) setActiveSurvey(s); },
+      (err) => console.warn("surveys.activeSurvey:", err?.message || err),
+    );
+    return () => { current = false; };
+  }, [surveys, userId]);
+
+  // The 3 tags kept for a botanist, so a new tag can be made with no signal (CTIP-116),
+  // or a survey's target while one is open (CTIP-147).
   const { keptTags, keepOffline, setKeepOffline, topUpReservedTags, takeReservedTag } = useReservedTags({
     reservedTags, userId, role, db, outboxItems, callApi, apiStatus, notify, loadFromApi,
+    keepTarget: role === "botanist" ? surveyKeepTarget(activeSurvey) : undefined,
   });
+
+  // Start a survey (online only, so the tags can be kept), or end the open one. Ending
+  // works offline; the extra kept tags are given back at the next connection.
+  const startSurvey = async ({ name, tagTarget }) => {
+    if (!surveys || role !== "botanist") return { ok: false, message: "Only botanists on the app can run a survey." };
+    if (apiStatus !== "connected") return { ok: false, message: "Starting a survey needs a connection to keep tags." };
+    if (!keepOffline) return { ok: false, message: "Turn on \"Keep tags for offline use\" first." };
+    const check = checkSurveyStart({ name, tagTarget });
+    if (!check.ok) return check;
+    try {
+      const s = await surveys.startSurvey({ userId, name, tagTarget });
+      if (!s) return { ok: false, message: "This phone can't save a survey." };
+      setActiveSurvey(s);
+      return { ok: true, survey: s };
+    } catch (err) {
+      console.warn("startSurvey:", err?.message || err);
+      return { ok: false, message: "Could not start the survey. Try again." };
+    }
+  };
+  const endSurvey = async () => {
+    if (!surveys || !activeSurvey) return { ok: true };
+    try {
+      await surveys.endSurvey(activeSurvey.id);
+    } catch (err) {
+      console.warn("endSurvey:", err?.message || err);
+      return { ok: false, message: "Could not end the survey. Try again." };
+    }
+    setActiveSurvey(null);
+    return { ok: true };
+  };
 
   // The tag list saved at the last load, read once per person.
   const loadCachedTags = useCallback(async () => {
@@ -1670,6 +1716,7 @@ function collectionMatches(a = [], b = []) {
 
   const value = {
     timings, // time per record on the phone (CTIP-146); null on the website
+    activeSurvey, startSurvey, endSurvey, // quick survey mode (CTIP-147)
     db, me, role, toast, notify,
     logout, login, signIn, changePassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,

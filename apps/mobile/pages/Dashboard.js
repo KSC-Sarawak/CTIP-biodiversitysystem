@@ -424,7 +424,7 @@ const SORT_DASHBOARD = [
 
 export function StaffDashboard({ nav }) {
   usePolling(5000);
-  const { db, role, me } = useStore();
+  const { db, role, me, activeSurvey } = useStore();
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -557,6 +557,9 @@ export function StaffDashboard({ nav }) {
               )}
               {role === 'botanist' && (
                 <Button label="Add plant" icon="plus" height={44} onPress={() => nav.go('add')} />
+              )}
+              {role === 'botanist' && (
+                <Button label={activeSurvey ? 'Survey in progress' : 'Start survey'} icon="leaf" kind="secondary" height={44} onPress={() => nav.go('survey')} />
               )}
               {can(role, 'tags') && (
                 <Button label="QR tags" icon="qr" kind="secondary" height={44} onPress={() => nav.go('tags')} />
