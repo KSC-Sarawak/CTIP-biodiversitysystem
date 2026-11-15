@@ -360,7 +360,10 @@ paths:
         Every list the apps show, each holding what RLS lets this user read:
         species, species_media, qr_tags, specimens, observations,
         observation_photos (with signed links), observation_reviews,
-        observation_comments, alerts, alert_notes, sensor_nodes, notifications,
+        observation_comments, alerts, alert_notes, sensor_nodes,
+        sensor_node_nicknames (the caller's own names for nodes),
+        sensor_stable_ranges (the fixed alert range per reading: field,
+        min_value, max_value; officer and admin only), notifications,
         audit_logs, profiles and zones (officer and admin only), discussions,
         discussion_audience, discussion_posts, and directory (active accounts'
         id, full_name, username and role, for sharing and @mentions). If qr_tags, specimens or observations cannot
@@ -1637,6 +1640,41 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SensorNode' }
 
+  /sensor-nodes/{id}/nickname:
+    put:
+      tags: [Sensors]
+      operationId: setSensorNodeNickname
+      summary: Your own name for a node (officer/admin)
+      description: >
+        Each officer or admin can give a node their own name, seen only by
+        them; the node's technical name stays as set by IoT management. An
+        empty or null nickname removes it. The workspace load returns the
+        caller's names as sensor_node_nicknames.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [nickname]
+              properties:
+                nickname: { type: [string, 'null'], maxLength: 60 }
+      responses:
+        '200':
+          description: The name now in use (null when cleared)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  node_id: { type: string, format: uuid }
+                  nickname: { type: [string, 'null'] }
+                  updated_at: { type: string, format: date-time }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /sensor-nodes/{id}/telemetry:
     get:
       tags: [Sensors]
@@ -2873,7 +2911,11 @@ components:
         lng: { type: number, minimum: -180, maximum: 180 }
         thresholds:
           type: object
-          description: Readings outside these limits create an alert
+          description: >
+            Per-node alert limits. Not used for now: rule-based alerts use one
+            preset stable range for every node (apps/shared/config/sensorStableRanges.json,
+            pushed to the sensor_stable_ranges table). Kept for a possible
+            per-node range feature the team has not decided on yet.
           properties:
             temperature_min: { type: number }
             temperature_max: { type: number }

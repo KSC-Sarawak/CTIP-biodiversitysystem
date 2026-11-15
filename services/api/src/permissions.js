@@ -96,6 +96,7 @@ export const routes = [
   ['get', '/sensor-nodes/:id', OFFICER_ADMIN],
   ['patch', '/sensor-nodes/:id', ADMIN], // edit a node or its thresholds: admin only (CTIP-48)
   ['get', '/sensor-nodes/:id/telemetry', OFFICER_ADMIN],
+  ['put', '/sensor-nodes/:id/nickname', OFFICER_ADMIN], // your own name for a node, seen only by you
   ['post', '/telemetry', SENSOR],
   ['get', '/sensor-nodes/:id/images', OFFICER_ADMIN],
   ['post', '/sensor-nodes/:id/images', SENSOR],

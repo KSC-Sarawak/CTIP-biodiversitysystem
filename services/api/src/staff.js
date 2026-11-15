@@ -66,6 +66,10 @@ const WORKSPACE = {
   alerts: (db) => db.from('alerts').select('*').order('created_at', { ascending: false }),
   alert_notes: (db) => db.from('alert_notes').select('*').order('created_at'),
   sensor_nodes: (db) => db.from('sensor_nodes').select('*').order('created_at'),
+  // This person's own names for the nodes (RLS returns only their rows).
+  sensor_node_nicknames: (db) => db.from('sensor_node_nicknames').select('node_id, nickname, updated_at'),
+  // The fixed alert range per reading (pushed from apps/shared/config/sensorStableRanges.json).
+  sensor_stable_ranges: (db) => db.from('sensor_stable_ranges').select('field, min_value, max_value, updated_at'),
   // Sensor readings from the last day, newest first and capped, so a busy
   // node cannot make every poll huge. Officers and admins only (RLS).
   telemetry: (db) => db.from('telemetry').select('*')
@@ -137,6 +141,8 @@ const Assign = z.strictObject({ assigned_to: z.string().regex(UUID, 'must be a U
 const Resolve = z.strictObject({ outcome: z.string().trim().max(2000) });
 const Note = z.strictObject({ note: z.string().trim().min(1).max(2000) });
 const Thresholds = z.strictObject({ thresholds: z.record(z.string(), z.number().nullable()) });
+// Empty or null clears the personal name, so the technical name shows again.
+const Nickname = z.strictObject({ nickname: z.string().trim().max(60).nullable() });
 
 // Tag ids are NIAH-0001, NIAH-0002, ... Same rule as nextTagIds in apps/shared/selectors.js.
 const tagIds = (existing, count) => {
@@ -727,6 +733,28 @@ export const staffHandlers = {
       .eq('id', req.params.id).select('*').maybeSingle();
     if (error) return dbError(res, error);
     if (!data) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    res.json(data);
+  },
+
+  // The signed-in person's own name for a node (officers and admins). Only they see it;
+  // the node's technical name stays as IoT management set it.
+  'put /sensor-nodes/:id/nickname': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    const body = parseBody(Nickname, req, res);
+    if (!body) return;
+    const db = supabaseAs(req.user);
+    const nickname = body.nickname || null;
+    if (!nickname) {
+      const { error } = await db.from('sensor_node_nicknames').delete()
+        .eq('user_id', req.user.id).eq('node_id', req.params.id);
+      if (error) return dbError(res, error);
+      return res.json({ node_id: req.params.id, nickname: null });
+    }
+    const { data, error } = await db.from('sensor_node_nicknames')
+      .upsert({ user_id: req.user.id, node_id: req.params.id, nickname, updated_at: new Date().toISOString() })
+      .select('node_id, nickname, updated_at').single();
+    if (error?.code === '23503') return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
+    if (error) return dbError(res, error);
     res.json(data);
   },
 

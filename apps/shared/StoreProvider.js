@@ -68,6 +68,7 @@ import {
   resolveAlertApi,
   addAlertNoteApi,
   setThresholdsApi,
+  setNodeNicknameApi,
   getNodeTelemetryApi,
   getNodeImagesApi,
   markReadApi,
@@ -438,6 +439,12 @@ function collectionMatches(a = [], b = []) {
       const altEqual = collectionMatches(prevDb.alerts, w.alerts);
       const notesEqual = collectionMatches(prevDb.alertNotes, alertNotes);
       const nodesEqual = collectionMatches(prevDb.nodes, nodes);
+      // This person's own names for the nodes (an API not yet redeployed sends none).
+      const nodeNicknames = Object.fromEntries((w.sensor_node_nicknames || []).map((r) => [r.node_id, r.nickname]));
+      const nicksEqual = JSON.stringify(prevDb.nodeNicknames || {}) === JSON.stringify(nodeNicknames);
+      // The fixed alert range the database uses (apps/shared/config/sensorStableRanges.json, pushed there).
+      const stableRanges = Object.fromEntries((w.sensor_stable_ranges || []).map((r) => [r.field, { min: r.min_value, max: r.max_value }]));
+      const rangesEqual = JSON.stringify(prevDb.stableRanges || {}) === JSON.stringify(stableRanges);
       const telemetryEqual = JSON.stringify(prevDb.telemetry || {}) === JSON.stringify(telemetry);
       const notifsEqual = collectionMatches(prevDb.notifications, w.notifications);
       const auditEqual = collectionMatches(prevDb.audit, audit);
@@ -455,7 +462,7 @@ function collectionMatches(a = [], b = []) {
       const dirEqual = collectionMatches(prevDb.directory, directory);
 
       const hasChanges = !spEqual || !mediaEqual || !plEqual || !obsEqual || !tagsEqual ||
-        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !telemetryEqual ||
+        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !nicksEqual || !rangesEqual || !telemetryEqual ||
         !notifsEqual || !auditEqual || !profEqual || !zonesEqual ||
         !discEqual || !audEqual || !postsEqual || !dirEqual;
 
@@ -476,6 +483,8 @@ function collectionMatches(a = [], b = []) {
         alerts: altEqual ? prevDb.alerts : w.alerts,
         alertNotes: notesEqual ? prevDb.alertNotes : alertNotes,
         nodes: nodesEqual ? prevDb.nodes : nodes,
+        nodeNicknames: nicksEqual ? prevDb.nodeNicknames : nodeNicknames,
+        stableRanges: rangesEqual ? prevDb.stableRanges : stableRanges,
         telemetry: telemetryEqual ? prevDb.telemetry : telemetry,
         notifications: notifsEqual ? prevDb.notifications : w.notifications,
         audit: auditEqual ? prevDb.audit : audit,
@@ -1593,6 +1602,22 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
+  // Your own name for a node; an empty name goes back to its technical name.
+  const setNodeNickname = async (nodeId, nickname) => {
+    const name = (nickname || "").trim() || null;
+    const res = await callApi(setNodeNicknameApi, nodeId, name);
+    if (!res.ok) {
+      notify(`Could not rename the node: ${res.message}`);
+      return false;
+    }
+    setDb((d) => {
+      const next = { ...(d.nodeNicknames || {}) };
+      if (name) next[nodeId] = name; else delete next[nodeId];
+      return { ...d, nodeNicknames: next };
+    });
+    return true;
+  };
+
   // One node's readings over a longer range than the workspace's last 24 hours.
   // Returns { ok, rows } (oldest first) and never changes db.
   // `range`: hours back from now, or { from, to } for a chosen date range.
@@ -1668,7 +1693,7 @@ function collectionMatches(a = [], b = []) {
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
-    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, loadNodeTelemetry, loadNodeImages,
+    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, setNodeNickname, loadNodeTelemetry, loadNodeImages,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,

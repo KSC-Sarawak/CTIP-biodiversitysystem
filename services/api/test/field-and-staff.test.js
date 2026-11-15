@@ -122,7 +122,7 @@ async function fakeSupabase(input, init = {}) {
 beforeEach((t) => {
   db = {
     qr_tags: [], specimens: [], observations: [], observation_photos: [], observation_comments: [],
-    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], telemetry: [], sensor_images: [],
+    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], sensor_node_nicknames: [], sensor_stable_ranges: [], telemetry: [], sensor_images: [],
     notifications: [], audit_logs: [], profiles: [], zones: [],
     discussions: [], discussion_audience: [], discussion_posts: [], 'rpc/discussion_directory': [],
   };
@@ -499,6 +499,25 @@ test('sensor node telemetry: readings in the asked range, oldest first; bad inpu
   assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry?hours=abc`).set(as('officer'))).status, 400);
   assert.equal((await request(app).get('/v1/sensor-nodes/not-a-uuid/telemetry').set(as('officer'))).status, 404);
   assert.equal((await request(app).get(`/v1/sensor-nodes/${node}/telemetry`).set(as('botanist'))).status, 403);
+});
+
+test('node nickname: an officer names a node for themself, and clears it; botanists cannot', async () => {
+  const node = crypto.randomUUID();
+  const put = (body, role = 'officer', id = node) => request(app).put(`/v1/sensor-nodes/${id}/nickname`).set(as(role)).send(body);
+  const set = await put({ nickname: '  Gate orchid  ' });
+  assert.equal(set.status, 200);
+  assert.equal(set.body.nickname, 'Gate orchid');
+  assert.deepEqual(db.sensor_node_nicknames.map((r) => [r.user_id, r.node_id, r.nickname]), [[users.officer, node, 'Gate orchid']]);
+  const res = await request(app).get('/v1/workspace').set(as('officer'));
+  assert.equal(res.body.sensor_node_nicknames[0].nickname, 'Gate orchid');
+  const cleared = await put({ nickname: '' });
+  assert.equal(cleared.status, 200);
+  assert.equal(cleared.body.nickname, null);
+  assert.equal(db.sensor_node_nicknames.length, 0);
+  assert.equal((await put({ nickname: 'x'.repeat(61) })).status, 422);
+  assert.equal((await put({ nickname: 'Mine', node_id: node })).status, 422); // no other fields
+  assert.equal((await put({ nickname: 'Mine' }, 'officer', 'not-a-uuid')).status, 404);
+  assert.equal((await put({ nickname: 'Mine' }, 'botanist')).status, 403);
 });
 
 test('sensor node telemetry: a chosen date range (from and to)', async () => {

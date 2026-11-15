@@ -165,6 +165,8 @@ export const seed = {
   discussionPosts: [],
   directory: [],
   nodes: [],
+  nodeNicknames: {},
+  stableRanges: {},
   telemetry: {},
   alerts: [],
   alertNotes: [],

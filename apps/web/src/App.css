@@ -985,6 +985,126 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 .nodecard.alerting { border-color: var(--bad-line, var(--bad)); }
 /* The top of a node card picks the node; the rest is its latest readings. */
 .nodepick { display: flex; flex-direction: column; gap: var(--s-1); padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+/* ---- Monitoring dashboard: most urgent first (alerts, then nodes, then one node) ---- */
+.sectionhead { align-items: center; gap: var(--s-3); margin-bottom: var(--s-3); }
+.gap-section-s .sectionhead > h2 { margin: 0; }
+.allquiet { display: flex; align-items: center; gap: var(--s-2); margin: 0; padding: var(--s-3) var(--s-4); border: 1px solid var(--ok-line); border-radius: var(--r-card); background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.allquiet.neutral { border-color: var(--line); background: var(--surface); color: var(--ink2); font-weight: 500; }
+
+/* Alerts: what, where and how bad first; the investigation folded away. */
+.alertgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr)); gap: var(--s-3); align-items: start; }
+.alertgrid .record { margin-bottom: 0; }
+.alertcard { gap: var(--s-2); }
+.alertcard-title { font-size: 17px; line-height: 1.3; }
+.alertcard-reading { font-size: var(--t-small-size); }
+.alertcard-acts { align-items: flex-end; gap: var(--s-3); }
+.alertcard-more { border-top: 1px solid var(--line); padding-top: var(--s-2); }
+.alertcard-more > summary { cursor: pointer; font-weight: 600; color: var(--acc); min-height: 32px; display: flex; align-items: center; }
+.alertcard-more[open] > summary { margin-bottom: var(--s-3); }
+
+/* Sensor nodes: one row each, so readings line up and compare at a glance. */
+.nodelist { display: flex; flex-direction: column; gap: var(--s-2); }
+.nodelist .nodecard {
+  display: grid; grid-template-columns: minmax(180px, 1.3fr) minmax(0, 3fr) minmax(150px, 1fr) auto;
+  align-items: center; gap: var(--s-4); padding: var(--s-3) var(--s-4); border-left: 4px solid transparent; cursor: pointer;
+  transition: background-color .15s ease, border-color .15s ease;
+}
+.nodelist .nodecard:hover { background: var(--raised); }
+.nodelist .nodecard:has(.nodepick:focus-visible) { outline: 2px solid var(--acc); outline-offset: 2px; }
+.nodelist .nodepick:focus-visible { outline: none; }
+.nodelist .nodecard.on { border-left-color: var(--acc); }
+/* Not sending (offline, maintenance): a solid grey edge, not the old dashed card border. */
+.nodelist .nodecard.down { border-style: solid; border-color: var(--line); border-left: 4px solid var(--ink2); }
+.nodelist .nodecard.alerting { border-left: 4px solid var(--bad); }
+.nodecard-name { font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
+.site .nodelist dl.readings { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; }
+.nodecard-none { margin: 0; }
+.nodecard-status { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.nodecard-status .textlink { padding: 0; border: 0; background: none; font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.iconbtn {
+  display: inline-grid; place-items: center; width: 36px; height: 36px; min-height: 0; padding: 0;
+  border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--ink2); cursor: pointer;
+}
+.iconbtn:hover, .iconbtn:focus-visible { color: var(--acc); border-color: var(--acc); }
+
+/* What counts as an alert: a quiet reference note under the alerts */
+.alertrules { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); margin-top: var(--s-4); padding: var(--s-3) 0 0; border-top: 1px solid var(--line); }
+.alertrules-lead { font-size: var(--t-caption-size); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
+.alertrules ul { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0; }
+.alertrules li { padding: 2px var(--s-3); border: 1px solid var(--line); border-radius: var(--r-pill); font-size: var(--t-small-size); }
+.alertrules li span { color: var(--ink2); }
+.alertrules li code, .alertrules li .mono { color: var(--ink); font-weight: 600; }
+.nodemap-card { margin-bottom: var(--s-2); }
+
+/* The selected node: 1. graphs (wide), 2. photos (side), 3. time range under the graphs. */
+.nodedetail-body { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(260px, 1fr); gap: var(--s-5, 24px); align-items: start; margin-top: var(--s-4); }
+.nodedetail-main > .sub:first-child { margin-top: 0; }
+.nodedetail-side { padding-left: var(--s-5, 24px); border-left: 1px solid var(--line); }
+.nodedetail-side .sub { margin-top: 0; }
+.nodedetail-side .shots { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nodedetail-main .charts { margin-top: var(--s-2); }
+.nodedetail-main .rangebar { margin-top: var(--s-3); }
+.rangebar-title { font-size: var(--t-caption-size); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
+@media (max-width: 1000px) {
+  .nodedetail-body { grid-template-columns: 1fr; }
+  .nodedetail-side { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); padding-top: var(--s-3); }
+  .nodedetail-side .shots { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+}
+
+/* The latest reading: one slim line, alert colour when out of range */
+.nowstrip { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-4); margin-top: var(--s-3); padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); }
+.site .nowstrip dl { display: flex; flex-wrap: wrap; gap: var(--s-2) var(--s-5, 24px); margin: 0; border: 0; border-radius: 0; background: none; overflow: visible; }
+.nowitem { display: flex; flex-direction: column; }
+.site .nowitem dt { padding: 0; border: 0; background: none; font-size: var(--t-caption-size); font-weight: 600; color: var(--ink2); }
+.site .nowitem dd { margin: 0; padding: 0; border: 0; }
+.nowitem dd b { font-family: var(--f-mono); font-weight: 600; }
+.nowitem dd small { color: var(--ink2); font-size: var(--t-caption-size); }
+.nowitem.is-off dd b, .nowitem.is-off dd small { color: var(--bad); }
+
+/* Charts: out-of-range parts in the alert colour */
+.badtext { color: var(--bad); }
+.spark-line.spark-bad { stroke: var(--bad); stroke-width: 2.6; }
+.tchart-zone { fill: var(--bad); opacity: .07; }
+.tchart-dot.bad { background: var(--bad); }
+.tchart-off { padding: 0 var(--s-2); border-radius: var(--r-pill); background: var(--bad-soft); color: var(--bad); font-size: var(--t-caption-size); font-weight: 600; }
+.chartkey { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-4); margin: var(--s-1) 0 0; }
+.chartkey span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The selected node */
+.nodedetail-head .overline { margin: 0 0 2px; }
+.nodedetail-head p { margin: var(--s-1) 0 0; }
+.nodename { align-items: center; gap: var(--s-3); }
+.nodename h2 { margin: 0; }
+.renameform { margin-top: var(--s-3); padding: var(--s-3); gap: var(--s-3); align-items: flex-end; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); }
+.nowtiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.nowtiles .tile b { font-size: 28px; line-height: 32px; }
+.nowtiles .tile small { font-size: var(--t-caption-size); }
+.nowtiles .tile-warn { border-color: var(--warn-line); }
+
+/* Time range: the preset buttons, and the slider or the dates right under them. */
+.rangebar { display: flex; flex-direction: column; gap: var(--s-3); padding: var(--s-3) var(--s-4); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--raised); }
+.rangeslider { display: grid; grid-template-columns: minmax(170px, auto) auto minmax(0, 1fr) auto; align-items: center; gap: var(--s-3); }
+.site .rangeslider label { display: block; margin: 0; white-space: nowrap; }
+.site .rangeslider input[type="range"] { width: 100%; min-height: 0; padding: 0; border: 0; background: none; accent-color: var(--acc); }
+.rangebar-dates { gap: var(--s-3); align-items: flex-end; }
+.rangesummary { margin: var(--s-2) 0 0; }
+
+/* Chart header: name, latest value, and min · avg · max on one line */
+.tchart figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s-3); }
+.tchart-title { font-weight: 600; color: var(--ink); }
+.tchart-stats { margin-left: auto; }
+.tchart-stats b { font-family: var(--f-mono); font-weight: 500; color: var(--ink); }
+
+@media (max-width: 800px) {
+  .nodelist .nodecard { grid-template-columns: minmax(0, 1fr) auto; gap: var(--s-2) var(--s-3); }
+  .nodelist .nodecard > .nodepick { order: 1; }
+  .nodelist .nodecard > .iconbtn { order: 2; }
+  .nodelist .nodecard > .readings, .nodelist .nodecard > .nodecard-none { order: 3; grid-column: 1 / -1; }
+  .nodelist .nodecard > .nodecard-status { order: 4; grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 2px var(--s-3); }
+  .site .nodelist dl.readings { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rangeslider { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .rangeslider label { grid-column: 1 / -1; }
+}
 .nodecard > .textlink { align-self: flex-start; padding: 0; border: 0; background: none; font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .site dl.readings { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: var(--s-1) var(--s-3); margin: var(--s-1) 0; border: 0; border-radius: 0; background: none; overflow: visible; }
 .site dl.readings dt { padding: 0; background: none; border: 0; font-size: var(--t-caption-size); font-weight: 600; color: var(--ink2); }
