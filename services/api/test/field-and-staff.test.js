@@ -446,6 +446,42 @@ test('an officer cannot make a batch labelled reserved', async () => {
   assert.equal(one.body[0].batch_label, 'reserved');
 });
 
+test('botanist keeps 20 tags in one request for a survey (CTIP-147)', async () => {
+  const res = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 20, batch_label: 'reserved' });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.length, 20);
+  assert.ok(res.body.every((t) => t.batch_label === 'reserved' && t.created_by === users.botanist));
+});
+
+test('botanist asking for 21 kept tags gets 403 (CTIP-147)', async () => {
+  const res = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 21, batch_label: 'reserved' });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'FORBIDDEN');
+  assert.equal(res.body.message, 'You can keep at most 20 tags at a time.');
+  assert.equal(db.qr_tags.length, 0);
+});
+
+test("botanist's ordinary batch is still one at a time (CTIP-147)", async () => {
+  const res = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 2, batch_label: 'field' });
+  assert.equal(res.status, 403);
+  assert.equal(db.qr_tags.length, 0);
+});
+
+test('botanist holding 20 unused kept tags cannot keep 4 more, but can keep 3 (CTIP-147)', async () => {
+  for (let i = 1; i <= 20; i += 1) keptTag(`NIAH-${String(i).padStart(4, '0')}`);
+  // Tags that do not count: used, printed, or another botanist's.
+  keptTag('NIAH-0101', { status: 'assigned' });
+  keptTag('NIAH-0102', { batch_label: 'Print 3' });
+  keptTag('NIAH-0103', { created_by: users.officer });
+  const four = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 4, batch_label: 'reserved' });
+  assert.equal(four.status, 403);
+  assert.equal(four.body.code, 'TOO_MANY_KEPT_TAGS');
+  assert.equal(four.body.message, 'Release some kept tags first.');
+  const three = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 3, batch_label: 'reserved' });
+  assert.equal(three.status, 201);
+  assert.equal(three.body.length, 3);
+});
+
 test("POST /specimens on another botanist's reserved tag answers 409 TAG_RESERVED", async () => {
   keptTag('NIAH-0001', { created_by: users.officer });
   const res = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
