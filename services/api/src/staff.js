@@ -146,6 +146,31 @@ const Assign = z.strictObject({ assigned_to: z.string().regex(UUID, 'must be a U
 const Resolve = z.strictObject({ outcome: z.string().trim().max(2000) });
 const Note = z.strictObject({ note: z.string().trim().min(1).max(2000) });
 const Thresholds = z.strictObject({ thresholds: z.record(z.string(), z.number().nullable()) });
+// Registering and editing a sensor node (CTIP-48). The id is made by the database.
+const Lat = z.number().min(-90).max(90);
+const Lng = z.number().min(-180).max(180);
+const NodeSpecimen = z.string().regex(UUID, 'must be a UUID').nullable();
+const NewNode = z.strictObject({
+  lat: Lat,
+  lng: Lng,
+  specimen_id: NodeSpecimen.optional(),
+  status: z.enum(['active', 'maintenance']).optional(),
+});
+// Any of these; status "retired" turns the node off (its readings are then refused).
+const NodeChanges = z.strictObject({
+  lat: Lat.optional(),
+  lng: Lng.optional(),
+  specimen_id: NodeSpecimen.optional(),
+  status: z.enum(['active', 'offline', 'maintenance', 'retired']).optional(),
+  thresholds: z.record(z.string(), z.number().nullable()).nullable().optional(),
+}).refine((o) => Object.keys(o).length > 0, { message: 'Send at least one field to change' })
+  .refine((o) => (o.lat === undefined) === (o.lng === undefined), { message: 'Send lat and lng together' });
+// Alert routing (CTIP-48): which nodes (null: all) and from which severity up.
+const SEVERITIES = ['low', 'medium', 'high', 'critical'];
+const AlertRoute = z.strictObject({
+  node_ids: z.array(z.string().regex(UUID, 'must be a UUID')).max(200).nullable(),
+  min_severity: z.enum(SEVERITIES),
+});
 // Empty or null clears the personal name, so the technical name shows again.
 const Nickname = z.strictObject({ nickname: z.string().trim().max(60).nullable() });
 
@@ -745,15 +770,65 @@ export const staffHandlers = {
     res.json({ data: data.map((r) => ({ ...r, view_url: signed.get(r.s3_key) ?? null })), meta: { page, limit, total: count ?? data.length } });
   },
 
+  // Register a sensor node (CTIP-48): admin only, here and in RLS.
+  'post /sensor-nodes': async (req, res) => {
+    const body = parseBody(NewNode, req, res);
+    if (!body) return;
+    const { data, error } = await supabaseAs(req.user).from('sensor_nodes')
+      .insert({ status: 'active', ...body }).select('*').single();
+    if (error?.code === '23503') return fail(res, 422, 'PLANT_NOT_FOUND', 'No plant with this specimen_id');
+    if (error) return dbError(res, error);
+    res.status(201).json(data);
+  },
+
+  // Edit a node: where it is, which plant it guards, its status (retired turns it
+  // off), or its stored per-node limits. Admin only (CTIP-48).
   'patch /sensor-nodes/:id': async (req, res) => {
     if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
-    const body = parseBody(Thresholds, req, res);
+    const body = parseBody(NodeChanges, req, res);
     if (!body) return;
-    const { data, error } = await supabaseAs(req.user).from('sensor_nodes').update({ thresholds: body.thresholds })
+    const { data, error } = await supabaseAs(req.user).from('sensor_nodes')
+      .update({ ...body, updated_at: new Date().toISOString() })
       .eq('id', req.params.id).select('*').maybeSingle();
+    if (error?.code === '23503') return fail(res, 422, 'PLANT_NOT_FOUND', 'No plant with this specimen_id');
     if (error) return dbError(res, error);
     if (!data) return fail(res, 404, 'NOT_FOUND', 'Sensor node not found');
     res.json(data);
+  },
+
+  // Alert routing (CTIP-48). Officers and admins with no row hear about every alert.
+  'get /alert-routes': async (req, res) => {
+    const { data, error } = await supabaseAs(req.user).from('alert_routes').select('*').order('updated_at');
+    if (error) return dbError(res, error);
+    res.json(data);
+  },
+
+  'put /alert-routes/:userId': async (req, res) => {
+    const notStaff = () => fail(res, 404, 'NOT_FOUND', 'No active officer or admin with this id');
+    if (!UUID.test(req.params.userId)) return notStaff();
+    const body = parseBody(AlertRoute, req, res);
+    if (!body) return;
+    const db = supabaseAs(req.user);
+    const person = await db.from('profiles').select('id, role, is_active').eq('id', req.params.userId).maybeSingle();
+    if (person.error) return dbError(res, person.error);
+    if (!person.data || !person.data.is_active || !['officer', 'admin'].includes(person.data.role)) return notStaff();
+    const { data, error } = await db.from('alert_routes').upsert({
+      user_id: req.params.userId,
+      node_ids: body.node_ids === null ? null : [...new Set(body.node_ids)],
+      min_severity: body.min_severity,
+      updated_by: req.user.id,
+      updated_at: new Date().toISOString(),
+    }).select('*').single();
+    if (error) return dbError(res, error);
+    res.json(data);
+  },
+
+  // Back to the default: every alert.
+  'delete /alert-routes/:userId': async (req, res) => {
+    if (!UUID.test(req.params.userId)) return fail(res, 404, 'NOT_FOUND', 'No alert routing for this id');
+    const { error } = await supabaseAs(req.user).from('alert_routes').delete().eq('user_id', req.params.userId);
+    if (error) return dbError(res, error);
+    res.status(204).end();
   },
 
   // The signed-in person's own name for a node (officers and admins). Only they see it;

@@ -3,6 +3,7 @@ import express from 'express';
 import { z } from 'zod';
 import { supabaseService } from './supabase.js';
 import { fail, dbError, parseBody, UUID } from './validate.js';
+import { alertsRaisedSince, checkSilentNodesSoon, pushAlerts } from './alertWatch.js';
 
 // The two routes the IoT gateway calls (CTIP-61, F-14/F-15 follow-up):
 // readings and camera photos go through the API, never straight to Supabase.
@@ -60,13 +61,21 @@ async function ingestTelemetry(req, res) {
   if (!(await findNode(db, body.node_id, res))) return;
 
   const rows = body.readings.map((r) => ({ ...r, node_id: body.node_id }));
+  const before = new Date(Date.now() - 1000).toISOString();
   const { error } = await db.from('telemetry').insert(rows);
   if (error) return dbError(res, error);
 
-  // Keep last_seen fresh for the offline alert (CTIP-76). Never in the future.
+  // Keep last_seen fresh for the silent check (CTIP-76). Never in the future.
+  // The telemetry trigger does the same and sets an offline node back to active.
   const now = Date.now();
   const latest = Math.min(now, Math.max(...rows.map((r) => Date.parse(r.ts))));
   await db.from('sensor_nodes').update({ last_seen: new Date(latest).toISOString() }).eq('id', body.node_id);
+
+  // The telemetry triggers may have raised alerts (stable range, node moved):
+  // push them to the people told in the app (CTIP-77). A failure here never
+  // fails the request; the readings are stored.
+  await pushAlerts(db, await alertsRaisedSince(db, body.node_id, before));
+  await checkSilentNodesSoon({ db, now });
   res.status(202).json({ stored: rows.length });
 }
 

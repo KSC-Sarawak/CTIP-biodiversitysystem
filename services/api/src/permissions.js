@@ -109,6 +109,10 @@ export const routes = [
   ['post', '/alerts/:id/resolve', OFFICER_ADMIN],
   ['get', '/alerts/:id/notes', OFFICER_ADMIN],
   ['post', '/alerts/:id/notes', OFFICER_ADMIN],
+  // Who hears about which node's alerts, from which severity (CTIP-48): admin only
+  ['get', '/alert-routes', ADMIN],
+  ['put', '/alert-routes/:userId', ADMIN],
+  ['delete', '/alert-routes/:userId', ADMIN],
 
   // Discussion board: who can read a thread is decided by RLS (owner, public or shared)
   ['post', '/discussions', ANY_STAFF],
