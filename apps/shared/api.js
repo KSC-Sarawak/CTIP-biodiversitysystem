@@ -757,7 +757,6 @@ export const getNodeTelemetryApi = (nodeId, range = 24, { token } = {}) => {
 };
 // Newest webcam photos for a node, each with a short-lived view_url (CTIP-82).
 export const getNodeImagesApi = (nodeId, limit = 12, { token } = {}) => send("GET", `/sensor-nodes/${enc(nodeId)}/images?limit=${enc(limit)}`, undefined, token);
-export const setThresholdsApi = (nodeId, thresholds, { token } = {}) => send("PATCH", `/sensor-nodes/${enc(nodeId)}`, { thresholds }, token);
 // Your own name for a node (null clears it, so the technical name shows again).
 export const setNodeNicknameApi = (nodeId, nickname, { token } = {}) => send("PUT", `/sensor-nodes/${enc(nodeId)}/nickname`, { nickname }, token);
 // Registering and editing nodes, and who hears about their alerts (Admin, CTIP-48).

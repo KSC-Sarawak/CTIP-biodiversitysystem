@@ -1,5 +1,20 @@
 # Automated IoT Alerts Implementation Plan
 
+> **Status (16 Nov 2026): done, by a different route than planned below.** The team
+> chose one fixed stable range for every node instead of per-node rules (PR #83), so
+> the alerts are raised by **database triggers**, not by `alertRules.js` in the API.
+> What was built, and where:
+>
+> | Ticket | Built in |
+> |---|---|
+> | CTIP-38 stable range, Motion detected | migrations `20261116091220`, `20261116094425` |
+> | CTIP-38, CTIP-82 photo linked to its motion alert | migration `20261116095803` |
+> | CTIP-76 Node silent, back online | migration `20261116093047`; `services/api/src/alertWatch.js`; pg_cron job (`20261116095245`) |
+> | CTIP-77 push, routing, no coordinates | `alertWatch.js`, `alert_recipients()` in `20261116093047` |
+> | CTIP-48 register and edit nodes, Node moved, alert routing | `services/api/src/staff.js`, `apps/web/src/pages/SensorNodes.jsx`, `20261116093047` |
+>
+> The rest of this file is the original plan, kept for the record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Sensor readings raise alerts by themselves. A reading that breaks a node's rule (CTIP-38) or a node that goes silent (CTIP-76) creates an alert, and officers and admins are told in the app and by push, never with coordinates (CTIP-77). Today nothing creates alerts: `ingestTelemetry` only stores readings.
