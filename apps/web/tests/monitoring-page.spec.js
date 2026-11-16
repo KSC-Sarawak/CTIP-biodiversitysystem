@@ -142,6 +142,30 @@ test("monitoring: a person renames a node for themself, and can go back to its t
   expect(state.writes.at(-1).body).toEqual({ nickname: null });
 });
 
+test("monitoring: the slider gives way to the date fields while chosen dates are shown", async ({ page }) => {
+  const NODE = "aaaaaaaa-0000-4000-8000-000000000011";
+  const state = newState();
+  state.sensorNodes = [{ id: NODE, name: "Dates node", specimen_id: specimen(1).id, status: "active", thresholds: null, last_seen: null, created_at: "2026-11-01T00:00:00Z" }];
+  await open(page, state, "#/monitoring");
+  await expect(page.getByRole("slider", { name: /Show the last/ })).toBeVisible();
+  await page.getByRole("button", { name: "Choose dates" }).click();
+  await expect(page.getByLabel("From")).toBeVisible();
+  await expect(page.getByRole("slider", { name: /Show the last/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "24 hours" }).click();
+  await expect(page.getByRole("slider", { name: /Show the last/ })).toHaveAttribute("aria-valuetext", "24 hours");
+});
+
+test("monitoring: a personal name equal to the technical name can still be cleared (PR #83 review)", async ({ page }) => {
+  const NODE = "aaaaaaaa-0000-4000-8000-000000000012";
+  const state = newState();
+  state.sensorNodes = [{ id: NODE, name: "ESP32-NODE-09", specimen_id: specimen(1).id, status: "active", thresholds: null, last_seen: null, created_at: "2026-11-01T00:00:00Z" }];
+  state.nicknames = [{ node_id: NODE, nickname: "ESP32-NODE-09" }];
+  await open(page, state, "#/monitoring");
+  await page.getByRole("button", { name: "Rename", exact: true }).click();
+  await page.getByRole("button", { name: "Use technical name" }).click();
+  await expect.poll(() => state.writes.at(-1)?.body).toEqual({ nickname: null });
+});
+
 test("monitoring: readings outside the preset stable range are flagged; per-node limits are not used", async ({ page }) => {
   const NODE = "aaaaaaaa-0000-4000-8000-000000000009";
   const at = (minsAgo) => new Date(Date.now() - minsAgo * 60_000).toISOString();

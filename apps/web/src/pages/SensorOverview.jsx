@@ -427,9 +427,11 @@ function RangeSlider({ hours, onChange }) {
 
 // Your own name for a node. Only you see it; empty goes back to the technical name.
 function RenameNode({ node, onDone }) {
-  const { setNodeNickname, notify } = useStore();
-  const nicknamed = node.name !== node.techName;
-  const [text, setText] = useState(nicknamed ? node.name : "");
+  const { db, setNodeNickname, notify } = useStore();
+  // Whether this person saved a name, even one equal to the technical name.
+  const saved = db.nodeNicknames?.[node.id] || "";
+  const nicknamed = !!saved;
+  const [text, setText] = useState(saved);
   const [busy, setBusy] = useState(false);
   const save = async (value) => {
     setBusy(true);
