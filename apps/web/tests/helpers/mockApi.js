@@ -80,6 +80,28 @@ export function mockApi(page, state) {
       state.nicknames = (state.nicknames || []).filter((r) => r.node_id !== id).concat(nickname ? [{ node_id: id, nickname }] : []);
       return json({ node_id: id, nickname });
     }
+    // Registering and editing nodes, and alert routing (admin, CTIP-48).
+    if (path === "/sensor-nodes" && method === "POST") {
+      const made = { id: "aaaaaaaa-0000-4000-8000-0000000000ff", status: "active", thresholds: null, last_seen: null, created_at: iso(0), specimen_id: null, ...body };
+      state.sensorNodes = [...(state.sensorNodes || []), made];
+      return json(made, 201);
+    }
+    if (/^\/sensor-nodes\/[^/]+$/.test(path) && method === "PATCH") {
+      const id = path.split("/")[2];
+      const node = (state.sensorNodes || []).find((n) => n.id === id);
+      if (!node) return json({ code: "NOT_FOUND", message: "Sensor node not found" }, 404);
+      Object.assign(node, body);
+      return json(node);
+    }
+    if (path === "/alert-routes" && method === "GET") return json(state.alertRoutes || []);
+    if (/^\/alert-routes\/[^/]+$/.test(path)) {
+      const userId = path.split("/")[2];
+      state.alertRoutes = (state.alertRoutes || []).filter((r) => r.user_id !== userId);
+      if (method === "DELETE") return route.fulfill({ status: 204 });
+      const saved = { user_id: userId, ...body, updated_at: iso(0) };
+      state.alertRoutes.push(saved);
+      return json(saved);
+    }
     if (/^\/sensor-nodes\/[^/]+\/images$/.test(path)) {
       const id = path.split("/")[2];
       const rows = (state.sensorImages || []).filter((r) => r.node_id === id);
