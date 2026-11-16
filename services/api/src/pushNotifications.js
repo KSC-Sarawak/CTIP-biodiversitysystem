@@ -1,7 +1,7 @@
 // services/api/src/pushNotifications.js
 // Dispatches remote push notifications via the Expo Push API (https://exp.host/--/api/v2/push/send)
 // Sends notifications to target user IDs in the background without blocking request responses.
-import { supabaseAs, supabaseFresh } from './supabase.js';
+import { supabaseService } from './supabase.js';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 
@@ -22,7 +22,7 @@ export function isExpoPushToken(token) {
  * Dispatch remote push notifications to one or more user IDs.
  *
  * @param {Object} options
- * @param {Object} [options.db] - Authenticated supabase client (supabaseAs(req.user))
+ * @param {Object} [options.db] - Not used any more: tokens are read with the secret key
  * @param {string|string[]} options.userIds - Recipient user UUID(s)
  * @param {string} options.title - Notification title (no emojis)
  * @param {string} options.body - Notification message body
@@ -30,15 +30,17 @@ export function isExpoPushToken(token) {
  * @param {string} [options.channelId] - Android notification channel (default 'discussions')
  * @param {string} [options.sound] - Notification sound (default 'default')
  */
-export async function sendPushToUsers({ db: clientDb, userIds, title, body, data = {}, channelId = 'discussions', sound = 'default' }) {
+export async function sendPushToUsers({ userIds, title, body, data = {}, channelId = 'discussions', sound = 'default' }) {
   if (!userIds) return;
   const targetIds = Array.isArray(userIds) ? [...new Set(userIds.filter(Boolean))] : [userIds];
   if (!targetIds.length) return;
 
   try {
-    // Query tokens using SECURITY DEFINER RPC. Uses authenticated caller's client if available,
-    // or falls back to supabaseFresh.
-    const db = clientDb || supabaseFresh();
+    // Other people's push tokens are read only with the server's secret key:
+    // a staff token cannot read them (anyone holding a token could send that
+    // phone fake notifications). Without the secret key (local runs) no push is sent.
+    const db = supabaseService();
+    if (!db) return;
     const rpcRes = await db.rpc('get_user_push_tokens', { p_user_ids: targetIds });
 
     const rows = rpcRes.data;
