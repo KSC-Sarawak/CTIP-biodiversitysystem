@@ -228,7 +228,7 @@ more**, **Show all** and **Show less**.
 `apps/web/src/pages/Tags.jsx`. The tag ID cell now shows a small QR preview with the ID.
 Clicking it opens the big, scannable code. The separate **QR** button is removed.
 
-## 9. Reset emails open the right site *(uncommitted)*
+## 9. Reset emails open the right site
 
 **Bug:** a colleague clicked the link in a password-reset email and got "localhost refused to
 connect". The email sent people to `localhost`, so it only worked on a computer running the
@@ -257,7 +257,7 @@ instead, so the list in [Before this goes live](#before-this-goes-live) is requi
 Opening the site from another device by the computer's network address
 (`http://192.168.x.x:5173`) is not covered: those links fall back to the default.
 
-## 10. "Forgot password" works again with two-step sign-in *(uncommitted)*
+## 10. "Forgot password" works again with two-step sign-in
 
 **Bug:** after opening a reset link and typing a new password, **Save new password** answered
 "Enter your email". Against the API before this fix it answered "Sign in again and enter
@@ -408,10 +408,12 @@ link, so the emailed link and Supabase's Redirect URLs do not change:
 | **New** `tests/account-page.spec.js` | Greeting, profile strength, password meter and match; QR preview opens the popup |
 | **New** `tests/long-lists.spec.js` | Species View more and reset on search; tags 10 at a time with preview; audit badges, summary and Expand; Dashboard 10 rows |
 | `tests/helpers/mockApi.js` | Mocks the nickname route, returns `sensor_node_nicknames`, `sensor_stable_ranges`, tags, audit logs and an optional staff species list |
-
 | API `session.test.js` (items 9–10) | New: the reset link opens Cloudflare, a preview, `localhost` or `127.0.0.1` as asked; look-alike sites and a missing `Origin` get the fallback |
 | API `mfa-recovery.test.js` (items 9–10) | New: lost-phone link opens the site asked from; a fresh email-link session (`otp` and `recovery`) may set the password and nothing else; an old one or a password-only one may not; `MFA_CODE_NEEDED` when Supabase wants the code |
 | **New** `apps/web/tests/password-reset.spec.js` | Reset page without an app (saved, back to sign in, never "Enter your email") and with an app (asks for the code, verifies, saves with the `aal2` session) |
+| API `mfa-recovery.test.js` (item 11) | New: email alone cannot remove the app; a link opened before the password step is refused; one password step allows one reset; a reset-link session cannot start Lost your phone? |
+| Shared `session.test.js` (item 11) | New: a retry after a refused password does not send the 6-digit code again |
+| Web `monitoring-page.spec.js` (item 11) | New: the slider gives way to the date fields; a personal name equal to the technical name can be cleared |
 
 Results on 16 Nov, after items 9–10:
 
@@ -425,7 +427,18 @@ Results on 16 Nov, after items 9–10:
 
 The other Playwright files were not re-run after items 9–10.
 
-Not tested yet: the stable-range trigger against real readings on Supabase,
+Results on 16 Nov, after item 11:
+
+| Suite | Result |
+|---|---|
+| API (`cd services/api && npm test`) | 278 pass |
+| Shared (`apps/shared`) | 223 pass |
+| Mobile (`npm --prefix apps/mobile test`) | 100 pass |
+| Web lint (`npm run web:lint`) | Pass |
+| Playwright: `monitoring-page`, `password-reset` | 28 pass |
+
+Not tested yet: the stable-range trigger against real readings on Supabase (the migration is
+applied to live, but no reading has gone through it yet),
 `npm run sensor-ranges:push` against the live project, and a real reset email from the
 Cloudflare site (needs the Render redeploy and the Redirect URLs first).
 
@@ -459,3 +472,11 @@ Cloudflare site (needs the Render redeploy and the Redirect URLs first).
 | `apps/shared/StoreProvider.js` | `resetPassword` (item 10) |
 | `apps/web/src/pages/Login.jsx` | Reset form: errors, 6-digit code, new-link button (item 10) |
 | `services/api/test/session.test.js`, `mfa-recovery.test.js`, `apps/web/tests/password-reset.spec.js` | Tests for items 9–10 |
+| `supabase/migrations/20261116091336_mfa_recovery_proofs.sql` | **New.** Table for the lost-phone password proof (item 11) |
+| `services/api/src/auth/emailLink.js` | **New.** When a session signed in with an email link or a password (item 11) |
+| `services/api/src/mfa.js`, `auth/middleware.js` | Lost phone needs the password proof; both use the shared helper (item 11) |
+| `packages/api-contract/openapi.yaml` | Lost-phone steps: `PASSWORD_REQUIRED` and `RECOVERY_NOT_STARTED` (item 11) |
+| `apps/shared/api.js` | A retry after a refused password does not send the code again (item 11) |
+| `apps/mobile/pages/Monitoring.js` | Fixed stable range, no Edit limits form, alert cards show the range (item 11) |
+| `apps/web/src/pages/SensorOverview.jsx` | Use technical name offered whenever a personal name is saved (item 11) |
+| `services/api/test/mfa-recovery.test.js`, `apps/shared/test/session.test.js`, `apps/web/tests/monitoring-page.spec.js` | Tests for item 11 |
