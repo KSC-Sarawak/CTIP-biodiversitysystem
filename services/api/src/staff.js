@@ -107,7 +107,12 @@ const Me = z.strictObject({
   full_name: z.string().trim().min(1).max(200).optional(),
   username: z.string().trim().toLowerCase().regex(/^[a-z0-9._]{3,20}$/, 'use 3-20 letters, numbers, dots or underscores').optional(),
   phone: z.string().trim().regex(/^(\+?[0-9 -]{7,15})?$/, 'not a valid phone number').optional(),
-  avatar_url: z.string().max(3_000_000).nullable().optional(),
+  // A small picture stored in the profile, never a link: a link would let anyone
+  // who opens the Users list load a picture from a server the person chose.
+  // 90 KB keeps it under the API's 100 KB request limit (the website makes 60 KB).
+  avatar_url: z.string().max(90_000, 'Choose a smaller photo')
+    .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, 'must be a JPEG, PNG or WebP photo')
+    .nullable().optional(),
 }).refine((b) => Object.keys(b).length > 0, 'Send at least one field to change');
 
 const ProfileUpdate = z.strictObject({
