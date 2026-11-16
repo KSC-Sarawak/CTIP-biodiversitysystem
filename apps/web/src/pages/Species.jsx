@@ -6,6 +6,7 @@ import PageHead from "../components/PageHead.jsx";
 import PhotoEditor from "../components/PhotoEditor.jsx";
 import SpeciesForm from "../components/SpeciesForm.jsx";
 import { Chip, Empty, Modal } from "../components/Bits.jsx";
+import { useViewMore } from "../useViewMore.jsx";
 import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
 import { fuzzyMatch } from "../../../shared/fuzzy.js";
@@ -40,24 +41,27 @@ export default function Species() {
     .filter((s) => fuzzyMatch(`${s.scientific_name} ${s.common_name} ${s.family}`, q));
 
   const sortedList = [...list].sort((a, b) => {
-    if (sort === "scientific") return (a.scientific_name || "").localeCompare(b.scientific_name || "");
-    if (sort === "family") return (a.family || "").localeCompare(b.family || "");
+    if (sort === "scientific") return (a.scientific_name || "").localeCompare(b.scientific_name || "", undefined, { numeric: true, sensitivity: "base" });
+    if (sort === "family") return (a.family || "").localeCompare(b.family || "", undefined, { numeric: true, sensitivity: "base" });
     if (sort === "endangered") {
       const ea = isThreatened(a.conservation_status) ? 1 : 0;
       const eb = isThreatened(b.conservation_status) ? 1 : 0;
-      return eb - ea || (a.common_name || a.scientific_name || "").localeCompare(b.common_name || b.scientific_name || "");
+      return eb - ea || (a.common_name || a.scientific_name || "").localeCompare(b.common_name || b.scientific_name || "", undefined, { numeric: true, sensitivity: "base" });
     }
     if (sort === "plants") {
       const ca = db.plants.filter((p) => p.species_id === a.id).length;
       const cb = db.plants.filter((p) => p.species_id === b.id).length;
-      return cb - ca || (a.common_name || a.scientific_name || "").localeCompare(b.common_name || b.scientific_name || "");
+      return cb - ca || (a.common_name || a.scientific_name || "").localeCompare(b.common_name || b.scientific_name || "", undefined, { numeric: true, sensitivity: "base" });
     }
     const na = a.common_name || a.scientific_name || "";
     const nb = b.common_name || b.scientific_name || "";
-    return na.localeCompare(nb);
+    return na.localeCompare(nb, undefined, { numeric: true, sensitivity: "base" });
   });
 
   const deleted = db.species.filter((s) => s.is_deleted);
+  // Ten at a time, so a long catalogue stays readable; a new search or sort starts over.
+  const [shownSpecies, moreSpecies] = useViewMore(sortedList, { step: 10, noun: "species", reset: `${q}|${sort}` });
+  const plantsOf = (id) => db.plants.filter((p) => p.species_id === id).length;
 
   const remove = () => {
     deleteSpecies(removing.id); // shows its own message
@@ -117,15 +121,17 @@ export default function Species() {
       {sortedList.length === 0 ? (
         <Empty>No species match your search.</Empty>
       ) : (
-        <div className="tablewrap">
+        <>
+        <div className="tablewrap roomy">
           <table>
-            <thead><tr><th>Species</th><th>Family</th><th>Conservation</th><th>Public</th><th><span className="sr">Actions</span></th></tr></thead>
+            <thead><tr><th>Species</th><th>Family</th><th>Conservation</th><th className="num">Plants</th><th>Public</th><th><span className="sr">Actions</span></th></tr></thead>
             <tbody>
-              {sortedList.map((s) => (
+              {shownSpecies.map((s) => (
                 <tr key={s.id}>
-                  <td><b>{s.common_name || s.scientific_name}</b><i className="sci small block">{s.scientific_name}</i></td>
-                  <td>{s.family}</td>
+                  <td><b className="rowtitle">{s.common_name || s.scientific_name}</b><i className="sci small block">{s.scientific_name}</i></td>
+                  <td>{s.family || <span className="mute">-</span>}</td>
                   <td><Chip value={s.conservation_status} /></td>
+                  <td className="num">{plantsOf(s.id)}</td>
                   <td>
                     <button className={"switch" + (s.is_published ? " on" : "")} role="switch" aria-checked={s.is_published} onClick={() => flipPublish(s)} aria-label={`Publish ${s.scientific_name}`}><i /></button>
                   </td>
@@ -139,6 +145,8 @@ export default function Species() {
             </tbody>
           </table>
         </div>
+        {moreSpecies}
+        </>
       )}
 
       {deleted.length > 0 && (

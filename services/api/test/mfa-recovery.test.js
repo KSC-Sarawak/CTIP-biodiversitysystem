@@ -18,9 +18,17 @@ const people = {
   password: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'password', timestamp: now() }] },
   link: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'otp', timestamp: now() }] },
   oldlink: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'otp', timestamp: now() - EMAIL_LINK_MAX_AGE_S - 60 }] },
+  oldresetlink: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'recovery', timestamp: now() - 16 * 60 }] },
   resetlink: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'recovery', timestamp: now() }] },
 };
+// Sessions whose sign-in time is "now" when the request is made, so a test can
+// open the email link after the password step (the order step 2 checks).
+const live = {
+  freshlink: () => ({ sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'otp', timestamp: now() }] }),
+  earlylink: () => ({ sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'otp', timestamp: now() - 120 }] }),
+};
 const verify = async (token) => {
+  if (live[token]) return live[token]();
   if (!people[token]) throw new Error('bad token');
   return people[token];
 };
@@ -29,6 +37,8 @@ const app = createApp({ verify, mfaRoles: MFA_ROLES });
 let calls;
 let factors;
 let otpError;
+let putNeedsAal2 = false;
+let proofs; // mfa_recovery_proofs rows: user_id -> proven_at (only the API's secret key reaches it)
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 globalThis.fetch = async (input, init = {}) => {
@@ -38,7 +48,24 @@ globalThis.fetch = async (input, init = {}) => {
   calls.push({ method, path: url.pathname, body, search: url.search });
   const p = url.pathname.replace('/auth/v1', '');
   if (p === '/user' && method === 'GET') return json(200, { id, factors });
+  if (p === '/user' && method === 'PUT') {
+    // Supabase: an account with a verified app needs aal2 to change its password.
+    if (putNeedsAal2) return json(401, { code: 401, error_code: 'insufficient_aal', msg: 'AAL2 required to update password' });
+    return json(200, { id });
+  }
   if (p === '/otp') return otpError ? json(429, otpError) : json(200, {});
+  if (url.pathname === '/rest/v1/mfa_recovery_proofs') {
+    if (method === 'POST') {
+      for (const row of [].concat(body)) proofs.set(row.user_id, row.proven_at);
+      return json(201, [].concat(body));
+    }
+    if (method === 'DELETE') {
+      const user = url.searchParams.get('user_id')?.replace('eq.', '');
+      const taken = proofs.has(user) ? [{ user_id: user, proven_at: proofs.get(user) }] : [];
+      proofs.delete(user);
+      return json(200, taken);
+    }
+  }
   if (p === `/admin/users/${id}/factors` && method === 'GET') return json(200, factors);
   const del = new RegExp(`^/admin/users/${id}/factors/([^/]+)$`).exec(p);
   if (del && method === 'DELETE') {
@@ -52,6 +79,8 @@ beforeEach(() => {
   calls = [];
   factors = [{ id: crypto.randomUUID(), factor_type: 'totp', status: 'verified' }];
   otpError = null;
+  putNeedsAal2 = false;
+  proofs = new Map();
   resetAttemptLimits();
   resetEmailLimit();
 });
@@ -93,8 +122,12 @@ test('recovery: Supabase email limit is passed on', async () => {
   assert.equal(res.body.code, 'EMAIL_RATE_LIMIT');
 });
 
+// Step 1 (password) then step 2 (the email link opened afterwards).
+const startRecovery = () => request(app).post('/v1/auth/mfa/recovery').set('Authorization', 'Bearer password');
+
 test('reset: the email-link session removes the old app', async () => {
-  const res = await request(app).post('/v1/auth/mfa/reset').set('Authorization', 'Bearer link');
+  assert.equal((await startRecovery()).status, 202);
+  const res = await request(app).post('/v1/auth/mfa/reset').set('Authorization', 'Bearer freshlink');
   assert.equal(res.status, 204);
   assert.equal(factors.length, 0);
   assert.ok(calls.some((c) => c.method === 'DELETE' && c.path.startsWith(`/auth/v1/admin/users/${id}/factors/`)));
@@ -127,4 +160,73 @@ test('fromEmailLink accepts otp and magiclink only, within 15 minutes', () => {
   assert.equal(fromEmailLink([{ method: 'otp', timestamp: t / 1000 - 60 }], t), true);
   assert.equal(fromEmailLink([{ method: 'password', timestamp: t / 1000 }], t), false);
   assert.equal(fromEmailLink(undefined, t), false);
+});
+
+test('recovery: the sign-in link opens the site it was asked from', async () => {
+  const res = await request(app).post('/v1/auth/mfa/recovery').set('Authorization', 'Bearer password').set('Origin', 'http://localhost:5173');
+  assert.equal(res.status, 202);
+  const otp = calls.find((c) => c.path.endsWith('/otp'));
+  assert.equal(new URLSearchParams(otp.search).get('redirect_to'), 'http://localhost:5173/');
+});
+
+// The password-reset link's session is only aal1. It may set the new password
+// (and nothing else), and only while the link is fresh.
+test('reset link: a fresh one may set the new password; nothing else, and not an old one', async () => {
+  const ok = await request(app).post('/v1/me/password').set('Authorization', 'Bearer resetlink').send({ new_password: 'brand-new-pass' });
+  assert.equal(ok.status, 204);
+  // What the real Supabase gives a reset link: amr "otp".
+  const real = await request(app).post('/v1/me/password').set('Authorization', 'Bearer link').send({ new_password: 'brand-new-pass' });
+  assert.equal(real.status, 204);
+  assert.ok(calls.some((c) => c.path === '/auth/v1/user' && c.method === 'PUT'));
+  const other = await request(app).get('/v1/me').set('Authorization', 'Bearer resetlink');
+  assert.equal(other.status, 403);
+  assert.equal(other.body.code, 'MFA_REQUIRED');
+  const old = await request(app).post('/v1/me/password').set('Authorization', 'Bearer oldresetlink').send({ new_password: 'brand-new-pass' });
+  assert.equal(old.body.code, 'MFA_REQUIRED');
+  const notLink = await request(app).post('/v1/me/password').set('Authorization', 'Bearer password').send({ new_password: 'brand-new-pass' });
+  assert.equal(notLink.body.code, 'MFA_REQUIRED', 'a password-only session still needs the code');
+});
+
+test('reset link with an authenticator app: Supabase wants the code, so the answer says so', async () => {
+  putNeedsAal2 = true;
+  const res = await request(app).post('/v1/me/password').set('Authorization', 'Bearer resetlink').send({ new_password: 'brand-new-pass' });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'MFA_CODE_NEEDED');
+});
+
+// Account takeover with email access alone (found in PR #83): a password-reset
+// link is also an "otp" session, so step 2 must check that step 1 (the password)
+// really happened, for this person, before the link was opened, and only once.
+test('reset: refused when the password step was not done (email alone is not enough)', async () => {
+  const res = await request(app).post('/v1/auth/mfa/reset').set('Authorization', 'Bearer freshlink');
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'RECOVERY_NOT_STARTED');
+  assert.equal(factors.length, 1);
+});
+
+test('reset: refused with an email link opened before the password step', async () => {
+  assert.equal((await startRecovery()).status, 202);
+  const res = await request(app).post('/v1/auth/mfa/reset').set('Authorization', 'Bearer earlylink');
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'RECOVERY_NOT_STARTED');
+  assert.equal(factors.length, 1);
+});
+
+test('reset: one password step allows one reset', async () => {
+  assert.equal((await startRecovery()).status, 202);
+  assert.equal((await request(app).post('/v1/auth/mfa/reset').set('Authorization', 'Bearer freshlink')).status, 204);
+  factors = [{ id: crypto.randomUUID(), factor_type: 'totp', status: 'verified' }];
+  const again = await request(app).post('/v1/auth/mfa/reset').set('Authorization', 'Bearer freshlink');
+  assert.equal(again.status, 403);
+  assert.equal(factors.length, 1);
+});
+
+test('recovery: refused with an email-link session, so a reset link cannot do the password step', async () => {
+  for (const token of ['freshlink', 'resetlink']) {
+    const res = await request(app).post('/v1/auth/mfa/recovery').set('Authorization', `Bearer ${token}`);
+    assert.equal(res.status, 403, token);
+    assert.equal(res.body.code, 'PASSWORD_REQUIRED', token);
+  }
+  assert.ok(!calls.some((c) => c.path.endsWith('/otp')), 'no email sent');
+  assert.equal(proofs.size, 0);
 });

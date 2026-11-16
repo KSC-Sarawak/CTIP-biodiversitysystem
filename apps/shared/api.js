@@ -407,6 +407,43 @@ export async function signOutApi() {
   if (token) await apiFetch("/auth/sign-out", { method: "POST", token, timeout: 4000 });
 }
 
+/**
+ * The password-reset link's session. Like the lost-phone link it is only aal1
+ * (no 6-digit code yet), so it is kept here rather than stored: stored, the
+ * start-up load would be refused (MFA_REQUIRED) and sign it out before the new
+ * password could be saved.
+ */
+let passwordResetSession = null;
+export const hasPasswordResetSession = () => !!passwordResetSession;
+
+/**
+ * Saves the new password with the reset link's session. Someone with an
+ * authenticator app must give its 6-digit `code` too (Supabase asks for aal2):
+ * without one the answer is { ok: false, code: "MFA_CODE_NEEDED" } and the page
+ * asks for it. Afterwards the link's session is ended, so the person signs in
+ * normally with the new password and the code.
+ */
+export async function resetPasswordApi(newPassword, code) {
+  const session = passwordResetSession;
+  if (!session) return { ok: false, status: 0, code: "LINK_GONE", message: "Open the link in the reset email again, or ask for a new one." };
+  let token = session.access_token;
+  // Once the code has been checked the kept session is aal2: a retry (say the new
+  // password was refused as too weak) uses it and does not send the code again,
+  // which Supabase would refuse as already used.
+  if (code && !session.verified) {
+    const verified = await apiFetch("/auth/mfa/verify", { method: "POST", token, body: { code } });
+    if (!verified.ok) return verified;
+    token = verified.data.access_token;
+    passwordResetSession = { ...session, ...verified.data, verified: true };
+  }
+  const res = await apiFetch("/me/password", { method: "POST", token, body: { new_password: newPassword } });
+  if (res.ok) {
+    passwordResetSession = null;
+    await apiFetch("/auth/sign-out", { method: "POST", token, timeout: 4000 });
+  }
+  return res;
+}
+
 /** POST /v1/auth/password-reset: emails a link that opens the website signed in. */
 export const passwordResetApi = (email) => apiFetch("/auth/password-reset", { method: "POST", token: null, body: { email } });
 
@@ -436,6 +473,7 @@ export function takeSessionFromUrl() {
   };
   const type = params.get("type") || "signin";
   if (type === "magiclink") mfaResetSession = session; // lost-phone link: see mfaResetApi()
+  else if (type === "recovery") passwordResetSession = session; // reset link: see resetPasswordApi()
   else setSession(session);
   return type;
 }
@@ -720,6 +758,8 @@ export const getNodeTelemetryApi = (nodeId, range = 24, { token } = {}) => {
 // Newest webcam photos for a node, each with a short-lived view_url (CTIP-82).
 export const getNodeImagesApi = (nodeId, limit = 12, { token } = {}) => send("GET", `/sensor-nodes/${enc(nodeId)}/images?limit=${enc(limit)}`, undefined, token);
 export const setThresholdsApi = (nodeId, thresholds, { token } = {}) => send("PATCH", `/sensor-nodes/${enc(nodeId)}`, { thresholds }, token);
+// Your own name for a node (null clears it, so the technical name shows again).
+export const setNodeNicknameApi = (nodeId, nickname, { token } = {}) => send("PUT", `/sensor-nodes/${enc(nodeId)}/nickname`, { nickname }, token);
 
 // Notifications (the signed-in person's own)
 export const fetchNotificationsApi = ({ token } = {}) => apiFetch("/notifications", { token });

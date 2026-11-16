@@ -20,6 +20,7 @@ import {
   mfaResetApi,
   signOutApi,
   passwordResetApi,
+  resetPasswordApi,
   changePasswordApi,
   tokenClaims,
   fetchPublicSpecies,
@@ -69,6 +70,7 @@ import {
   resolveAlertApi,
   addAlertNoteApi,
   setThresholdsApi,
+  setNodeNicknameApi,
   getNodeTelemetryApi,
   getNodeImagesApi,
   markReadApi,
@@ -450,6 +452,12 @@ function collectionMatches(a = [], b = []) {
       const altEqual = collectionMatches(prevDb.alerts, w.alerts);
       const notesEqual = collectionMatches(prevDb.alertNotes, alertNotes);
       const nodesEqual = collectionMatches(prevDb.nodes, nodes);
+      // This person's own names for the nodes (an API not yet redeployed sends none).
+      const nodeNicknames = Object.fromEntries((w.sensor_node_nicknames || []).map((r) => [r.node_id, r.nickname]));
+      const nicksEqual = JSON.stringify(prevDb.nodeNicknames || {}) === JSON.stringify(nodeNicknames);
+      // The fixed alert range the database uses (apps/shared/config/sensorStableRanges.json, pushed there).
+      const stableRanges = Object.fromEntries((w.sensor_stable_ranges || []).map((r) => [r.field, { min: r.min_value, max: r.max_value }]));
+      const rangesEqual = JSON.stringify(prevDb.stableRanges || {}) === JSON.stringify(stableRanges);
       const telemetryEqual = JSON.stringify(prevDb.telemetry || {}) === JSON.stringify(telemetry);
       const notifsEqual = collectionMatches(prevDb.notifications, w.notifications);
       const auditEqual = collectionMatches(prevDb.audit, audit);
@@ -467,7 +475,7 @@ function collectionMatches(a = [], b = []) {
       const dirEqual = collectionMatches(prevDb.directory, directory);
 
       const hasChanges = !spEqual || !mediaEqual || !plEqual || !obsEqual || !tagsEqual ||
-        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !telemetryEqual ||
+        !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !nicksEqual || !rangesEqual || !telemetryEqual ||
         !notifsEqual || !auditEqual || !profEqual || !zonesEqual ||
         !discEqual || !audEqual || !postsEqual || !dirEqual;
 
@@ -488,6 +496,8 @@ function collectionMatches(a = [], b = []) {
         alerts: altEqual ? prevDb.alerts : w.alerts,
         alertNotes: notesEqual ? prevDb.alertNotes : alertNotes,
         nodes: nodesEqual ? prevDb.nodes : nodes,
+        nodeNicknames: nicksEqual ? prevDb.nodeNicknames : nodeNicknames,
+        stableRanges: rangesEqual ? prevDb.stableRanges : stableRanges,
         telemetry: telemetryEqual ? prevDb.telemetry : telemetry,
         notifications: notifsEqual ? prevDb.notifications : w.notifications,
         audit: auditEqual ? prevDb.audit : audit,
@@ -871,8 +881,21 @@ function collectionMatches(a = [], b = []) {
 
   const signIn = (id) => setUserId(id);
 
-  // Signed in through a password-reset link, with a new password: sets it.
-  // Otherwise: emails a reset link to that address.
+  // Opened a password-reset link: saves the new password with that link's
+  // session (plus the 6-digit code for someone with an authenticator app).
+  // { ok } or { ok: false, message, needCode }; afterwards they sign in again.
+  const resetPassword = async (next, code) => {
+    if (!next || next.length < 8) return { ok: false, message: "Use at least 8 characters for the new password" };
+    const clean = String(code || "").replace(/\s+/g, "");
+    if (code != null && !/^\d{6}$/.test(clean)) return { ok: false, needCode: true, message: "Enter the 6-digit code from your authenticator app" };
+    const res = noteOffline(await resetPasswordApi(next, clean || undefined));
+    if (res.ok) return { ok: true };
+    if (res.code === "MFA_CODE_NEEDED") return { ok: false, needCode: true, message: res.message };
+    return { ok: false, message: res.offline ? API_DOWN : res.message };
+  };
+
+  // With a new password and a stored session (the first sign-in after a
+  // temporary password): sets it. Otherwise: emails a reset link to that address.
   const changePassword = async (email, next) => {
     if (next && getAuthToken()) {
       if (next.length < 8) return { ok: false, message: "Use at least 8 characters for the new password" };
@@ -1650,6 +1673,22 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
+  // Your own name for a node; an empty name goes back to its technical name.
+  const setNodeNickname = async (nodeId, nickname) => {
+    const name = (nickname || "").trim() || null;
+    const res = await callApi(setNodeNicknameApi, nodeId, name);
+    if (!res.ok) {
+      notify(`Could not rename the node: ${res.message}`);
+      return false;
+    }
+    setDb((d) => {
+      const next = { ...(d.nodeNicknames || {}) };
+      if (name) next[nodeId] = name; else delete next[nodeId];
+      return { ...d, nodeNicknames: next };
+    });
+    return true;
+  };
+
   // One node's readings over a longer range than the workspace's last 24 hours.
   // Returns { ok, rows } (oldest first) and never changes db.
   // `range`: hours back from now, or { from, to } for a chosen date range.
@@ -1718,7 +1757,7 @@ function collectionMatches(a = [], b = []) {
     timings, // time per record on the phone (CTIP-146); null on the website
     activeSurvey, startSurvey, endSurvey, // quick survey mode (CTIP-147)
     db, me, role, toast, notify,
-    logout, login, signIn, changePassword, updateProfile, changeMyPassword,
+    logout, login, signIn, changePassword, resetPassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
     setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
@@ -1727,7 +1766,7 @@ function collectionMatches(a = [], b = []) {
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
-    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, loadNodeTelemetry, loadNodeImages,
+    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, setNodeNickname, loadNodeTelemetry, loadNodeImages,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,

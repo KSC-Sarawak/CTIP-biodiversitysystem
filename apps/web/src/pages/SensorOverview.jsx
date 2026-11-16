@@ -1,5 +1,14 @@
 // apps/web/src/pages/SensorOverview.jsx
-import { useEffect, useState } from "react";
+// IoT dashboard for officers and admins (the API refuses everyone else). Laid out so the
+// most urgent thing is read first, then the detail:
+//   1. the header: one sentence on what needs doing, and four numbers;
+//   2. Sensor nodes: the map (CTIP-39), then every node's latest readings in one row each (CTIP-79);
+//   3. the chosen node: charts over a chosen time range with out-of-range parts in red
+//      (CTIP-81), then its webcam photos (CTIP-82), then the time range controls;
+//   4. Alerts (CTIP-78): open ones first, then acknowledged and resolved, with the alert
+//      rules underneath as a reference.
+// Readings stay current through the workspace poll, with no page refresh.
+import { useEffect, useMemo, useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
 import PageHead from "../components/PageHead.jsx";
@@ -10,6 +19,7 @@ import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
 import { nameOf, plantView, shownCoords } from "../../../shared/selectors.js";
 import { isExactProtected } from "../../../shared/mapConfig.js";
+import { SENSOR_FIELDS, fixedRanges, outOfRange, rangeState, rangeText } from "../../../shared/sensorLimits.js";
 import { fmtDateTime, label } from "../../../shared/utils.js";
 
 const latest = (rows) => rows?.[rows.length - 1];
@@ -25,19 +35,21 @@ const RANGES = [
   { key: 24 * 30, label: "30 days" },
   { key: "custom", label: "Choose dates" },
 ];
+// The slider's stops, in hours: 1 hour up to the API's 30 days.
+const SLIDER_HOURS = [1, 2, 3, 6, 12, 24, 48, 72, 120, 168, 336, 504, 720];
+const hoursLabel = (h) => (h <= 24 ? `${h} hour${h === 1 ? "" : "s"}` : `${h / 24} days`);
 const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-// Is a reading outside the node's alert limits?
-const tooHot = (r, t) => has(r?.temperature) && has(t?.temp_max) && Number(r.temperature) > Number(t.temp_max);
-const tooDry = (r, t) => has(r?.soil_moisture) && has(t?.moisture_min) && Number(r.soil_moisture) < Number(t.moisture_min);
-
-function stats(rows, key) {
-  const vals = rows.map((r) => r[key]).filter(has).map(Number);
-  if (!vals.length) return null;
-  return { min: Math.min(...vals), max: Math.max(...vals), avg: vals.reduce((a, b) => a + b, 0) / vals.length };
+// "just now", "12 min ago", "3 h ago", else the date.
+function ago(iso, now = Date.now()) {
+  const m = Math.round((now - Date.parse(iso)) / 60e3);
+  if (!Number.isFinite(m)) return "";
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  if (m < 24 * 60) return `${Math.round(m / 60)} h ago`;
+  return fmtDateTime(iso);
 }
 
-// The chosen custom dates as a time range (whole local days), or { error }.
+// The custom dates as a time range (whole local days), or { error }.
 function customRange({ from, to }) {
   if (!from || !to) return { error: "Pick both dates." };
   const start = new Date(`${from}T00:00:00`);
@@ -48,19 +60,14 @@ function customRange({ from, to }) {
   return { start: start.getTime(), end: end.getTime() };
 }
 
-// IoT dashboard for officers and admins (the API refuses everyone else):
-// - CTIP-39 map of every node with its state, and the open alerts with their handling (CTIP-78)
-// - CTIP-79 each node's latest readings, kept current by the workspace poll (no page refresh)
-// - CTIP-81 charts of one node's readings over a chosen time range
-// - CTIP-82 the latest webcam photos for that node
 export default function SensorOverview() {
-  const { db, role, setThresholds, notify, loadNodeTelemetry } = useStore();
+  const { db, role, loadNodeTelemetry } = useStore();
+  const [renaming, setRenaming] = useState(null); // id of the node whose name is being edited
   const [nodeId, setNodeId] = useState(db.nodes?.[0]?.id || null);
-  const [tab, setTab] = useState("acknowledged");
+  const [tab, setTab] = useState("open"); // which alerts the Alerts section lists
   const [range, setRange] = useState(24);
   const [dates, setDates] = useState(() => ({ from: ymd(new Date(Date.now() - 6 * DAY)), to: ymd(new Date()) }));
   const [longRange, setLongRange] = useState({ key: null, rows: [], error: null });
-  const [ask, confirmDialog] = useConfirm();
   // "Now" for the rolling ranges, moved on every minute so the charts keep sliding.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -68,15 +75,22 @@ export default function SensorOverview() {
     return () => clearInterval(timer);
   }, []);
 
-  const nodes = db.nodes || [];
+  // Each person can give a node their own name; the technical name stays as IoT management set it.
+  const nicknames = db.nodeNicknames;
+  const stableRanges = db.stableRanges;
+  // The preset stable range, the same for every node (apps/shared/config/sensorStableRanges.json).
+  const preset = useMemo(() => fixedRanges({ stableRanges }), [stableRanges]);
+  const off = (r, field) => !!rangeState(r, field, preset);
+  const nodes = useMemo(() => (db.nodes || []).map((n) => ({ ...n, techName: n.name, name: nicknames?.[n.id] || n.name })), [db.nodes, nicknames]);
   const telemetry = db.telemetry || {};
   const node = nodes.find((n) => n.id === nodeId) || nodes[0] || null;
 
-  // Which time span the charts cover. The last 24 hours come live with the workspace
+  // Which time span the charts cover. Up to the last 24 hours comes live with the workspace
   // load; longer or chosen ranges are asked for per node.
   const custom = range === "custom" ? customRange(dates) : null;
   const span = custom && !custom.error ? custom : { start: now - (custom ? 24 : range) * HOUR, end: now };
-  const rangeKey = !node || range === 24 || custom?.error ? null : `${node.id}:${range}:${custom ? `${custom.start}-${custom.end}` : ""}`;
+  const liveWindow = !custom && range <= 24;
+  const rangeKey = !node || liveWindow || custom?.error ? null : `${node.id}:${range}:${custom ? `${custom.start}-${custom.end}` : ""}`;
   useEffect(() => {
     if (!rangeKey || !loadNodeTelemetry) return;
     let stale = false; // loading shows while longRange.key is not this range's key
@@ -88,7 +102,9 @@ export default function SensorOverview() {
     return () => { stale = true; };
   }, [rangeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const data = !node || custom?.error ? [] : range === 24 ? telemetry[node.id] || [] : longRange.key === rangeKey ? longRange.rows : [];
+  const data = !node || custom?.error ? []
+    : liveWindow ? (telemetry[node.id] || []).filter((r) => Date.parse(r.ts) >= span.start)
+      : longRange.key === rangeKey ? longRange.rows : [];
   const loading = !!rangeKey && longRange.key !== rangeKey;
   const loadError = rangeKey && longRange.key === rangeKey ? longRange.error : null;
 
@@ -106,227 +122,336 @@ export default function SensorOverview() {
   const open = db.alerts.filter((a) => a.status === "open").sort(byNewest);
   const openByNode = {};
   for (const a of open) openByNode[a.node_id] = (openByNode[a.node_id] || 0) + 1;
-  const history = db.alerts.filter((a) => a.status !== "open" && (tab === "all" || a.status === tab)).sort(byNewest);
+  const listed = db.alerts.filter((a) => tab === "all" || a.status === tab).sort(byNewest);
+  const countOf = (status) => db.alerts.filter((a) => status === "all" || a.status === status).length;
   const online = nodes.filter((n) => n.status === "active").length;
+  const down = nodes.length - online;
   const readings24h = Object.values(telemetry).reduce((sum, rows) => sum + rows.length, 0);
   const newestTs = Object.values(telemetry).map((rows) => latest(rows)?.ts).filter(Boolean).sort().at(-1) || null;
-  const outOfLimits = nodes.filter((n) => { const r = latest(telemetry[n.id]); return tooHot(r, n.thresholds) || tooDry(r, n.thresholds); }).length;
+  const outOfLimits = nodes.filter((n) => outOfRange(latest(telemetry[n.id]), preset)).length;
+  // Nodes with something wrong first, then by name, so the eye lands on them.
+  const rank = (n) => ({ alert: 0, offline: 1, online: 2 })[nodeState(n, openByNode[n.id] || 0)];
+  const sortedNodes = [...nodes].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 
+  const goTo = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   // Open the node and bring its first open alert into view.
+  // Show the open alerts, and bring this node's first one into view (after the tab has drawn).
   const showAlerts = (n) => {
-    const first = open.find((a) => a.node_id === n.id);
-    document.getElementById(first ? `alert-${first.id}` : "attn")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const first = n && open.find((a) => a.node_id === n.id);
+    setTab("open");
+    setTimeout(() => goTo(first ? `alert-${first.id}` : "alerts"), 50);
   };
-
-  const saveLimits = async (e) => {
-    e.preventDefault();
-    if (!node) return;
-    const f = new FormData(e.target);
-    if (!(await ask({ title: "Change alert limits", body: `Change the alert limits for ${node.name} to ${Number(f.get("temp_max"))}°C max and ${Number(f.get("moisture_min"))}% soil moisture min? New alerts will use these limits.`, confirmLabel: "Save limits" }))) return;
-    setThresholds(node.id, { temp_max: Number(f.get("temp_max")), moisture_min: Number(f.get("moisture_min")) });
-    notify("Limits saved");
-  };
+  const pickNode = (id) => { setNodeId(id); if (renaming && renaming !== id) setRenaming(null); };
 
   const live = node ? latest(telemetry[node.id]) : null; // newest reading, always from the live load
-  const temp = stats(data, "temperature");
-  const soil = stats(data, "soil_moisture");
-  const humid = stats(data, "humidity");
   const motionCount = data.filter((r) => r.motion_detected === true).length;
-  const breaches = node ? data.filter((r) => tooHot(r, node.thresholds) || tooDry(r, node.thresholds)).length : 0;
-  const rangeLabel = custom && !custom.error ? `${fmtDateTime(new Date(span.start).toISOString())} to ${fmtDateTime(new Date(span.end).toISOString())}` : `the last ${RANGES.find((r) => r.key === range)?.label}`;
+  const breaches = data.filter((r) => outOfRange(r, preset)).length;
+  const rangeLabel = custom && !custom.error ? `${fmtDateTime(new Date(span.start).toISOString())} to ${fmtDateTime(new Date(span.end).toISOString())}` : `the last ${hoursLabel(range)}`;
+  const nodeStateOf = (n) => nodeState(n, openByNode[n.id] || 0);
 
   return (
-    <Shell seg="monitoring" plain>
-      {confirmDialog}
+    <Shell seg="monitoring">
       <PageHead
         overline="Sensor network"
         title="Monitoring"
         lead={
           open.length ? `${open.length} open ${open.length === 1 ? "alert needs" : "alerts need"} your attention.`
-            : nodes.length - online ? `No open alerts, but ${nodes.length - online} ${nodes.length - online === 1 ? "node is" : "nodes are"} offline or faulty.`
+            : down ? `No open alerts, but ${down} ${down === 1 ? "node is" : "nodes are"} offline or faulty.`
               : nodes.length ? "All quiet. Every node is online and no alerts are open."
                 : "No sensor nodes are set up yet."
         }
-        tone={open.length ? "bad" : nodes.length - online ? "warn" : nodes.length ? "ok" : "info"}
+        tone={open.length ? "bad" : down ? "warn" : nodes.length ? "ok" : "info"}
         stats={[
-          { label: "Open alerts", value: open.length, tone: "bad", onClick: () => document.getElementById("attn")?.scrollIntoView({ behavior: "smooth", block: "start" }) },
+          { label: "Open alerts", value: open.length, tone: "bad", onClick: () => showAlerts(null) },
           { label: `Nodes online of ${nodes.length}`, value: online },
-          { label: "Offline or faulty", value: nodes.length - online, tone: "warn" },
-          { label: "Outside alert limits", value: outOfLimits, tone: "warn" },
-          { label: "Readings, last 24 h", value: readings24h },
+          { label: "Offline or faulty", value: down, tone: "warn" },
+          { label: "Outside stable range", value: outOfLimits, tone: "warn" },
         ]}
       >
-        <p className="mute small"><span className="livedot" aria-hidden="true" /> Live: readings update on their own every few seconds{newestTs ? ` · newest ${fmtDateTime(newestTs)}` : ""}</p>
+        <p className="mute small">
+          <span className="livedot" aria-hidden="true" /> Live: updates every few seconds
+          {newestTs ? ` · newest reading ${ago(newestTs, now)}` : ""} · {readings24h} readings in the last 24 h
+        </p>
       </PageHead>
 
-      <div className="monitor-top gap-section-s">
-        <section className="glass pad" aria-labelledby="nodemap">
-          <h2 id="nodemap">Node map</h2>
-          <p className="mute small">Select a pin to see that node's readings and photos.</p>
-          <NodeMap nodes={nodes} whereOf={whereOf} plantOf={plantOf} openByNode={openByNode} selectedId={node?.id} onSelect={setNodeId} />
-        </section>
-
-        <section aria-labelledby="attn-h" id="attn">
-          <h2 id="attn-h">Needs attention</h2>
-          {open.length === 0 ? (
-            <div className="glass pad"><Empty icon="shield">No open alerts. All quiet.</Empty></div>
-          ) : (
-            open.map((a) => <AlertCard key={a.id} alert={a} />)
-          )}
-        </section>
-      </div>
-
+      {/* 1. Every node at a glance: the map, then one table row per node */}
       <section className="gap-section-s" aria-labelledby="nodes">
         <h2 id="nodes">Sensor nodes</h2>
         {nodes.length === 0 ? (
-          <div className="glass pad"><Empty icon="shield">No sensor nodes have been registered yet.</Empty></div>
+          <Empty icon="shield">No sensor nodes have been registered yet.</Empty>
         ) : (
-          <div className="grid g3">
-            {nodes.map((n) => {
-              const last = latest(telemetry[n.id]);
-              const state = nodeState(n, openByNode[n.id] || 0);
-              const seen = last?.ts || n.last_seen;
-              return (
-                <article key={n.id} className={"glass nodecard" + (n.id === node?.id ? " on" : "") + (state === "offline" ? " down" : "") + (state === "alert" ? " alerting" : "")}>
-                  <button type="button" className="nodepick" aria-pressed={n.id === node?.id} onClick={() => setNodeId(n.id)}>
-                    <span className="row between"><b>{n.name}</b><span className={"dotstatus " + state}>{state === "offline" ? label(n.status) : NODE_STATE[state].text}</span></span>
-                    <small className="mute">{plantOf(n).name} · <Mono>{plantOf(n).qr_id}</Mono></small>
-                  </button>
-                  {last ? (
-                    <dl className="readings">
-                      <div className={tooHot(last, n.thresholds) ? "warntext" : ""}><dt>Temp</dt><dd><Mono>{num(last.temperature)}°C</Mono></dd></div>
-                      <div><dt>Humidity</dt><dd><Mono>{num(last.humidity, 0)}%</Mono></dd></div>
-                      <div className={tooDry(last, n.thresholds) ? "warntext" : ""}><dt>Soil</dt><dd><Mono>{num(last.soil_moisture, 0)}%</Mono></dd></div>
-                      <div><dt>Distance</dt><dd><Mono>{num(last.distance_cm)} cm</Mono></dd></div>
-                      <div className={last.motion_detected ? "warntext" : ""}><dt>Motion</dt><dd>{motionText(last.motion_detected)}</dd></div>
-                    </dl>
-                  ) : (
-                    <span className="warntext"><b>{n.last_seen ? `No readings since ${fmtDateTime(n.last_seen)}` : "No readings yet"}</b></span>
-                  )}
-                  <small className="mute">{n.status !== "active" ? "Check the node's battery or Wi-Fi" : seen ? `Updated ${fmtDateTime(seen)}` : "Waiting for the first reading"}</small>
-                  {openByNode[n.id] > 0 && (
-                    <button type="button" className="textlink warntext" onClick={() => showAlerts(n)}>
-                      {openByNode[n.id]} open alert{openByNode[n.id] === 1 ? "" : "s"} <Icon name="arrowR" size={14} />
-                    </button>
-                  )}
-                </article>
-              );
-            })}
-          </div>
+          <>
+            <p className="mute small">Select a pin or a row to see that node's readings and photos.</p>
+            <NodeMap nodes={nodes} whereOf={whereOf} plantOf={plantOf} openByNode={openByNode} selectedId={node?.id} onSelect={pickNode} />
+            <div className="tablewrap nodetable">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Node</th><th>Status</th>
+                    <th className="num">Temp</th><th className="num">Humidity</th><th className="num">Soil</th><th className="num">Distance</th><th>Motion</th>
+                    <th>Updated</th><th><span className="sr">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedNodes.map((n) => {
+                    const last = latest(telemetry[n.id]);
+                    const state = nodeStateOf(n);
+                    const seen = last?.ts || n.last_seen;
+                    return (
+                      // The whole row picks the node; its button keeps it reachable by keyboard.
+                      <tr key={n.id} className={"noderow" + (n.id === node?.id ? " on" : "") + (state === "offline" ? " down" : "") + (state === "alert" ? " alerting" : "")}
+                        onClick={() => pickNode(n.id)}>
+                        <td>
+                          <button type="button" className="nodepick" aria-pressed={n.id === node?.id}>
+                            <b>{n.name}</b>
+                            {n.name !== n.techName && <small className="mute">Technical name: <Mono>{n.techName}</Mono></small>}
+                            <small className="mute">{plantOf(n).name} · <Mono>{plantOf(n).qr_id}</Mono></small>
+                          </button>
+                        </td>
+                        <td>
+                          <Chip value={state === "alert" ? "high" : state === "online" ? "active" : "offline"}>{state === "offline" ? label(n.status) : NODE_STATE[state].text}</Chip>
+                          {openByNode[n.id] > 0 && (
+                            <button type="button" className="textlink block" onClick={(e) => { e.stopPropagation(); pickNode(n.id); showAlerts(n); }}>
+                              {openByNode[n.id]} open alert{openByNode[n.id] === 1 ? "" : "s"} <Icon name="arrowR" size={14} />
+                            </button>
+                          )}
+                        </td>
+                        {last ? (
+                          <>
+                            <td className={"num" + (off(last, "temperature") ? " badtext" : "")}><Mono>{num(last.temperature)}°C</Mono></td>
+                            <td className={"num" + (off(last, "humidity") ? " badtext" : "")}><Mono>{num(last.humidity, 0)}%</Mono></td>
+                            <td className={"num" + (off(last, "soil_moisture") ? " badtext" : "")}><Mono>{num(last.soil_moisture, 0)}%</Mono></td>
+                            <td className="num"><Mono>{num(last.distance_cm)} cm</Mono></td>
+                            <td className={last.motion_detected ? "warntext" : ""}>{motionText(last.motion_detected)}</td>
+                          </>
+                        ) : (
+                          <td colSpan="5" className="mute">{n.last_seen ? `No readings since ${fmtDateTime(n.last_seen)}` : "No readings yet"}</td>
+                        )}
+                        <td className="mute small nowrap">{n.status !== "active" ? "Check battery or Wi-Fi" : seen ? ago(seen, now) : "Waiting"}</td>
+                        <td className="actions">
+                          <button type="button" className="ic" aria-label={`Rename ${n.name}`} title="Rename (only you see this name)"
+                            onClick={(e) => { e.stopPropagation(); setNodeId(n.id); setRenaming(n.id); goTo("readings"); }}>
+                            <Icon name="pencil" size={18} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </section>
 
+      {/* 2. The chosen node in detail */}
       {node && (
-        <section className="glass pad gap-section-s" aria-labelledby="readings">
-          <h2 id="readings">{node.name}</h2>
-          <p className="mute small">{plantOf(node).name} · <Mono>{plantOf(node).qr_id}</Mono></p>
-
-          <h3 className="sub">Right now</h3>
-          {live ? (
-            <>
-              <div className="tiles" aria-live="polite">
-                <div className={"glass tile" + (tooHot(live, node.thresholds) ? " tile-warn" : "")}><span className="mute">Temperature</span><b>{num(live.temperature)}°C</b></div>
-                <div className="glass tile"><span className="mute">Humidity</span><b>{num(live.humidity, 0)}%</b></div>
-                <div className={"glass tile" + (tooDry(live, node.thresholds) ? " tile-warn" : "")}><span className="mute">Soil moisture</span><b>{num(live.soil_moisture, 0)}%</b></div>
-                <div className="glass tile"><span className="mute">Distance</span><b>{num(live.distance_cm)} cm</b></div>
-                <div className={"glass tile" + (live.motion_detected ? " tile-warn" : "")}><span className="mute">Motion</span><b>{motionText(live.motion_detected)}</b></div>
+        <section className="gap-section-s nodedetail" aria-labelledby="readings">
+          <header className="nodedetail-head">
+            <div>
+              <p className="overline">Selected node</p>
+              <div className="row wrap nodename">
+                <h2 id="readings">{node.name}</h2>
+                <span className={"dotstatus " + nodeStateOf(node)}>{nodeStateOf(node) === "offline" ? label(node.status) : NODE_STATE[nodeStateOf(node)].text}</span>
+                {renaming !== node.id && (
+                  <button type="button" className="btn ghost small-btn" onClick={() => setRenaming(node.id)}>
+                    <Icon name="pencil" size={16} /> Rename
+                  </button>
+                )}
               </div>
-              <p className="mute small">Reading from {fmtDateTime(live.ts)}. This updates without refreshing the page.</p>
-            </>
+              <p className="mute small">
+                {node.name !== node.techName && <>Technical name <Mono>{node.techName}</Mono> · </>}
+                {plantOf(node).name} · <Mono>{plantOf(node).qr_id}</Mono>
+              </p>
+            </div>
+          </header>
+          {renaming === node.id && <RenameNode key={node.id} node={node} onDone={() => setRenaming(null)} />}
+
+          {/* The latest reading, kept small: the node rows above show it too. */}
+          {live ? (
+            <div className="nowstrip" aria-live="polite">
+              <span className="nowstrip-when mute small">Latest reading · {ago(live.ts, now)}</span>
+              <dl>
+                {[
+                  ["temperature", `${num(live.temperature)}°C`],
+                  ["humidity", `${num(live.humidity, 0)}%`],
+                  ["soil_moisture", `${num(live.soil_moisture, 0)}%`],
+                ].map(([f, text]) => {
+                  const state = rangeState(live, f, preset);
+                  return (
+                    <div key={f} className={"nowitem" + (state ? " is-off" : "")}>
+                      <dt>{SENSOR_FIELDS[f].label}</dt>
+                      <dd><b>{text}</b> <small>{state ? `${state === "high" ? "Above" : "Below"} range · ` : "Range "}{rangeText(preset[f], SENSOR_FIELDS[f].unit)}</small></dd>
+                    </div>
+                  );
+                })}
+                <div className="nowitem"><dt>Distance</dt><dd><b>{num(live.distance_cm)} cm</b></dd></div>
+                <div className={"nowitem" + (live.motion_detected ? " is-off" : "")}><dt>Motion</dt><dd><b>{motionText(live.motion_detected)}</b></dd></div>
+              </dl>
+            </div>
           ) : (
             <p className="mute">No readings from {node.name} in the last 24 hours.</p>
           )}
 
-          <div className="row between wrap gap-top">
-            <h3 className="sub">Over time</h3>
-            <Pills label="Time range" value={range} onChange={setRange} items={RANGES} />
-          </div>
-          {range === "custom" && (
-            <div className="row wrap gap-top-s">
-              <label className="inline">From
-                <input type="date" value={dates.from} max={dates.to || ymd(new Date())} onChange={(e) => setDates((d) => ({ ...d, from: e.target.value }))} />
-              </label>
-              <label className="inline">to
-                <input type="date" value={dates.to} min={dates.from || undefined} max={ymd(new Date())} onChange={(e) => setDates((d) => ({ ...d, to: e.target.value }))} />
-              </label>
-              <span className="mute small">Up to {MAX_RANGE_DAYS} days.</span>
-            </div>
-          )}
-          <p className="mute small">
-            {custom?.error ? <span className="warntext">{custom.error}</span>
-              : loading ? "Loading readings…"
-              : loadError ? `Could not load readings: ${loadError}`
-              : `${data.length} reading${data.length === 1 ? "" : "s"} from ${rangeLabel}`}
-            {" · "}<svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" className="spark-limit" /></svg> alert limit
-          </p>
+          <div className="nodedetail-body">
+            {/* 1. Graphs: the main thing to read */}
+            <div className="nodedetail-main">
+              <h3 className="sub" id="overtime">Readings over time</h3>
+              <p className="mute small rangesummary">
+                {custom?.error ? <span className="warntext">{custom.error}</span>
+                  : loading ? "Loading readings…"
+                  : loadError ? `Could not load readings: ${loadError}`
+                  : <>
+                      {data.length} reading{data.length === 1 ? "" : "s"} from {rangeLabel}
+                      {data.length > 0 && <> · <span className={breaches ? "badtext" : ""}>{breaches} outside the stable range</span> · {motionCount} with movement</>}
+                    </>}
+              </p>
+              <p className="chartkey mute small" aria-hidden="true">
+                <span><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" className="spark-limit" /></svg> stable range</span>
+                <span><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" className="spark-line" /></svg> in range</span>
+                <span><svg width="22" height="6"><line x1="0" y1="3" x2="22" y2="3" className="spark-line spark-bad" /></svg> outside the range</span>
+              </p>
 
-          {!custom?.error && !loading && (
-            <div className="charts">
-              <TimeChart title="Temperature" unit="°C" rows={data} field="temperature" limit={node.thresholds?.temp_max} start={span.start} end={span.end} />
-              <TimeChart title="Air humidity" unit="%" rows={data} field="humidity" digits={0} start={span.start} end={span.end} />
-              <TimeChart title="Soil moisture" unit="%" rows={data} field="soil_moisture" digits={0} limit={node.thresholds?.moisture_min} start={span.start} end={span.end} />
-              <TimeChart title="Distance to nearest object" unit=" cm" rows={data} field="distance_cm" start={span.start} end={span.end} />
-            </div>
-          )}
+              {!custom?.error && !loading && (
+                <div className="charts">
+                  <TimeChart title="Temperature" unit="°C" rows={data} field="temperature" limit={[preset.temperature.min, preset.temperature.max]} start={span.start} end={span.end} />
+                  <TimeChart title="Air humidity" unit="%" rows={data} field="humidity" digits={0} limit={[preset.humidity.min, preset.humidity.max]} start={span.start} end={span.end} />
+                  <TimeChart title="Soil moisture" unit="%" rows={data} field="soil_moisture" digits={0} limit={[preset.soil_moisture.min, preset.soil_moisture.max]} start={span.start} end={span.end} />
+                  <TimeChart title="Distance to nearest object" unit=" cm" rows={data} field="distance_cm" start={span.start} end={span.end} />
+                </div>
+              )}
 
-          {data.length > 0 && (
-            <div className="tiles gap-top-s">
-              <div className="glass tile"><span className="mute">Temperature min · avg · max</span><span><Mono>{temp ? `${num(temp.min)} · ${num(temp.avg)} · ${num(temp.max)} °C` : "-"}</Mono></span></div>
-              <div className="glass tile"><span className="mute">Soil moisture min · avg · max</span><span><Mono>{soil ? `${num(soil.min, 0)} · ${num(soil.avg, 0)} · ${num(soil.max, 0)} %` : "-"}</Mono></span></div>
-              <div className="glass tile"><span className="mute">Humidity min · avg · max</span><span><Mono>{humid ? `${num(humid.min, 0)} · ${num(humid.avg, 0)} · ${num(humid.max, 0)} %` : "-"}</Mono></span></div>
-              <div className={"glass tile" + (breaches ? " tile-warn" : "")}><span className="mute">Outside limits · movement</span><span><Mono>{breaches} · {motionCount}</Mono> readings</span></div>
-            </div>
-          )}
-
-          {data.length > 0 && (
-            <details className="limits">
-              <summary>Latest {Math.min(data.length, 20)} readings in this range</summary>
-              <div className="tablewrap">
-                <table>
-                  <thead><tr><th>Time</th><th>Temp (°C)</th><th>Soil (%)</th><th>Humidity (%)</th><th>Distance (cm)</th><th>Movement</th></tr></thead>
-                  <tbody>
-                    {data.slice(-20).reverse().map((r) => (
-                      <tr key={r.id || r.ts}>
-                        <td>{fmtDateTime(r.ts)}</td>
-                        <td className={tooHot(r, node.thresholds) ? "warntext" : ""}><Mono>{num(r.temperature)}</Mono></td>
-                        <td className={tooDry(r, node.thresholds) ? "warntext" : ""}><Mono>{num(r.soil_moisture, 0)}</Mono></td>
-                        <td><Mono>{num(r.humidity, 0)}</Mono></td>
-                        <td><Mono>{num(r.distance_cm)}</Mono></td>
-                        <td>{r.motion_detected == null ? "-" : r.motion_detected ? "Yes" : "No"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              {/* 3. The time range, under the graphs it changes */}
+              <div className="rangebar">
+                <span className="rangebar-title">Time range</span>
+                <Pills label="Time range" value={range} onChange={setRange} items={RANGES} />
+                {range === "custom" ? (
+                  <div className="row wrap rangebar-dates">
+                    <label className="inline">From
+                      <input type="date" value={dates.from} max={dates.to || ymd(new Date())} onChange={(e) => setDates((d) => ({ ...d, from: e.target.value }))} />
+                    </label>
+                    <label className="inline">to
+                      <input type="date" value={dates.to} min={dates.from || undefined} max={ymd(new Date())} onChange={(e) => setDates((d) => ({ ...d, to: e.target.value }))} />
+                    </label>
+                    <span className="mute small">Up to {MAX_RANGE_DAYS} days.</span>
+                  </div>
+                ) : (
+                  <RangeSlider hours={range} onChange={setRange} />
+                )}
               </div>
-            </details>
-          )}
 
-          {node.thresholds && (
-            <details className="limits">
-              <summary>Alert limits for {node.name} · {node.thresholds.temp_max}°C max, {node.thresholds.moisture_min}% soil min</summary>
-              {role === "admin" ? (<form key={node.id} className="row wrap" onSubmit={saveLimits}>
-                <label>Temperature max (°C)<input name="temp_max" type="number" step="0.5" defaultValue={node.thresholds.temp_max} /></label>
-                <label>Soil moisture min (%)<input name="moisture_min" type="number" step="1" defaultValue={node.thresholds.moisture_min} /></label>
-                <button className="btn ghost" type="submit"><Icon name="check" size={18} /> Save limits</button>
-              </form>) : <p className="mute small">Only an admin can change these limits.</p>}
-            </details>
-          )}
+              {data.length > 0 && (
+                <details className="limits">
+                  <summary>Latest {Math.min(data.length, 20)} readings in this range</summary>
+                  <div className="tablewrap">
+                    <table>
+                      <thead><tr><th>Time</th><th>Temp (°C)</th><th>Soil (%)</th><th>Humidity (%)</th><th>Distance (cm)</th><th>Movement</th></tr></thead>
+                      <tbody>
+                        {data.slice(-20).reverse().map((r) => (
+                          <tr key={r.id || r.ts}>
+                            <td>{fmtDateTime(r.ts)}</td>
+                            <td className={off(r, "temperature") ? "badtext" : ""}><Mono>{num(r.temperature)}</Mono></td>
+                            <td className={off(r, "soil_moisture") ? "badtext" : ""}><Mono>{num(r.soil_moisture, 0)}</Mono></td>
+                            <td className={off(r, "humidity") ? "badtext" : ""}><Mono>{num(r.humidity, 0)}</Mono></td>
+                            <td><Mono>{num(r.distance_cm)}</Mono></td>
+                            <td>{r.motion_detected == null ? "-" : r.motion_detected ? "Yes" : "No"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
+              )}
+            </div>
 
-          <div className="gap-top">
-            <NodeImages node={node} alerts={db.alerts} />
+            {/* 2. The webcam photos */}
+            <aside className="nodedetail-side" aria-label="Webcam photos">
+              <NodeImages node={node} alerts={db.alerts} />
+            </aside>
           </div>
         </section>
       )}
 
-      <section className="gap-section-s" aria-labelledby="history">
-        <h2 id="history">Alert history</h2>
-        <div className="row wrap gap-bottom">
-          <Pills label="Alert history" value={tab} onChange={setTab} items={["acknowledged", "resolved", "all"].map((t) => ({ key: t, label: label(t) }))} />
+      {/* 3. Alerts: open ones by default, then what happened before */}
+      <section className="gap-section-s" aria-labelledby="alerts-h" id="alerts">
+        <div className="row between wrap sectionhead">
+          <h2 id="alerts-h">Alerts</h2>
+          <Pills label="Show alerts" value={tab} onChange={setTab}
+            items={["open", "acknowledged", "resolved", "all"].map((t) => ({ key: t, label: label(t), count: countOf(t) }))} />
         </div>
-        {history.length === 0 && <div className="glass pad"><Empty icon="shield">No {tab === "all" ? "" : tab} alerts.</Empty></div>}
-        {history.map((a) => <AlertCard key={a.id} alert={a} />)}
+        {listed.length === 0 ? (
+          tab === "open"
+            ? <p className="allquiet"><Icon name="check" size={18} /> No open alerts. All quiet.</p>
+            : <p className="allquiet neutral">No {tab === "all" ? "" : tab} alerts.</p>
+        ) : (
+          <div className="alertgrid">{listed.map((a) => <AlertCard key={a.id} alert={a} nodes={nodes} />)}</div>
+        )}
+
+        {/* Reference only: what opens an alert */}
+        <div className="alertrules" aria-label="Alert rules">
+          <span className="alertrules-lead">Alert rules</span>
+          <ul className="plain">
+            {Object.entries(SENSOR_FIELDS).map(([f, r]) => (
+              <li key={f}><span>{r.label}</span> <Mono>{rangeText(preset[f], r.unit)}</Mono></li>
+            ))}
+          </ul>
+          <span className="mute small">A reading outside its range opens one alert per node and problem (repeats are not counted while it is open), and every officer and admin is notified. Same range for every node.</span>
+        </div>
       </section>
     </Shell>
+  );
+}
+
+// The time range as a slider, from 1 hour to 30 days. Dragging only moves the label;
+// the range is applied once the slider rests, so a drag does not ask the API for every stop.
+function RangeSlider({ hours, onChange }) {
+  const stopOf = (h) => SLIDER_HOURS.reduce((best, v, i) => (Math.abs(v - h) < Math.abs(SLIDER_HOURS[best] - h) ? i : best), 0);
+  const [draft, setDraft] = useState(null); // the stop being dragged to, until it is applied
+  const stop = draft ?? stopOf(hours);
+  useEffect(() => {
+    if (draft == null) return;
+    const timer = setTimeout(() => { setDraft(null); onChange(SLIDER_HOURS[draft]); }, 300);
+    return () => clearTimeout(timer);
+  }, [draft]); // eslint-disable-line react-hooks/exhaustive-deps
+  const text = hoursLabel(SLIDER_HOURS[stop]);
+  return (
+    <div className="rangeslider">
+      <label htmlFor="range-slider">Show the last <b>{text}</b></label>
+      <span className="mute small" aria-hidden="true">1 h</span>
+      <input id="range-slider" type="range" min={0} max={SLIDER_HOURS.length - 1} step={1} value={stop}
+        aria-valuetext={text} onChange={(e) => setDraft(Number(e.target.value))} />
+      <span className="mute small" aria-hidden="true">30 d</span>
+    </div>
+  );
+}
+
+// Your own name for a node. Only you see it; empty goes back to the technical name.
+function RenameNode({ node, onDone }) {
+  const { db, setNodeNickname, notify } = useStore();
+  // Whether this person saved a name, even one equal to the technical name.
+  const saved = db.nodeNicknames?.[node.id] || "";
+  const nicknamed = !!saved;
+  const [text, setText] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const save = async (value) => {
+    setBusy(true);
+    const ok = await setNodeNickname(node.id, value);
+    setBusy(false);
+    if (!ok) return;
+    notify(value.trim() ? "Node renamed. Only you see this name." : "Back to the technical name");
+    onDone();
+  };
+  return (
+    <form className="row wrap renameform" onSubmit={(e) => { e.preventDefault(); save(text); }}
+      onKeyDown={(e) => { if (e.key === "Escape") onDone(); }}>
+      <label className="inline">Your name for this node
+        <input value={text} maxLength={60} autoFocus placeholder={node.techName} onChange={(e) => setText(e.target.value)} />
+      </label>
+      <button className="btn" type="submit" disabled={busy}><Icon name="check" size={18} /> Save</button>
+      {nicknamed && <button className="btn ghost" type="button" disabled={busy} onClick={() => save("")}>Use technical name</button>}
+      <button className="btn ghost" type="button" disabled={busy} onClick={onDone}>Cancel</button>
+      <span className="mute small">Only you see this name. Technical name: <Mono>{node.techName}</Mono></span>
+    </form>
   );
 }
 
@@ -338,12 +463,15 @@ function stepOf(alert) {
   return alert.assigned_to ? 1 : 0;
 }
 
-function AlertCard({ alert }) {
+// One alert: what, where and how bad on top, the next step as one button, and the
+// investigation (notes, outcome) folded away until it is needed.
+function AlertCard({ alert, nodes }) {
   const { db, ackAlert, resolveAlert, assignAlert, addAlertNote, notify } = useStore();
   const [outcome, setOutcome] = useState("");
   const [note, setNote] = useState("");
   const [ask, confirmDialog] = useConfirm();
-  const node = db.nodes.find((n) => n.id === alert.node_id);
+  const node = (nodes || db.nodes).find((n) => n.id === alert.node_id);
+  const nodeName = node?.name || alert.reading?.node || "Unknown node";
 
   const resolve = async () => {
     if (!outcome.trim()) return notify("Write what was found first");
@@ -353,21 +481,26 @@ function AlertCard({ alert }) {
   };
   const notes = db.alertNotes.filter((n) => n.alert_id === alert.id);
   const officers = db.profiles.filter((p) => p.role === "officer" && p.is_active);
+  const values = Object.entries(alert.reading || {}).filter(([k]) => k !== "node" && k !== "stable_range");
+  const range = alert.reading?.stable_range;
 
   return (
-    <article id={`alert-${alert.id}`} className={"glass record sev-" + alert.severity}>
+    <article id={`alert-${alert.id}`} className={"glass record alertcard sev-" + alert.severity}>
       {confirmDialog}
       <header>
         <div>
-          <b>{alert.type}</b>
-          <small className="mute block">{node?.name || "Unknown node"} · {fmtDateTime(alert.created_at)}</small>
+          <b className="alertcard-title">{alert.type}</b>
+          <small className="mute block">{node ? nodeName : "Unknown node"} · {fmtDateTime(alert.created_at)}</small>
         </div>
         <span className="row"><Chip value={alert.severity} /><Chip value={alert.status} /></span>
       </header>
 
-      <p className="mute small">
-        {node?.name || "Unknown node"}'s reading: {Object.entries(alert.reading || {}).map(([k, v], i) => <span key={k}>{i > 0 && " · "}{label(k)} <Mono>{v}</Mono></span>)}
-      </p>
+      {(values.length > 0 || range) && (
+        <p className="alertcard-reading">
+          {values.map(([k, v], i) => <span key={k}>{i > 0 && " · "}{label(k)} <Mono><b>{v}</b></Mono></span>)}
+          {range && <span className="mute"> · stable range <Mono>{range}</Mono></span>}
+        </p>
+      )}
 
       <ol className="progress" aria-label="Alert progress">
         {STEPS.map((s, i) => (
@@ -375,33 +508,40 @@ function AlertCard({ alert }) {
         ))}
       </ol>
 
-      <div className="row wrap">
-        <label className="inline">Assigned to
-          <select value={alert.assigned_to || ""} onChange={(e) => { assignAlert(alert.id, e.target.value); notify("Alert assigned"); }}>
-            {officers.map((o) => <option key={o.id} value={o.id}>{o.full_name}</option>)}
-          </select>
-        </label>
-        {alert.status === "open" && <button className="btn" onClick={() => { ackAlert(alert.id); notify("Alert acknowledged"); }}><Icon name="check" size={18} /> Acknowledge</button>}
-      </div>
-      {alert.acknowledged_by && <p className="mute small">Acknowledged by {nameOf(db, alert.acknowledged_by)} · {fmtDateTime(alert.acknowledged_at)}</p>}
-
-      <ul className="plain thread">
-        {notes.map((n) => <li key={n.id}><b>{nameOf(db, n.author_id)}</b>{n.note}<small className="mute block">{fmtDateTime(n.created_at)}</small></li>)}
-      </ul>
-
       {alert.status === "resolved" ? (
         <p className="mute">Outcome: {alert.outcome}</p>
       ) : (
         <>
-          <div className="row">
-            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add an investigation note" aria-label="Investigation note" />
-            <button className="btn ghost" onClick={() => { if (note.trim()) { addAlertNote(alert.id, note.trim()); setNote(""); } }}><Icon name="plus" size={18} /> Add note</button>
+          <div className="row wrap alertcard-acts">
+            <label className="inline">Assigned to
+              <select value={alert.assigned_to || ""} onChange={(e) => { assignAlert(alert.id, e.target.value); notify("Alert assigned"); }}>
+                {!alert.assigned_to && <option value="">Nobody yet</option>}
+                {officers.map((o) => <option key={o.id} value={o.id}>{o.full_name}</option>)}
+              </select>
+            </label>
+            {alert.status === "open" && <button className="btn" onClick={() => { ackAlert(alert.id); notify("Alert acknowledged"); }}><Icon name="check" size={18} /> Acknowledge</button>}
           </div>
-          <div className="row gap-top-s">
-            <input value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder="What was found? (needed to resolve)" aria-label="Outcome" />
-            <button className="btn" onClick={resolve}><Icon name="shield" size={18} /> Resolve</button>
-          </div>
+          {alert.acknowledged_by && <p className="mute small">Acknowledged by {nameOf(db, alert.acknowledged_by)} · {fmtDateTime(alert.acknowledged_at)}</p>}
+          <details className="alertcard-more">
+            <summary>Notes and resolve{notes.length ? ` (${notes.length} note${notes.length === 1 ? "" : "s"})` : ""}</summary>
+            <ul className="plain thread">
+              {notes.map((n) => <li key={n.id}><b>{nameOf(db, n.author_id)}</b>{n.note}<small className="mute block">{fmtDateTime(n.created_at)}</small></li>)}
+            </ul>
+            <div className="row">
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add an investigation note" aria-label="Investigation note" />
+              <button className="btn ghost" onClick={() => { if (note.trim()) { addAlertNote(alert.id, note.trim()); setNote(""); } }}><Icon name="plus" size={18} /> Add note</button>
+            </div>
+            <div className="row gap-top-s">
+              <input value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder="What was found? (needed to resolve)" aria-label="Outcome" />
+              <button className="btn" onClick={resolve}><Icon name="shield" size={18} /> Resolve</button>
+            </div>
+          </details>
         </>
+      )}
+      {alert.status === "resolved" && notes.length > 0 && (
+        <ul className="plain thread">
+          {notes.map((n) => <li key={n.id}><b>{nameOf(db, n.author_id)}</b>{n.note}<small className="mute block">{fmtDateTime(n.created_at)}</small></li>)}
+        </ul>
       )}
     </article>
   );

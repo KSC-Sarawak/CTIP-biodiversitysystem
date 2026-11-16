@@ -5,6 +5,8 @@ import { ATTEMPT_LIMIT, ATTEMPT_WINDOW_MS, toSession } from './session.js';
 import { logAuthEvent } from './auditLog.js';
 import { supabaseFresh, supabaseService } from './supabase.js';
 import { isEmailRateLimit, emailLimitInfo, emailLimitMessage, recordEmailSent } from './emailLimit.js';
+import { linkTarget } from './resetRedirect.js';
+import { EMAIL_LINK_MAX_AGE_S, PASSWORD_MAX_AGE_S, signedInWith } from './auth/emailLink.js';
 
 // Two-step sign-in with an authenticator app (VA-70, lecturer feedback; CTIP-50).
 // Every signed-in role (botanist, officer, admin) must use it: an access token
@@ -31,13 +33,42 @@ export const MFA_ROLES = ['botanist', 'officer', 'admin'];
 export const MFA_SETUP_ROUTES = new Set(['post /auth/mfa/enroll', 'post /auth/mfa/verify', 'post /auth/mfa/recovery', 'post /auth/mfa/reset']);
 
 // How long the session from the email link may be used to reset the app.
-export const EMAIL_LINK_MAX_AGE_S = 15 * 60;
+export { EMAIL_LINK_MAX_AGE_S };
 // Supabase names the email-link sign-in "otp" or "magiclink" in the token's amr list.
 const EMAIL_LINK_METHODS = ['otp', 'magiclink'];
 
 // True when this session was made from an email link in the last 15 minutes.
 export function fromEmailLink(amr, now = Date.now()) {
-  return (amr ?? []).some((a) => EMAIL_LINK_METHODS.includes(a?.method) && now / 1000 - Number(a.timestamp) <= EMAIL_LINK_MAX_AGE_S);
+  return signedInWith(amr, EMAIL_LINK_METHODS, { now }) != null;
+}
+
+// The password step of a lost-phone reset (POST /auth/mfa/recovery) leaves a
+// proof: one row per person in mfa_recovery_proofs, a table only the API's
+// secret key can reach (migration 20261116091336). Step 2 (POST /auth/mfa/reset)
+// takes it, once. Without it, a password-reset link (also amr "otp") would let
+// someone with only the mailbox remove the authenticator app (found in PR #83).
+const PROOF_TABLE = 'mfa_recovery_proofs';
+const CLOCK_SKEW_S = 5; // the token's seconds against the API's clock
+
+async function leaveRecoveryProof(userId) {
+  const db = supabaseService();
+  if (!db) return false;
+  const { error } = await db.from(PROOF_TABLE).upsert({ user_id: userId, proven_at: new Date().toISOString() }, { onConflict: 'user_id' });
+  if (error) console.warn('MFA recovery proof not saved:', error.message);
+  return !error;
+}
+
+// The proof's time (seconds), taken so it cannot be used twice, or null.
+async function takeRecoveryProof(userId) {
+  const db = supabaseService();
+  if (!db) return null;
+  const { data, error } = await db.from(PROOF_TABLE).delete().eq('user_id', userId).select('proven_at');
+  if (error) {
+    console.warn('MFA recovery proof not read:', error.message);
+    return null;
+  }
+  const at = Date.parse(data?.[0]?.proven_at ?? '');
+  return Number.isNaN(at) ? null : at / 1000;
 }
 
 const Verify = z.strictObject({ code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code from your authenticator app') });
@@ -140,11 +171,17 @@ export const mfaHandlers = {
   // Lost phone, step 1: after the right password, email a sign-in link to the
   // account's own address (never one typed in). Only for someone who has an app set up.
   'post /auth/mfa/recovery': async (req, res) => {
+    // Step 1 is the password: a session from an email link (a password-reset link
+    // included) must not count as it.
+    if (signedInWith(req.user.amr, ['password'], { maxAgeS: PASSWORD_MAX_AGE_S }) == null) {
+      return fail(res, 403, 'PASSWORD_REQUIRED', 'Sign in with your password first, then choose "Lost your phone?".');
+    }
     if (tooManyEmails(req)) return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many emails asked for. Wait 15 minutes and try again.');
     const factors = await totpFactors(req.user.token);
     if (!factors) return fail(res, 502, 'AUTH_ERROR', AUTH_DOWN);
     if (!factors.some((f) => f.status === 'verified')) return fail(res, 409, 'MFA_NOT_SET_UP', 'Two-step sign-in is not set up yet, so there is nothing to reset.');
-    const emailRedirectTo = process.env.MFA_RESET_REDIRECT_URL || process.env.PASSWORD_RESET_REDIRECT_URL || undefined;
+    if (!(await leaveRecoveryProof(req.user.id))) return fail(res, 502, 'AUTH_ERROR', AUTH_DOWN);
+    const emailRedirectTo = linkTarget(req, process.env.MFA_RESET_REDIRECT_URL || process.env.PASSWORD_RESET_REDIRECT_URL);
     const { error } = await supabaseFresh().auth.signInWithOtp({ email: req.user.email, options: { shouldCreateUser: false, emailRedirectTo } });
     if (isEmailRateLimit(error)) {
       const info = emailLimitInfo();
@@ -163,8 +200,15 @@ export const mfaHandlers = {
   // set-up app with aal2, which they cannot reach without the phone). The page
   // then runs the normal set-up with the new phone.
   'post /auth/mfa/reset': async (req, res) => {
-    if (!fromEmailLink(req.user.amr)) {
+    const linkAt = signedInWith(req.user.amr, EMAIL_LINK_METHODS);
+    if (linkAt == null) {
       return fail(res, 403, 'EMAIL_LINK_REQUIRED', 'Open the link in the email we sent you (it works for 15 minutes), then try again.');
+    }
+    // The password step must have happened, for this person, before this link was
+    // opened and in the last 15 minutes; its proof is used up here either way.
+    const provenAt = await takeRecoveryProof(req.user.id);
+    if (provenAt == null || Date.now() / 1000 - provenAt > EMAIL_LINK_MAX_AGE_S || linkAt < provenAt - CLOCK_SKEW_S) {
+      return fail(res, 403, 'RECOVERY_NOT_STARTED', 'Start again: sign in with your password, choose "Lost your phone?", then open the new email.');
     }
     const admin = supabaseService()?.auth.admin.mfa;
     if (!admin) return fail(res, 503, 'AUTH_ERROR', AUTH_DOWN);
