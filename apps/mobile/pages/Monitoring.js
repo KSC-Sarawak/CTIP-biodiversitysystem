@@ -5,7 +5,8 @@
 // - Distance to nearest object and motion detection indicators
 // - Webcam photos captured on motion events with full photo modal
 // - Open alerts and alert history (filters: open, acknowledged, resolved, all)
-// - Admin threshold limits editing (temp_max, moisture_min)
+// - The fixed stable range per reading (apps/shared/sensorLimits.js), the same one the
+//   database alert rule uses; per-node limits (thresholds) are not used (PR #83)
 // - Alert detail with 3-step progress pipeline (Assign -> Acknowledge -> Resolve),
 //   conservation officer assignment, investigation notes, and resolution outcome.
 import React, { useState, useEffect, useMemo } from 'react';
@@ -18,9 +19,10 @@ import { useTheme, font, statusText } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import {
   Screen, Bar, Header, IconButton, TitleBlock, Section, Row, Thumb, Mono, Txt, DotLabel, Chip, Spark, Button, Area,
-  Empty, EmptyState, Pills, Field,
+  Empty, EmptyState, Pills,
 } from '../components/Bits.js';
 import LeafletMap from '../components/LeafletMap.js';
+import { SENSOR_FIELDS, fixedRanges, rangeState, rangeText } from '../../shared/sensorLimits.js';
 import { dateTime, shortDate } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 
@@ -46,9 +48,12 @@ function AlertCard({ a, node, onPress }) {
   const { c } = useTheme();
   const tone = a.status === 'open' ? 'danger' : a.status === 'acknowledged' ? 'warning' : 'accent';
   const r = a.reading || {};
-  const limit = node?.thresholds?.temp_max;
-  const what = r.temperature != null
-    ? `${r.temperature}°C${limit != null ? `, limit ${limit}°C` : ''}`
+  // Alerts from the stable-range rule hold the reading and the range, e.g.
+  // { temperature: 36.2, stable_range: "18.0 to 35.0 °C", node: "..." }.
+  const field = Object.keys(SENSOR_FIELDS).find((f) => r[f] != null);
+  const unit = field ? (SENSOR_FIELDS[field].unit === '%' ? '%' : SENSOR_FIELDS[field].unit) : '';
+  const what = field
+    ? `${SENSOR_FIELDS[field].label} ${r[field]}${unit}${r.stable_range ? `, stable range ${r.stable_range}` : ''}`
     : r.motion
     ? 'Movement detected near the plant'
     : 'Unusual reading';
@@ -86,15 +91,11 @@ function AlertCard({ a, node, onPress }) {
 
 export function Monitor({ nav }) {
   usePolling(5000);
-  const { db, role, setThresholds, notify, loadNodeTelemetry, loadNodeImages } = useStore();
+  const { db, role, notify, loadNodeTelemetry, loadNodeImages } = useStore();
   const { c } = useTheme();
 
   const [picked, setPicked] = useState(null);
   const [historyTab, setHistoryTab] = useState('open'); // open | acknowledged | resolved | all
-  const [editingLimits, setEditingLimits] = useState(false);
-  const [newTempMax, setNewTempMax] = useState('32');
-  const [newMoistureMin, setNewMoistureMin] = useState('25');
-  const [savingLimits, setSavingLimits] = useState(false);
 
   // Time range selection
   const [range, setRange] = useState(24);
@@ -169,7 +170,8 @@ export function Monitor({ nav }) {
   }, [nodeId, range, db.telemetry, customTelemetry]);
 
   const now = latest(readings);
-  const limits = node?.thresholds || {};
+  // The fixed stable range, the same for every node (the database's copy, else the settings file).
+  const ranges = useMemo(() => fixedRanges(db), [db.stableRanges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openCount = (db.alerts || []).filter((a) => a.status === 'open').length;
   const offline = (db.nodes || []).filter((n) => n.status !== 'active').length;
@@ -236,29 +238,6 @@ export function Monitor({ nav }) {
   const humidStats = stats(readings, 'humidity');
   const motionCount = readings.filter((r) => r.motion_detected === true).length;
 
-  const openLimitsModal = () => {
-    setNewTempMax(String(limits.temp_max ?? 32));
-    setNewMoistureMin(String(limits.moisture_min ?? 25));
-    setEditingLimits(true);
-  };
-
-  const handleSaveLimits = async () => {
-    const tMax = parseFloat(newTempMax);
-    const mMin = parseFloat(newMoistureMin);
-    if (isNaN(tMax) || isNaN(mMin)) {
-      return Alert.alert('Invalid values', 'Please enter valid numerical thresholds.');
-    }
-    setSavingLimits(true);
-    try {
-      const ok = await setThresholds(node.id, { temp_max: tMax, moisture_min: mMin });
-      if (ok) {
-        setEditingLimits(false);
-      }
-    } finally {
-      setSavingLimits(false);
-    }
-  };
-
   return (
     <Screen gap={20}>
       <TitleBlock
@@ -303,13 +282,6 @@ export function Monitor({ nav }) {
       <Section
         title={RANGE_TITLE[range] || 'Telemetry readings'}
         gap={12}
-        right={
-          role === 'admin' && node ? (
-            <Pressable onPress={openLimitsModal} hitSlop={8}>
-              <Txt v="caption" color={c.accent} style={{ fontWeight: '700' }}>Edit limits</Txt>
-            </Pressable>
-          ) : null
-        }
       >
         <Pills
           value={nodeId}
@@ -341,7 +313,7 @@ export function Monitor({ nav }) {
               <DotLabel status={node.status} />
             </View>
             <Txt v="caption" color={c.ink2}>
-              Alert limits: {limits.temp_max != null ? `${limits.temp_max}°C max` : 'no max temp'}, {limits.moisture_min != null ? `${limits.moisture_min}% soil min` : 'no min soil'}
+              Stable range (every node): temperature {rangeText(ranges.temperature, '°C')}, air humidity {rangeText(ranges.humidity, '%')}, soil {rangeText(ranges.soil_moisture, '%')}
             </Txt>
           </View>
         )}
@@ -356,13 +328,13 @@ export function Monitor({ nav }) {
                   <Txt v="label">Air Temperature</Txt>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                  <Text style={{ fontFamily: font('display', 700), fontSize: 24, color: limits.temp_max != null && now.temperature > limits.temp_max ? c.danger : c.ink }}>
+                  <Text style={{ fontFamily: font('display', 700), fontSize: 24, color: rangeState(now, 'temperature', ranges) ? c.danger : c.ink }}>
                     {now.temperature}°C
                   </Text>
-                  {limits.temp_max != null && <Txt v="caption" color={c.ink2}>limit {limits.temp_max}°C</Txt>}
+                  <Txt v="caption" color={c.ink2}>range {rangeText(ranges.temperature, '°C')}</Txt>
                 </View>
               </View>
-              <Spark values={readings.map((r) => r.temperature).filter((v) => v != null)} limit={limits.temp_max} height={70} />
+              <Spark values={readings.map((r) => r.temperature).filter((v) => v != null)} limit={ranges.temperature?.max} height={70} />
             </View>
 
             {/* Air Humidity Sparkline */}
@@ -389,13 +361,13 @@ export function Monitor({ nav }) {
                   <Txt v="label">Soil Moisture</Txt>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
-                  <Text style={{ fontFamily: font('display', 700), fontSize: 24, color: limits.moisture_min != null && now.soil_moisture < limits.moisture_min ? c.danger : c.ink }}>
+                  <Text style={{ fontFamily: font('display', 700), fontSize: 24, color: rangeState(now, 'soil_moisture', ranges) ? c.danger : c.ink }}>
                     {now.soil_moisture}%
                   </Text>
-                  {limits.moisture_min != null && <Txt v="caption" color={c.ink2}>min {limits.moisture_min}%</Txt>}
+                  <Txt v="caption" color={c.ink2}>range {rangeText(ranges.soil_moisture, '%')}</Txt>
                 </View>
               </View>
-              <Spark values={readings.map((r) => r.soil_moisture).filter((v) => v != null)} limit={limits.moisture_min} height={70} />
+              <Spark values={readings.map((r) => r.soil_moisture).filter((v) => v != null)} limit={ranges.soil_moisture?.min} height={70} />
             </View>
 
             {/* Nearest Object Distance & Movement Status */}
@@ -600,38 +572,6 @@ export function Monitor({ nav }) {
         })}
       </Section>
 
-      {/* Admin Threshold Limits Modal */}
-      {editingLimits && (
-        <Modal transparent animationType="fade" visible onRequestClose={() => setEditingLimits(false)}>
-          <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 20 }} onPress={() => setEditingLimits(false)}>
-            <Pressable style={{ backgroundColor: c.surface, borderRadius: 16, padding: 20, gap: 14 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Txt v="title2">Edit alert limits for {node?.name}</Txt>
-                <IconButton name="x" label="Close" onPress={() => setEditingLimits(false)} />
-              </View>
-              <Txt v="caption" color={c.ink2}>Alerts trigger when telemetry crosses these limits.</Txt>
-              <Field
-                label="Maximum temperature (°C)"
-                value={newTempMax}
-                onChangeText={setNewTempMax}
-                keyboardType="numeric"
-                placeholder="32"
-              />
-              <Field
-                label="Minimum soil moisture (%)"
-                value={newMoistureMin}
-                onChangeText={setNewMoistureMin}
-                keyboardType="numeric"
-                placeholder="25"
-              />
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
-                <Button label="Cancel" kind="secondary" flex={1} onPress={() => setEditingLimits(false)} />
-                <Button label={savingLimits ? 'Saving…' : 'Save limits'} flex={1.4} disabled={savingLimits} onPress={handleSaveLimits} />
-              </View>
-            </Pressable>
-          </Pressable>
-        </Modal>
-      )}
     </Screen>
   );
 }
@@ -669,7 +609,7 @@ export function AlertDetail({ nav, params = {} }) {
   const readings = (db.telemetry || {})[a.node_id] || [];
   const r = a.reading || {};
   const notes = (db.alertNotes || []).filter((n) => n.alert_id === a.id);
-  const limits = node?.thresholds || {};
+  const ranges = fixedRanges(db); // the fixed stable range (sensorLimits.js)
 
   const officers = (db.profiles || []).filter((p) => p.role === 'officer' && p.is_active);
   const currentStep = stepIndexOf(a);
@@ -804,16 +744,16 @@ export function AlertDetail({ nav, params = {} }) {
           <Reading
             label="Temperature"
             value={`${r.temperature}°C`}
-            sub={limits.temp_max != null ? `limit ${limits.temp_max}°C` : 'no limit'}
-            bad={limits.temp_max != null && r.temperature > limits.temp_max}
+            sub={`range ${rangeText(ranges.temperature, '°C')}`}
+            bad={!!rangeState(r, 'temperature', ranges)}
           />
         ) : null}
         {r.soil_moisture != null ? (
           <Reading
             label="Soil moisture"
             value={`${r.soil_moisture}%`}
-            sub={limits.moisture_min != null ? `minimum ${limits.moisture_min}%` : 'no limit'}
-            bad={limits.moisture_min != null && r.soil_moisture < limits.moisture_min}
+            sub={`range ${rangeText(ranges.soil_moisture, '%')}`}
+            bad={!!rangeState(r, 'soil_moisture', ranges)}
           />
         ) : null}
         {r.motion ? <Reading label="Movement" value="Yes" sub="near plant" bad /> : null}
@@ -824,11 +764,11 @@ export function AlertDetail({ nav, params = {} }) {
         <Section title="24-hour dual telemetry sparklines" gap={10}>
           <View style={{ padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 6 }}>
             <Txt v="caption" color={c.ink2}>Temperature (°C)</Txt>
-            <Spark values={readings.map((x) => x.temperature).filter((v) => v != null)} limit={limits.temp_max} height={60} />
+            <Spark values={readings.map((x) => x.temperature).filter((v) => v != null)} limit={ranges.temperature?.max} height={60} />
           </View>
           <View style={{ padding: 12, borderRadius: 12, backgroundColor: c.bg, gap: 6 }}>
             <Txt v="caption" color={c.ink2}>Soil Moisture (%)</Txt>
-            <Spark values={readings.map((x) => x.soil_moisture).filter((v) => v != null)} limit={limits.moisture_min} height={60} />
+            <Spark values={readings.map((x) => x.soil_moisture).filter((v) => v != null)} limit={ranges.soil_moisture?.min} height={60} />
           </View>
         </Section>
       )}
