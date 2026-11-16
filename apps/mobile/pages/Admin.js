@@ -123,7 +123,7 @@ export function StaffMore({ nav }) {
           opacity: pressed ? 0.75 : 1,
         }]}
       >
-        <Avatar name={me?.full_name || me?.email || 'User'} size={48} />
+        <Avatar name={me?.full_name || me?.email || 'User'} uri={me?.avatar_url} size={48} />
         <View style={{ flex: 1, gap: 2 }}>
           <Txt v="label" style={{ fontSize: 17 }}>{me?.full_name || me?.email || 'User'}</Txt>
           <Txt v="small" color={c.ink2} style={{ fontFamily: font('text', 400) }}>{(ROLE_LABEL[role] || role || 'Member')} · {me?.email}</Txt>
