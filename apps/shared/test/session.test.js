@@ -2,7 +2,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   getSession, setSession, getAuthToken, freshAuthToken, onSessionEnded,
-  signInApi, signOutApi, takeSessionFromUrl, hasPasswordResetSession, tokenClaims, setStorageAdapter, restoreSession,
+  signInApi, signOutApi, takeSessionFromUrl, hasPasswordResetSession, resetPasswordApi, tokenClaims, setStorageAdapter, restoreSession,
 } from "../api.js";
 
 // The apps' session (CTIP-114): signed in, renewed and ended through the API,
@@ -106,6 +106,28 @@ test("a password-reset link's session is read from the address", () => {
     assert.equal(takeSessionFromUrl(), "expired");
     window.location.hash = "#/plants?q=nepenthes";
     assert.equal(takeSessionFromUrl(), null);
+  } finally {
+    delete globalThis.window;
+  }
+});
+
+test("a reset retry after a refused password does not send the 6-digit code again (PR #83 review)", async () => {
+  const token = jwt({ sub: "u9", email: "r@x.y", exp: now() + 3600 });
+  globalThis.window = { location: { hash: `#access_token=${token}&expires_at=123&refresh_token=r9&token_type=bearer&type=recovery` } };
+  try {
+    assert.equal(takeSessionFromUrl(), "recovery");
+    answer(
+      [200, { access_token: "aal2-token", refresh_token: "r2", expires_at: now() + 3600 }], // POST /auth/mfa/verify
+      [422, { code: "WEAK_PASSWORD", message: "Choose a stronger password" }], // POST /me/password
+      [204], // POST /me/password again, then sign-out
+    );
+    const first = await resetPasswordApi("weakpass", "123456");
+    assert.equal(first.ok, false);
+    const second = await resetPasswordApi("a-much-stronger-pass", "123456");
+    assert.equal(second.ok, true);
+    assert.equal(calls.filter((c) => c.url.endsWith("/auth/mfa/verify")).length, 1, "the code is used once");
+    const saves = calls.filter((c) => c.url.endsWith("/me/password"));
+    assert.deepEqual(saves.map((c) => c.auth), ["Bearer aal2-token", "Bearer aal2-token"]);
   } finally {
     delete globalThis.window;
   }

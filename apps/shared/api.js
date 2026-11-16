@@ -427,11 +427,14 @@ export async function resetPasswordApi(newPassword, code) {
   const session = passwordResetSession;
   if (!session) return { ok: false, status: 0, code: "LINK_GONE", message: "Open the link in the reset email again, or ask for a new one." };
   let token = session.access_token;
-  if (code) {
+  // Once the code has been checked the kept session is aal2: a retry (say the new
+  // password was refused as too weak) uses it and does not send the code again,
+  // which Supabase would refuse as already used.
+  if (code && !session.verified) {
     const verified = await apiFetch("/auth/mfa/verify", { method: "POST", token, body: { code } });
     if (!verified.ok) return verified;
     token = verified.data.access_token;
-    passwordResetSession = { ...session, ...verified.data }; // a retry uses the aal2 session
+    passwordResetSession = { ...session, ...verified.data, verified: true };
   }
   const res = await apiFetch("/me/password", { method: "POST", token, body: { new_password: newPassword } });
   if (res.ok) {
