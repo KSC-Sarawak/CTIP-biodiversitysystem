@@ -72,3 +72,7 @@ export default function Logo({ size = 32, style }) {
     </Svg>
   );
 }
+
+export function LogoMark({ size = 30, style }) {
+  return <Logo size={size} style={style} />;
+}
