@@ -63,6 +63,7 @@ jobs:
   mobile:
     name: Mobile (tests and export)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/mobile
@@ -74,6 +75,13 @@ jobs:
           cache: npm
           cache-dependency-path: apps/mobile/package-lock.json
       - run: npm ci
+      # The runner has the Android SDK. The emulator tests call `adb devices`,
+      # which would start the adb server in the background and keep the test's
+      # output open, so the run never ends. Start it here first, detached.
+      - name: Start adb (no device needed)
+        run: |
+          ADB="$(command -v adb || echo "$ANDROID_HOME/platform-tools/adb")"
+          if [ -x "$ADB" ]; then "$ADB" start-server > /dev/null 2>&1 < /dev/null || true; fi
       - run: npm test
       - run: npx expo export --platform android --output-dir dist
 
