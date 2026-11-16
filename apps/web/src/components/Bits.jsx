@@ -143,3 +143,4 @@ export function Sparkline({ values: raw, limit, unit, title }) {
     </figure>
   );
 }
+

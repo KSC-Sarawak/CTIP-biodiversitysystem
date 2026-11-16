@@ -59,6 +59,8 @@ for (const role of ["officer", "admin"]) {
     await open(page, withSensors(role), "#/monitoring");
     await expect(page.getByText("Overheat").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Acknowledge", exact: true })).toBeVisible();
+    // Notes and resolving are folded under each alert until needed.
+    await page.getByText("Notes and resolve").first().click();
     await expect(page.getByRole("button", { name: "Resolve", exact: true })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add note", exact: true })).toBeVisible();
   });

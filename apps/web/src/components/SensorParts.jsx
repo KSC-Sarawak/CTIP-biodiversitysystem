@@ -1,7 +1,7 @@
 // apps/web/src/components/SensorParts.jsx
 // Pieces of the Monitoring page: the node map (CTIP-39), readings over time
 // (CTIP-81) and the webcam photos per node (CTIP-82).
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import LeafletMap from "./LeafletMap.jsx";
 import Icon from "./Icon.jsx";
 import { Empty, Modal } from "./Bits.jsx";
@@ -27,7 +27,7 @@ export function NodeMap({ nodes, whereOf, plantOf, openByNode, selectedId, onSel
   const matches = (n) => {
     if (!needle) return true;
     const p = plantOf?.(n);
-    return fuzzyMatch([n.name, n.id, p?.name, p?.qr_id].filter(Boolean).join(" "), needle);
+    return fuzzyMatch([n.name, n.techName, n.id, p?.name, p?.qr_id].filter(Boolean).join(" "), needle);
   };
 
   const found = nodes.filter(matches); // the search, in every state (for the key counts)
@@ -114,7 +114,12 @@ const round = (v, digits) => String(Number(v.toFixed(digits)));
 
 // A line chart of one reading over time. Time runs left to right across the whole chosen
 // range (`start` to `end`, in ms), so quiet periods show as gaps. Hover or touch for values.
+// `limit` is one alert limit or a list of them (the stable range's min and max), drawn dashed.
+// With both a min and a max, the parts of the line outside that range are drawn in the
+// alert colour over a faint red band, so a breach stands out without reading numbers.
 export function TimeChart({ title, unit = "", rows, field, digits = 1, limit, start, end }) {
+  const clipId = `tc${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const limits = [].concat(limit ?? []).filter(has).map(Number);
   const [hover, setHover] = useState(null);
   const pts = rows.filter((r) => has(r[field]) && r.ts).map((r) => ({ t: Date.parse(r.ts), v: Number(r[field]), ts: r.ts }));
   if (!pts.length) {
@@ -129,7 +134,7 @@ export function TimeChart({ title, unit = "", rows, field, digits = 1, limit, st
   const t0 = Math.min(start ?? pts[0].t, pts[0].t);
   const t1 = Math.max(end ?? pts.at(-1).t, pts.at(-1).t, t0 + 60e3);
   const vals = pts.map((p) => p.v);
-  if (has(limit)) vals.push(Number(limit));
+  vals.push(...limits);
   const pad = (Math.max(...vals) - Math.min(...vals)) * 0.1 || 1;
   const lo = Math.min(...vals) - pad;
   const hi = Math.max(...vals) + pad;
@@ -157,32 +162,57 @@ export function TimeChart({ title, unit = "", rows, field, digits = 1, limit, st
   };
   const last = pts.at(-1);
   const span = t1 - t0;
+  // The stable band in chart units (0 is the top), when both limits are known.
+  const band = limits.length === 2 ? { top: Y(Math.max(...limits)), bottom: Y(Math.min(...limits)) } : null;
+  const isOff = (v) => limits.length === 2 && (v > Math.max(...limits) || v < Math.min(...limits));
+  const offCount = pts.filter((p) => isOff(p.v)).length;
   const ticks = [0, 1 / 3, 2 / 3, 1].map((f) => t0 + f * span);
 
   return (
     <figure className="tchart">
-      <figcaption>{title}: <b>{round(last.v, digits)}{unit}</b> <span className="mute small">latest, {fmtDateTime(last.ts)}</span></figcaption>
+      <figcaption>
+        <span className="tchart-title">{title}</span>
+        <span className="tchart-now"><b className={isOff(last.v) ? "badtext" : ""}>{round(last.v, digits)}{unit}</b> <span className="mute small">latest</span></span>
+        {offCount > 0 && <span className="tchart-off">{offCount} outside range</span>}
+        <span className="tchart-stats mute small">min <b>{round(Math.min(...pts.map((p) => p.v)), digits)}</b> · avg <b>{round(pts.reduce((sum, p) => sum + p.v, 0) / pts.length, digits)}</b> · max <b>{round(Math.max(...pts.map((p) => p.v)), digits)}</b></span>
+      </figcaption>
       <div
         className="tchart-plot"
         onPointerMove={pick}
         onPointerDown={pick}
         onPointerLeave={() => setHover(null)}
         role="img"
-        aria-label={`${title} from ${fmtDateTime(new Date(t0).toISOString())} to ${fmtDateTime(new Date(t1).toISOString())}: lowest ${round(Math.min(...pts.map((p) => p.v)), digits)}${unit}, highest ${round(Math.max(...pts.map((p) => p.v)), digits)}${unit}, latest ${round(last.v, digits)}${unit}.`}
+        aria-label={`${title} from ${fmtDateTime(new Date(t0).toISOString())} to ${fmtDateTime(new Date(t1).toISOString())}: lowest ${round(Math.min(...pts.map((p) => p.v)), digits)}${unit}, highest ${round(Math.max(...pts.map((p) => p.v)), digits)}${unit}, latest ${round(last.v, digits)}${unit}${band ? `, ${offCount} of ${pts.length} readings outside the stable range` : ""}.`}
       >
         <svg viewBox="0 0 1000 100" preserveAspectRatio="none" aria-hidden="true">
+          {band && (
+            <defs>
+              <clipPath id={`${clipId}-in`}><rect x="-10" y={band.top} width="1020" height={Math.max(0, band.bottom - band.top)} /></clipPath>
+              <clipPath id={`${clipId}-out`}>
+                <rect x="-10" y="-50" width="1020" height={band.top + 50} />
+                <rect x="-10" y={band.bottom} width="1020" height={150 - band.bottom} />
+              </clipPath>
+            </defs>
+          )}
+          {band && <rect x="0" y="0" width="1000" height={band.top} className="tchart-zone" />}
+          {band && <rect x="0" y={band.bottom} width="1000" height={100 - band.bottom} className="tchart-zone" />}
           {[25, 50, 75].map((y) => <line key={y} x1="0" x2="1000" y1={y} y2={y} className="tchart-grid" />)}
-          {has(limit) && <line x1="0" x2="1000" y1={Y(Number(limit))} y2={Y(Number(limit))} className="spark-limit" />}
-          {lines.map((seg, i) => <polyline key={i} points={path(seg)} className="spark-line" />)}
+          {limits.map((l) => <line key={l} x1="0" x2="1000" y1={Y(l)} y2={Y(l)} className="spark-limit" />)}
+          {band ? (
+            <>
+              <g clipPath={`url(#${clipId}-in)`}>{lines.map((seg, i) => <polyline key={i} points={path(seg)} className="spark-line" />)}</g>
+              <g clipPath={`url(#${clipId}-out)`}>{lines.map((seg, i) => <polyline key={i} points={path(seg)} className="spark-line spark-bad" />)}</g>
+            </>
+          ) : lines.map((seg, i) => <polyline key={i} points={path(seg)} className="spark-line" />)}
         </svg>
         <span className="tchart-y top">{round(hi, digits)}{unit}</span>
         <span className="tchart-y bottom">{round(lo, digits)}{unit}</span>
         {hover && (
           <>
             <span className="tchart-cursor" style={{ left: `${X(hover.t) / 10}%` }} />
-            <span className="tchart-dot" style={{ left: `${X(hover.t) / 10}%`, top: `${Y(hover.v)}%` }} />
+            <span className={"tchart-dot" + (isOff(hover.v) ? " bad" : "")} style={{ left: `${X(hover.t) / 10}%`, top: `${Y(hover.v)}%` }} />
             <span className={"tchart-tip" + (X(hover.t) > 650 ? " flip" : "")} style={{ left: `${X(hover.t) / 10}%` }}>
-              <b>{round(hover.v, digits)}{unit}</b> {fmtDateTime(hover.ts)}
+              <b className={isOff(hover.v) ? "badtext" : ""}>{round(hover.v, digits)}{unit}</b> {fmtDateTime(hover.ts)}{isOff(hover.v) ? " · outside range" : ""}
             </span>
           </>
         )}

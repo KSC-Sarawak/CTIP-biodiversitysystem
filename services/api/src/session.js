@@ -6,6 +6,7 @@ import { recordEmailSent, isEmailRateLimit, emailLimitInfo, emailLimitMessage } 
 import { mfaStep } from './mfa.js';
 import { accountBlock } from './accountStatus.js';
 import { logAuthEvent } from './auditLog.js';
+import { linkTarget } from './resetRedirect.js';
 
 // Sign-in, session refresh and passwords (CTIP-114). The web and mobile apps
 // never talk to Supabase directly: they send these requests to the API, and
@@ -131,13 +132,14 @@ export const sessionHandlers = {
   },
 
   // Always 202, whether or not the address has an account, so the form cannot
-  // be used to find out who has one. The email links back to the website
-  // (PASSWORD_RESET_REDIRECT_URL, else the Site URL set in Supabase).
+  // be used to find out who has one. The email links back to the website it was
+  // asked from (see resetRedirect.js), else PASSWORD_RESET_REDIRECT_URL, else the
+  // Site URL set in Supabase.
   'post /auth/password-reset': async (req, res) => {
     if (tooMany(req, 'password-reset')) return fail(res, 429, 'TOO_MANY_ATTEMPTS', 'Too many requests. Wait a few minutes and try again.');
     const body = parseBody(Reset, req, res);
     if (!body) return;
-    const redirectTo = process.env.PASSWORD_RESET_REDIRECT_URL || undefined;
+    const redirectTo = linkTarget(req);
     const { error } = await supabaseFresh().auth.resetPasswordForEmail(body.email, { redirectTo });
     if (error) console.warn('password reset email not sent:', error.message);
     // The limit is for the whole project, so saying so tells nobody whether this address has an account.
@@ -169,6 +171,11 @@ export const sessionHandlers = {
     const err = await updated.json().catch(() => ({}));
     if (err.error_code === 'same_password') return fail(res, 422, 'SAME_PASSWORD', 'Choose a password different from your current one');
     if (err.error_code === 'weak_password') return fail(res, 422, 'WEAK_PASSWORD', err.msg || 'Choose a stronger password');
+    // An account with an authenticator app: Supabase wants the 6-digit code first
+    // (a reset-link session is only aal1). The website then asks for it.
+    if (err.error_code === 'insufficient_aal' || /aal2/i.test(err.msg ?? err.message ?? '')) {
+      return fail(res, 403, 'MFA_CODE_NEEDED', 'Enter the 6-digit code from your authenticator app to save your new password.');
+    }
     if (err.error_code === 'reauthentication_needed') return fail(res, 403, 'SIGN_IN_AGAIN', 'Sign in again, then change your password');
     return fail(res, 502, 'AUTH_ERROR', 'Changing the password is not working right now. Please try again.');
   },

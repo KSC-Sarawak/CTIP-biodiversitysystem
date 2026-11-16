@@ -1,0 +1,6 @@
+{
+  "$comment": "Fixed stable range for each sensor reading. A reading outside it opens an alert and notifies every officer and admin. After editing, run `npm run sensor-ranges:push` (or `npm run sensor-ranges` and paste the SQL into Supabase) so the database alert rule uses the new numbers. min must be below max.",
+  "temperature": { "min": 18, "max": 35 },
+  "humidity": { "min": 40, "max": 100 },
+  "soil_moisture": { "min": 20, "max": 80 }
+}
