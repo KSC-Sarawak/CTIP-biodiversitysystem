@@ -220,7 +220,7 @@ export function SpeciesProfile({ nav, params }) {
           {plants.map((p, i) => (
             <Row key={p.id} serif={false} left={<Thumb uri={p.photos[0]?.url} size={48} />}
               title={<Mono size={16}>{p.qr_id}</Mono>}
-              sub={<Txt v="small" color={c.ink2}>Tagged {longDate(db.observations.find((o) => o.specimen_id === p.id)?.observed_at)}</Txt>}
+              sub={staff ? <Txt v="small" color={c.ink2}>Tagged {longDate(db.observations.find((o) => o.specimen_id === p.id)?.observed_at)}</Txt> : null}
               onPress={() => nav.go('tag', { qr: p.qr_id })} last={i === plants.length - 1} />
           ))}
         </Section>
@@ -285,16 +285,19 @@ export function TaggedPlant({ nav, params }) {
       {!staff ? (
         <Txt v="body" style={{ lineHeight: 25 }}>
           {p.isPublic
-            ? `You found tagged plant ${p.qr_id}. It was recorded by park botanists on ${longDate(firstObs?.observed_at)}.`
+            ? `You found tagged plant ${p.qr_id}. It was recorded by park botanists.`
             : `Tag ${p.qr_id} is on a ${p.name} (${p.scientific}). This field observation is currently being verified by park staff.`}
         </Txt>
       ) : null}
       <Section title="This plant">
         <KV rows={[
           ['Height', p.height_cm ? `${p.height_cm} cm` : '-'],
-          ['Recorded', longDate(firstObs?.observed_at)],
-          ...(staff ? [['Recorded by', nameOf(db, p.registered_by)], ['Last visit', longDate(lastObs?.observed_at)]] : []),
-          ...(updated ? [['Last updated', longDate(updated)]] : []),
+          ...(staff ? [
+            ['Recorded', longDate(firstObs?.observed_at)],
+            ['Recorded by', nameOf(db, p.registered_by)],
+            ['Last visit', longDate(lastObs?.observed_at)],
+            ...(updated ? [['Last updated', longDate(updated)]] : []),
+          ] : []),
           ['Location', where ? <Mono size={14}>{coords(where.lat, where.lng)}</Mono> : p.lat == null ? 'Not captured when recorded.' : HIDDEN_NOTE],
         ]} />
         {p.location_reduced ? <Txt v="caption" color={c.ink2}>{REDUCED_LOCATION_NOTE}</Txt> : null}
