@@ -5,9 +5,11 @@
 // - Profile name, username and phone editing
 // - Password update
 // - Account details & managed status
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
 import { useStore } from '../../shared/store.js';
 import { ROLE_LABEL } from '../../shared/permissions.js';
@@ -16,6 +18,7 @@ import {
   Screen, Header, IconButton, TitleBlock, Section, Avatar, Txt, Field, Button, KV, Notice,
 } from '../components/Bits.js';
 import { shortDate } from '../components/format.js';
+import { summarizeTimings, timingsCsv } from '../../shared/offline/captureTimings.js';
 
 export default function Account({ nav }) {
   const { me, role } = useStore();
@@ -40,6 +43,7 @@ export default function Account({ nav }) {
       <ProfileSection me={me} />
       <PasswordSection />
       <DetailsSection me={me} role={role} />
+      {role === 'botanist' ? <FieldTimingsSection me={me} /> : null}
     </Screen>
   );
 }
@@ -308,6 +312,75 @@ function DetailsSection({ me, role }) {
         title="Managed account"
         body="Your email and assigned role are managed by an administrator. Contact your system admin if either needs to change."
       />
+    </Section>
+  );
+}
+
+// Time per record (CTIP-146): what this phone measured for the signed-in
+// botanist, exported as CSV for the field evaluation (CTIP-148). The rows never
+// hold a location, tag, species or notes, and are never sent to the API.
+const mmss = (ms) => `${Math.floor(ms / 60000)}:${String(Math.round((ms % 60000) / 1000)).padStart(2, '0')}`;
+
+function FieldTimingsSection({ me }) {
+  const { timings, notify } = useStore();
+  const [rows, setRows] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const reload = useCallback(async () => {
+    if (!timings) return;
+    try {
+      setRows(await timings.listTimings(me.id));
+    } catch {
+      setRows([]);
+    }
+  }, [timings, me.id]);
+  useEffect(() => { reload(); }, [reload]);
+
+  if (!timings) return null;
+  const sum = summarizeTimings(rows);
+
+  const exportCsv = async () => {
+    setBusy(true);
+    try {
+      const fileUri = `${FileSystem.cacheDirectory}field-timings.csv`;
+      await FileSystem.writeAsStringAsync(fileUri, timingsCsv(rows), { encoding: FileSystem.EncodingType.UTF8 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri, { mimeType: 'text/csv', dialogTitle: 'Export field timings' });
+      } else {
+        notify?.('Sharing is not available on this phone.');
+      }
+    } catch (err) {
+      Alert.alert("Couldn't export", err?.message || 'Try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const clear = () => {
+    Alert.alert(`Delete all ${rows.length} timings on this phone?`, 'They cannot be brought back.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await timings.clearTimings(me.id);
+          await reload();
+        },
+      },
+    ]);
+  };
+
+  return (
+    <Section title="Field test timings" gap={10}>
+      <Txt v="body">
+        {sum.counted
+          ? `${sum.count} ${sum.count === 1 ? 'record' : 'records'} timed, median ${mmss(sum.medianMs)}`
+          : 'No records timed yet'}
+      </Txt>
+      <Txt v="caption">How long each plant record took on this phone, from opening the form for a tag to saving it. Kept only on this phone.</Txt>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        <Button label={busy ? 'Exporting…' : 'Export CSV'} kind="secondary" height={40} size={13} disabled={busy || !rows.length} onPress={exportCsv} />
+        <Button label="Clear" icon="trash" kind="dangerText" height={40} size={13} disabled={busy || !rows.length} onPress={clear} />
+      </View>
     </Section>
   );
 }

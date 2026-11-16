@@ -502,8 +502,9 @@ async function fetchAllPages(path, { token, query = {} } = {}) {
 }
 
 // The API rejects empty strings, so blank optional fields are sent as null.
-const SPECIES_FIELDS = ["scientific_name", "common_name", "family", "genus", "description", "conservation_status", "cultural_significance"];
-function speciesBody(sp) {
+const SPECIES_FIELDS = ["scientific_name", "common_name", "family", "genus", "description", "conservation_status", "cultural_significance", "ecology"];
+// Exported for the tests (apps/shared/test/species-ecology.test.js).
+export function speciesBody(sp) {
   const body = {};
   for (const k of SPECIES_FIELDS) {
     const v = typeof sp[k] === "string" ? sp[k].trim() : sp[k];

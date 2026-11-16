@@ -36,6 +36,7 @@ export default function Book({ nav }) {
               {e.family ? <Txt v="caption" color={c.ink2}>{e.family}{e.genus ? ` · ${e.genus}` : ''}</Txt> : null}
               {e.conservation_status ? <View style={{ flexDirection: 'row', paddingTop: 2 }}><Chip status={e.conservation_status} /></View> : null}
               {e.description ? <Txt v="body" style={{ fontSize: 15, lineHeight: 22 }}>{e.description}</Txt> : null}
+              {e.ecology ? <Txt v="body" color={c.ink2} style={{ fontSize: 15, lineHeight: 22 }}>Habitat and ecology: {e.ecology}</Txt> : null}
               {e.cultural_significance ? <Txt v="body" color={c.ink2} style={{ fontSize: 15, lineHeight: 22 }}>Cultural note: {e.cultural_significance}</Txt> : null}
               {e.updated_at ? <Txt v="caption" color={c.ink3}>Last updated {longDate(e.updated_at)}</Txt> : null}
             </Pressable>

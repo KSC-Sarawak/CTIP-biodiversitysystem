@@ -25,6 +25,7 @@ export const NEEDS = {
   staffMore: "pending",
   account: "pending",
   tagQr: "pending", // any signed-in role: a tag's QR code to share or print (CTIP-27)
+  survey: "add", // quick survey mode, botanists (CTIP-147)
 };
 
 // Screens that cover the whole phone (no bottom bar).
@@ -38,7 +39,7 @@ export const ROUTE_NAMES = [
   "records", "record", "phoneRecord", "alerts", "discussion",
   "review", "reviewItem", "monitor", "alert",
   "staffMore", "speciesAdmin", "tags", "tagQr", "reports",
-  "users", "audit", "account", "book",
+  "users", "audit", "account", "book", "survey",
 ];
 
 export function canAccess(role, routeName) {

@@ -29,7 +29,7 @@ async function loadPublicSpecies(db, id) {
   const { data: species, error } = await db
     .from('species')
     .select(`id, scientific_name, common_name, family, genus, description, conservation_status,
-      cultural_significance, species_media (id, species_id, s3_bucket, s3_key, caption, credit,
+      cultural_significance, ecology, species_media (id, species_id, s3_bucket, s3_key, caption, credit,
       is_primary, sort_order, created_at)`)
     .eq('id', id)
     .eq('is_published', true)

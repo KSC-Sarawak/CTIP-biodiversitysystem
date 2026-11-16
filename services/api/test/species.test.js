@@ -161,6 +161,21 @@ test('conservation status must be an IUCN category, in any case', async () => {
   assert.equal(patch.status, 422);
 });
 
+test('officer saves habitat and ecology on create and update (CTIP-149)', async () => {
+  const res = await create({ scientific_name: 'Nepenthes rajah', ecology: 'Montane forest on ultramafic soil' });
+  assert.equal(res.status, 201);
+  assert.equal(res.body.ecology, 'Montane forest on ultramafic soil');
+  const upd = await request(app).patch(`/v1/species/${res.body.id}`).set(as('officer')).send({ ecology: null });
+  assert.equal(upd.status, 200);
+  assert.equal(upd.body.ecology, null);
+});
+
+test('ecology over 5000 characters is 422 with the field named (CTIP-149)', async () => {
+  const res = await create({ scientific_name: 'Nepenthes rajah', ecology: 'x'.repeat(5001) });
+  assert.equal(res.status, 422);
+  assert.deepEqual(res.body.details.fields.map((f) => f.path), ['ecology']);
+});
+
 test('update rejects an empty body and unknown fields', async () => {
   const { body } = await create({ scientific_name: 'Nepenthes rajah' });
   assert.equal((await request(app).patch(`/v1/species/${body.id}`).set(as('admin')).send({})).status, 422);

@@ -833,8 +833,14 @@ paths:
         Officers and admins make print batches. A botanist may make one tag at a
         time (`count: 1`). The `batch_label` `reserved` marks a tag kept on a
         botanist's phone for making a tag offline (CTIP-116): it is allowed only
-        for a botanist with `count: 1`. Anyone else gets `403 FORBIDDEN`
+        for a botanist. Anyone else gets `403 FORBIDDEN`
         "Only a botanist's phone can make kept tags."
+
+        For a survey (CTIP-147) a botanist may keep up to 20 tags in one request
+        (`batch_label: reserved`, `count` 1 to 20); more answers `403 FORBIDDEN`
+        "You can keep at most 20 tags at a time." A botanist holds at most 23
+        unused kept tags: a request that would go over answers
+        `403 TOO_MANY_KEPT_TAGS` "Release some kept tags first."
       requestBody:
         required: true
         content:
@@ -2563,6 +2569,7 @@ components:
         description: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
         conservation_status: { $ref: '#/components/schemas/ConservationStatusValue' }
         cultural_significance: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
+        ecology: { type: [string, 'null'], minLength: 1, maxLength: 5000, description: Habitat and ecology (CTIP-149) }
 
     SpeciesCreate:
       description: Unknown fields (is_published, created_by, ...) are rejected with 422
@@ -2589,6 +2596,7 @@ components:
         description: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
         conservation_status: { $ref: '#/components/schemas/ConservationStatusValue' }
         cultural_significance: { type: [string, 'null'], minLength: 1, maxLength: 5000 }
+        ecology: { type: [string, 'null'], minLength: 1, maxLength: 5000, description: Habitat and ecology (CTIP-149) }
 
     Species:
       allOf:
@@ -2615,6 +2623,7 @@ components:
         description: { type: [string, 'null'] }
         conservation_status: { type: [string, 'null'] }
         cultural_significance: { type: [string, 'null'] }
+        ecology: { type: [string, 'null'], description: Habitat and ecology (CTIP-149) }
         primary_image_url: { type: [string, 'null'], format: uri }
         media:
           type: array

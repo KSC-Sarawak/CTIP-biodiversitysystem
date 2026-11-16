@@ -14,6 +14,8 @@ import { getLocalDb } from './offline/localDb.js';
 import { createSqliteOutbox } from './offline/outboxStore.js';
 import { createTagCache } from './offline/tagCache.js';
 import { createReservedTags } from './offline/reservedTags.js';
+import { createTimingStore } from './offline/timingStore.js';
+import { createSurveyStore } from './offline/surveyStore.js';
 import { speciesCache } from './offline/speciesCache.js';
 import { useSyncTriggers } from './offline/useSyncTriggers.js';
 import { waitingCount } from '../shared/offline/syncStatus.js';
@@ -31,6 +33,10 @@ restoreSession().catch(() => {});
 const outbox = createSqliteOutbox(getLocalDb);
 const tagCache = createTagCache(getLocalDb);
 const reservedTags = createReservedTags(getLocalDb);
+// Time per record for the field evaluation (CTIP-146): kept on the phone only.
+const timings = createTimingStore(getLocalDb);
+// Quick survey mode (CTIP-147): survey sessions on the phone only.
+const surveys = createSurveyStore(getLocalDb);
 
 // When to send the records saved on the phone (CTIP-68): when the connection
 // comes back, when the app comes back to the front, and on a timer while records
@@ -61,7 +67,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <StoreProvider outbox={outbox} tagCache={tagCache} reservedTags={reservedTags}>
+        <StoreProvider outbox={outbox} tagCache={tagCache} reservedTags={reservedTags} timings={timings} surveys={surveys}>
           <SyncTriggers />
           <AppNavigator />
         </StoreProvider>

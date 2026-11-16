@@ -59,6 +59,7 @@ export default function SpeciesForm({ species, onClose, onSaved, onManagePhotos,
           {!knownStatus && <small className="fielderr" role="alert">Choose the species' conservation status before saving.</small>}
         </label>
         <label>Description<textarea rows="3" value={form.description || ""} onChange={set("description")} /></label>
+        <label>Habitat and ecology<textarea rows="3" value={form.ecology || ""} onChange={set("ecology")} /></label>
         <label>Cultural significance<textarea rows="2" value={form.cultural_significance || ""} onChange={set("cultural_significance")} /></label>
         {offerPublish && (
           <label className="check hidespot gap-top-s">

@@ -87,6 +87,42 @@ export const MIGRATIONS = [
       ALTER TABLE reserved_tags ADD COLUMN made_here INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // Time per record (CTIP-146): one row per saved record, for the field
+    // evaluation. Only times, counts and flags: never a location, tag, species
+    // or notes. Never sent to the API.
+    version: 6,
+    sql: `
+      CREATE TABLE IF NOT EXISTS capture_timings (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        survey_id TEXT,
+        started_at TEXT NOT NULL,
+        saved_at TEXT NOT NULL,
+        duration_ms INTEGER NOT NULL,
+        offline INTEGER NOT NULL,
+        photos INTEGER NOT NULL,
+        located INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS capture_timings_user_saved ON capture_timings (user_id, saved_at);
+    `,
+  },
+  {
+    // Quick survey mode (CTIP-147): one row per survey a botanist started on this
+    // phone; the active one has no ended_at. Never sent to the API.
+    version: 7,
+    sql: `
+      CREATE TABLE IF NOT EXISTS survey_sessions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        tag_target INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        ended_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS survey_sessions_user_ended ON survey_sessions (user_id, ended_at);
+    `,
+  },
 ];
 
 /**

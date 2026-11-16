@@ -49,10 +49,11 @@ function observationOf({ height_cm, morphology, notes, lat, lng, gps_accuracy_m 
 }
 
 // Fields every new record starts with.
-function base({ userId, qr_id, kind, step, specimen_id, specimen_ref, specimen, observation, at }) {
+function base({ userId, qr_id, kind, step, specimen_id, specimen_ref, specimen, observation, at, survey_id = null }) {
   return {
     id: uid(), // the observation's id on the server too
     user_id: userId,
+    survey_id, // quick survey mode (CTIP-147): on the phone only, never sent
     kind,
     qr_id,
     specimen_id,
@@ -71,11 +72,12 @@ function base({ userId, qr_id, kind, step, specimen_id, specimen_ref, specimen, 
 }
 
 /** A new plant on a tag: register the plant, then its first observation. */
-export function newPlantRecord({ userId, qr_id, proposed_species, ...fields }) {
+export function newPlantRecord({ userId, qr_id, proposed_species, survey_id = null, ...fields }) {
   const at = nowIso();
   return base({
     userId,
     qr_id,
+    survey_id,
     kind: "new_plant",
     step: "specimen",
     specimen_id: uid(), // the plant's id, made here so a resend cannot add a second plant
