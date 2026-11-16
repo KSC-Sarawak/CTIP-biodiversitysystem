@@ -72,7 +72,7 @@ export const Browser: React.FC<{ w: number; layers: Layer[]; cam: number[]; url:
       </div>
       <div style={{ width: w, height: vh, overflow: "hidden", position: "relative", background: light ? "#f3f6ec" : C.bg }}>
         <div style={{ position: "absolute", left: 0, top: 0, width: 1440, transformOrigin: "0 0", translate: `${tx}px ${ty}px`, scale: String(s) }}>
-          {layers.map((l) => f >= l.from - 1 && <Img key={l.src} src={staticFile(`web/${l.src}.png`)} style={{ position: "absolute", left: 0, top: 0, width: 1440, height: l.h, opacity: interpolate(f, [l.from, l.from + 5], [0, 1], clamp) }} />)}
+          {layers.map((l, i) => (l === cur || (layers[i + 1] === cur && f < cur.from + 6)) && <Img key={l.src} src={staticFile(`web/${l.src}.png`)} style={{ position: "absolute", left: 0, top: 0, width: 1440, height: l.h, opacity: l === cur && l.from > 0 ? interpolate(f, [l.from, l.from + 5], [0, 1], clamp) : 1 }} />)}
           {children}
         </div>
       </div>
