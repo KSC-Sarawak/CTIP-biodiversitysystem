@@ -27,16 +27,19 @@ building item 10 is **fixed** on this branch (item 11).
 
 ## Before this goes live
 
-- [ ] **Database migrations, before merging.** Render redeploys the API from `main` as soon as
-      this merges, and the new API needs both tables. Tell Amberlyn, then dry-run and push:
-  - `supabase/migrations/20261116000000_node_nicknames_and_stable_range_alerts.sql`
-  - `supabase/migrations/20261116120000_mfa_recovery_proofs.sql`: without it, **Lost your phone?**
+- [x] **Database migrations, before merging.** Done 2026-11-16: both are applied to the live
+      database and to the test database. Render redeploys the API from `main` as soon as this
+      merges, and the new API needs both tables:
+  - `supabase/migrations/20261116091220_node_nicknames_and_stable_range_alerts.sql`
+  - `supabase/migrations/20261116091336_mfa_recovery_proofs.sql`: without it, **Lost your phone?**
     step 1 answers "Two-step sign-in is not working right now"
 
-  `npx supabase db push --remote --dry-run`, then without `--dry-run`. Both are safe to run more
-  than once.
-- [ ] After the push, check that the tables `sensor_node_nicknames` and `sensor_stable_ranges`
-      exist and that `sensor_stable_ranges` has 3 rows (temperature, humidity, soil_moisture).
+  The file names carry the versions live recorded, so `npx supabase db push` has nothing left
+  to do. Both are safe to run more than once.
+- [x] Checked on live: `sensor_node_nicknames`, `sensor_stable_ranges` and `mfa_recovery_proofs`
+      exist with RLS on, `sensor_stable_ranges` has 3 rows (temperature 18 to 35, humidity 40 to
+      100, soil_moisture 20 to 80), the alert trigger is in place, and signed-in users and
+      visitors cannot reach `mfa_recovery_proofs`.
 - [ ] **Redeploy the Render API.** Without it, renaming a node fails, and the Monitoring page
       falls back to the ranges in the settings file (it still works, but cannot show what
       the database holds).
@@ -360,7 +363,7 @@ link, so the emailed link and Supabase's Redirect URLs do not change:
 
 - Step 1 (`POST /auth/mfa/recovery`) now needs a **password sign-in** in the last 15 minutes
   (`403 PASSWORD_REQUIRED` otherwise), so a reset-link session cannot do it. It leaves a proof:
-  one row per person in the new table `mfa_recovery_proofs` (migration `20261116120000`; RLS on,
+  one row per person in the new table `mfa_recovery_proofs` (migration `20261116091336`; RLS on,
   no policies, so only the API's secret key reaches it).
 - Step 2 (`POST /auth/mfa/reset`) takes that proof and uses it up. It must be for the same
   person, less than 15 minutes old, and from **before** the email link was opened. Otherwise
@@ -430,7 +433,7 @@ Cloudflare site (needs the Render redeploy and the Redirect URLs first).
 
 | File | Change |
 |---|---|
-| `supabase/migrations/20261116000000_node_nicknames_and_stable_range_alerts.sql` | **New.** Nickname table, stable range table, alert trigger, better alert notification |
+| `supabase/migrations/20261116091220_node_nicknames_and_stable_range_alerts.sql` | **New.** Nickname table, stable range table, alert trigger, better alert notification |
 | `apps/shared/config/sensorStableRanges.json` | **New.** The one place the ranges are set |
 | `scripts/sensor-ranges.mjs` | **New.** Checks the file; prints SQL or pushes it to Supabase |
 | `package.json` | `sensor-ranges` and `sensor-ranges:push` scripts |

@@ -44,7 +44,7 @@ export function fromEmailLink(amr, now = Date.now()) {
 
 // The password step of a lost-phone reset (POST /auth/mfa/recovery) leaves a
 // proof: one row per person in mfa_recovery_proofs, a table only the API's
-// secret key can reach (migration 20261116120000). Step 2 (POST /auth/mfa/reset)
+// secret key can reach (migration 20261116091336). Step 2 (POST /auth/mfa/reset)
 // takes it, once. Without it, a password-reset link (also amr "otp") would let
 // someone with only the mailbox remove the authenticator app (found in PR #83).
 const PROOF_TABLE = 'mfa_recovery_proofs';

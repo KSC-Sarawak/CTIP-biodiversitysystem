@@ -66,7 +66,7 @@ async function push(rows) {
   const res = await fetch(`${url.replace(/\/$/, "")}/rest/v1/sensor_stable_ranges?on_conflict=field`, { method: "POST", headers, body: JSON.stringify(body) });
   const text = await res.text();
   if (!res.ok) {
-    const hint = res.status === 404 || text.includes("PGRST205") ? " Has migration 20261116000000 been applied?" : "";
+    const hint = res.status === 404 || text.includes("PGRST205") ? " Has migration 20261116091220 been applied?" : "";
     throw new Error(`Supabase answered ${res.status}: ${text.slice(0, 300)}${hint}`);
   }
   return JSON.parse(text);

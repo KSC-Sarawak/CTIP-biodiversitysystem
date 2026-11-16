@@ -4,7 +4,7 @@
 // The numbers live in one settings file: apps/shared/config/sensorStableRanges.json.
 // `npm run sensor-ranges:push` copies them into the sensor_stable_ranges table,
 // which the database alert rule reads (check_reading_stable_range, migration
-// 20261116000000). The apps show what that table holds (db.stableRanges, from the
+// 20261116091220). The apps show what that table holds (db.stableRanges, from the
 // workspace load), and fall back to the file when the table could not be loaded.
 //
 // Every node uses this one preset range. Per-node ranges (node.thresholds) are not
