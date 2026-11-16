@@ -70,6 +70,11 @@ import {
   resolveAlertApi,
   addAlertNoteApi,
   setThresholdsApi,
+  createNodeApi,
+  updateNodeApi,
+  getAlertRoutesApi,
+  setAlertRouteApi,
+  clearAlertRouteApi,
   setNodeNicknameApi,
   getNodeTelemetryApi,
   getNodeImagesApi,
@@ -1673,6 +1678,46 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
+  // Register a node (admin, CTIP-48). Returns the new node, or null after saying why.
+  const createNode = async (node) => {
+    const res = await callApi(createNodeApi, node);
+    if (!res.ok) {
+      notify(`Could not register the node: ${res.message}`);
+      return null;
+    }
+    notify("Sensor node registered");
+    await loadFromApi(true);
+    return res.data;
+  };
+
+  // Edit a node: lat and lng, specimen_id, or status (retired turns it off).
+  const updateNode = async (nodeId, changes, done = "Sensor node saved") => {
+    const res = await callApi(updateNodeApi, nodeId, changes);
+    if (!res.ok) {
+      notify(`Could not save the node: ${res.message}`);
+      return false;
+    }
+    setDb((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId ? { ...n, ...changes } : n)) }));
+    notify(done);
+    return true;
+  };
+
+  // Alert routing (admin). Returns { ok, rows } and never changes db.
+  const loadAlertRoutes = async () => {
+    const res = await callApi(getAlertRoutesApi);
+    return res.ok ? { ok: true, rows: Array.isArray(res.data) ? res.data : [] } : { ok: false, message: res.message };
+  };
+  // route: { node_ids: null (every node) or [...], min_severity }; null goes back to every alert.
+  const setAlertRoute = async (userId, route) => {
+    const res = route ? await callApi(setAlertRouteApi, userId, route) : await callApi(clearAlertRouteApi, userId);
+    if (!res.ok) {
+      notify(`Could not save who hears about alerts: ${res.message}`);
+      return false;
+    }
+    notify("Alert routing saved");
+    return true;
+  };
+
   // Your own name for a node; an empty name goes back to its technical name.
   const setNodeNickname = async (nodeId, nickname) => {
     const name = (nickname || "").trim() || null;
@@ -1766,7 +1811,7 @@ function collectionMatches(a = [], b = []) {
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
-    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, setNodeNickname, loadNodeTelemetry, loadNodeImages,
+    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, setNodeNickname, createNode, updateNode, loadAlertRoutes, setAlertRoute, loadNodeTelemetry, loadNodeImages,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,

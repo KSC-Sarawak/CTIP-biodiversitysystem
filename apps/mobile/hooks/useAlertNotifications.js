@@ -25,13 +25,19 @@ let Notifications = null;
 try {
   Notifications = require('expo-notifications');
   if (Notifications && Notifications.setNotificationHandler) {
+    // Only called while the app is open. A push from the server is not shown
+    // then: the app's own poll shows the same notification (below), so it
+    // would appear twice. Closed or in the background, the push shows as usual.
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-      }),
+      handleNotification: async (notification) => {
+        const fromServer = notification?.request?.trigger?.type === 'push';
+        return {
+          shouldShowBanner: !fromServer,
+          shouldShowList: !fromServer,
+          shouldPlaySound: !fromServer,
+          shouldSetBadge: true,
+        };
+      },
     });
   }
 } catch {
@@ -39,7 +45,6 @@ try {
 }
 
 export function useAlertNotifications(db, me, nav) {
-  const seenAlertsRef = useRef(null);
   const seenNotifsRef = useRef(null);
 
   // Initialize permissions & notification channels, and register push token
@@ -131,45 +136,9 @@ export function useAlertNotifications(db, me, nav) {
     };
   }, [nav, me?.id]);
 
-  // Monitor incoming alerts in db.alerts
-  useEffect(() => {
-    if (!db?.alerts) return;
-
-    if (!seenAlertsRef.current) {
-      // Record initial alerts so we don't spam on initial app startup
-      seenAlertsRef.current = new Set(db.alerts.map((a) => a.id));
-      return;
-    }
-
-    for (const alert of db.alerts) {
-      if (!seenAlertsRef.current.has(alert.id)) {
-        seenAlertsRef.current.add(alert.id);
-
-        if (alert.status === 'open') {
-          const node = (db.nodes || []).find((n) => n.id === alert.node_id);
-          const nodeName = node?.name || 'Protected Node';
-          const severity = (alert.severity || 'high').toUpperCase();
-
-          try {
-            Vibration.vibrate([0, 300, 200, 300]);
-          } catch {}
-
-          if (Notifications && Notifications.scheduleNotificationAsync) {
-            Notifications.scheduleNotificationAsync({
-              content: {
-                title: `Alert: ${alert.type || 'Sensor'} - ${nodeName}`,
-                body: `[${severity}] reading breach detected at ${nodeName}. Tap to inspect.`,
-                data: { alertId: alert.id, type: 'alert' },
-                sound: 'default',
-                channelId: 'alerts',
-              },
-              trigger: null,
-            }).catch(() => {});
-          }
-        }
-      }
-    }
-  }, [db?.alerts, db?.nodes]);
+  // Sensor alerts reach the phone through db.notifications below, which the
+  // database writes only for the people the alert routing names (CTIP-48), so
+  // an officer who was routed away from a node is not told about it.
 
   // Monitor all incoming notifications for me in db.notifications (discussions, mentions, reviews, etc.)
   useEffect(() => {

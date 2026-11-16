@@ -10,6 +10,7 @@ export const NEEDS = {
   reports: "reports",
   species: "species",
   monitoring: "monitor",
+  nodes: "nodes",
   users: "users",
   audit: "audit",
   tags: "tags",

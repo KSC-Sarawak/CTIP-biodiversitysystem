@@ -760,6 +760,12 @@ export const getNodeImagesApi = (nodeId, limit = 12, { token } = {}) => send("GE
 export const setThresholdsApi = (nodeId, thresholds, { token } = {}) => send("PATCH", `/sensor-nodes/${enc(nodeId)}`, { thresholds }, token);
 // Your own name for a node (null clears it, so the technical name shows again).
 export const setNodeNicknameApi = (nodeId, nickname, { token } = {}) => send("PUT", `/sensor-nodes/${enc(nodeId)}/nickname`, { nickname }, token);
+// Registering and editing nodes, and who hears about their alerts (Admin, CTIP-48).
+export const createNodeApi = (node, { token } = {}) => send("POST", "/sensor-nodes", node, token);
+export const updateNodeApi = (nodeId, changes, { token } = {}) => send("PATCH", `/sensor-nodes/${enc(nodeId)}`, changes, token);
+export const getAlertRoutesApi = ({ token } = {}) => send("GET", "/alert-routes", undefined, token);
+export const setAlertRouteApi = (userId, route, { token } = {}) => send("PUT", `/alert-routes/${enc(userId)}`, route, token);
+export const clearAlertRouteApi = (userId, { token } = {}) => send("DELETE", `/alert-routes/${enc(userId)}`, undefined, token);
 
 // Notifications (the signed-in person's own)
 export const fetchNotificationsApi = ({ token } = {}) => apiFetch("/notifications", { token });

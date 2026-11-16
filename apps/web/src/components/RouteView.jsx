@@ -47,6 +47,7 @@ const Review = safeLazy(() => import("../pages/Review.jsx"), "Review");
 const ReportSummary = safeLazy(() => import("../pages/ReportSummary.jsx"), "Reports");
 const Species = safeLazy(() => import("../pages/Species.jsx"), "Species Management");
 const SensorOverview = safeLazy(() => import("../pages/SensorOverview.jsx"), "Monitoring");
+const SensorNodes = safeLazy(() => import("../pages/SensorNodes.jsx"), "Sensor nodes");
 const AdminUsers = safeLazy(() => import("../pages/Admin.jsx").then((m) => ({ default: m.Users })), "User Management");
 const AdminAudit = safeLazy(() => import("../pages/Admin.jsx").then((m) => ({ default: m.Audit })), "Audit Log");
 const Tags = safeLazy(() => import("../pages/Tags.jsx"), "Tags");
@@ -84,6 +85,7 @@ export default function RouteView({ seg, arg, role }) {
       case "reports": return <ReportSummary />;
       case "species": return <Species />;
       case "monitoring": return <SensorOverview />;
+      case "nodes": return <SensorNodes />;
       case "users": return <AdminUsers />;
       case "audit": return <AdminAudit />;
       case "tags": return <Tags />;
