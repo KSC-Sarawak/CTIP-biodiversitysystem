@@ -122,7 +122,7 @@ async function fakeSupabase(input, init = {}) {
 beforeEach((t) => {
   db = {
     qr_tags: [], specimens: [], observations: [], observation_photos: [], observation_comments: [],
-    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], sensor_node_nicknames: [], sensor_stable_ranges: [], telemetry: [], sensor_images: [],
+    observation_reviews: [], species: [], species_media: [], alerts: [], alert_notes: [], sensor_nodes: [], sensor_node_nicknames: [], sensor_stable_ranges: [], telemetry: [], sensor_images: [], alert_routes: [],
     notifications: [], audit_logs: [], profiles: [], zones: [],
     discussions: [], discussion_audience: [], discussion_posts: [], 'rpc/discussion_directory': [],
   };
@@ -1120,4 +1120,61 @@ test('POST /sync refuses 21 items, or none, with 422', async () => {
 test('POST /sync needs sign-in', async () => {
   const res = await request(app).post('/v1/sync').send({ device_id: 'phone-1', observations: [syncItem()] });
   assert.equal(res.status, 401);
+});
+
+test('sensor nodes: an admin registers, moves, links and turns off a node; officers cannot (CTIP-48)', async () => {
+  const post = (body, role = 'admin') => request(app).post('/v1/sensor-nodes').set(as(role)).send(body);
+  const made = await post({ lat: 3.81, lng: 113.78 });
+  assert.equal(made.status, 201);
+  assert.equal(made.body.status, 'active');
+  assert.deepEqual([made.body.lat, made.body.lng], [3.81, 113.78]);
+  assert.equal(db.sensor_nodes.length, 1);
+  assert.equal((await post({ lat: 3.81 })).status, 422); // lng missing
+  assert.equal((await post({ lat: 95, lng: 113 })).status, 422);
+  assert.equal((await post({ lat: 3.8, lng: 113.7, status: 'retired' })).status, 422); // not at registration
+  assert.equal((await post({ lat: 3.8, lng: 113.7, name: 'x' })).status, 422); // unknown field
+  assert.equal((await post({ lat: 3.8, lng: 113.7 }, 'officer')).status, 403);
+
+  const id = made.body.id;
+  const patch = (body, role = 'admin', nodeId = id) => request(app).patch(`/v1/sensor-nodes/${nodeId}`).set(as(role)).send(body);
+  const plant = crypto.randomUUID();
+  const edited = await patch({ lat: 3.82, lng: 113.79, specimen_id: plant });
+  assert.equal(edited.status, 200);
+  assert.deepEqual([edited.body.lat, edited.body.lng, edited.body.specimen_id], [3.82, 113.79, plant]);
+  assert.equal((await patch({ status: 'retired' })).body.status, 'retired');
+  assert.equal((await patch({ thresholds: { temperature_max: 30 } })).status, 200); // the old body still works
+  assert.equal((await patch({})).status, 422);
+  assert.equal((await patch({ lat: 3.9 })).status, 422); // lat without lng
+  assert.equal((await patch({ status: 'gone' })).status, 422);
+  assert.equal((await patch({ status: 'active' }, 'officer')).status, 403);
+  assert.equal((await patch({ status: 'active' }, 'admin', crypto.randomUUID())).status, 404);
+});
+
+test('alert routing: an admin narrows what an officer hears about, and resets it (CTIP-48)', async () => {
+  db.profiles.push(
+    { id: users.officer, role: 'officer', is_active: true },
+    { id: users.botanist, role: 'botanist', is_active: true },
+  );
+  const node = crypto.randomUUID();
+  const put = (userId, body, role = 'admin') => request(app).put(`/v1/alert-routes/${userId}`).set(as(role)).send(body);
+  const saved = await put(users.officer, { node_ids: [node, node], min_severity: 'high' });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body.node_ids, [node]); // duplicates dropped
+  assert.equal(saved.body.min_severity, 'high');
+  assert.equal(saved.body.updated_by, users.admin);
+  const listed = await request(app).get('/v1/alert-routes').set(as('admin'));
+  assert.equal(listed.status, 200);
+  assert.equal(listed.body.length, 1);
+
+  assert.equal((await put(users.botanist, { node_ids: null, min_severity: 'low' })).status, 404); // botanists get no alerts
+  assert.equal((await put(crypto.randomUUID(), { node_ids: null, min_severity: 'low' })).status, 404);
+  assert.equal((await put(users.officer, { node_ids: null, min_severity: 'urgent' })).status, 422);
+  assert.equal((await put(users.officer, { node_ids: ['x'], min_severity: 'low' })).status, 422);
+  assert.equal((await put(users.officer, { min_severity: 'low' })).status, 422); // node_ids must be said
+  assert.equal((await put(users.officer, { node_ids: null, min_severity: 'low' }, 'officer')).status, 403);
+  assert.equal((await request(app).get('/v1/alert-routes').set(as('officer'))).status, 403);
+
+  const cleared = await request(app).delete(`/v1/alert-routes/${users.officer}`).set(as('admin'));
+  assert.equal(cleared.status, 204);
+  assert.equal(db.alert_routes.length, 0);
 });

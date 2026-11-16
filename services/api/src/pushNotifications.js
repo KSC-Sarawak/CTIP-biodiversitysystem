@@ -61,23 +61,27 @@ export async function sendPushToUsers({ db: clientDb, userIds, title, body, data
 
     if (!messages.length) return;
 
-    // Send chunks to Expo Push API in batches of 100
-    const chunkSize = 100;
-    for (let i = 0; i < messages.length; i += chunkSize) {
-      const chunk = messages.slice(i, i + chunkSize);
-      await fetch(EXPO_PUSH_URL, {
-        method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Accept-Encoding': 'gzip, deflate',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(chunk),
-      }).catch((err) => {
-        console.warn('Expo push send error:', err?.message || err);
-      });
-    }
+    await sendExpoMessages(messages);
   } catch (err) {
     console.warn('sendPushToUsers failure:', err?.message || err);
+  }
+}
+
+// Send ready-made Expo messages, 100 per request (Expo's limit). Never throws.
+export async function sendExpoMessages(messages) {
+  const chunkSize = 100;
+  for (let i = 0; i < messages.length; i += chunkSize) {
+    const chunk = messages.slice(i, i + chunkSize);
+    await fetch(EXPO_PUSH_URL, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(chunk),
+    }).catch((err) => {
+      console.warn('Expo push send error:', err?.message || err);
+    });
   }
 }

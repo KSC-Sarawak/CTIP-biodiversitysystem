@@ -1609,17 +1609,30 @@ paths:
       tags: [Sensors]
       operationId: createSensorNode
       summary: Register a sensor node (admin only, CTIP-48)
+      description: >
+        The database makes the node's id; give it to the gateway as node_id.
+        lat and lng are where the node is installed, used for the map and the
+        "Node moved" alert. Status starts as active unless maintenance is asked.
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: '#/components/schemas/SensorNodeInput' }
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lat, lng]
+              properties:
+                lat: { type: number, minimum: -90, maximum: 90 }
+                lng: { type: number, minimum: -180, maximum: 180 }
+                specimen_id: { type: [string, 'null'], format: uuid, description: The plant this node guards }
+                status: { type: string, enum: [active, maintenance] }
       responses:
         '201':
           description: Created
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SensorNode' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /sensor-nodes/{id}:
     get:
@@ -1638,11 +1651,14 @@ paths:
     patch:
       tags: [Sensors]
       operationId: updateSensorNode
-      summary: Update status or alert thresholds (admin)
+      summary: Edit a node, or turn it off (admin)
       description: >
-        Admin only, including the alert limits (thresholds); officers can read
-        nodes but not change them (CTIP-48). The database enforces this too
-        (migration 20261105200000_sensor_nodes_admin_manage).
+        Admin only; officers can read nodes but not change them (CTIP-48). The
+        database enforces this too (migration 20261105200000_sensor_nodes_admin_manage).
+        Send any of lat and lng (together), specimen_id, status and thresholds.
+        Status retired turns the node off: its readings and photos are then
+        refused (404) and it never raises a silent alert. 422 PLANT_NOT_FOUND
+        for an unknown specimen_id.
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -1736,6 +1752,17 @@ paths:
       description: |
         Called by the MQTT bridge and the sensor simulator, not by the nodes
         themselves: nodes publish to MQTT (see "Sensor data flow" at the top).
+
+        Alerts (CTIP-38, CTIP-48, CTIP-76, CTIP-77): database triggers on
+        the stored readings open "Temperature too high" and the like
+        (outside the stable range) and "Node moved" (a GPS position 50 m or
+        more from where the node was installed). A reading also sets an
+        offline node back to active. Officers and admins are told in the
+        app, following the alert routing (see /alert-routes), and the API
+        sends the same words as a phone push. No text holds a coordinate.
+        The API also raises "Node silent" for an active node with no reading
+        for NODE_SILENT_MINUTES (default 15): on readings, and every minute
+        while it runs.
       security:
         - sensorKey: []
       requestBody:
@@ -1964,6 +1991,64 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/AlertNote' }
+
+  /alert-routes:
+    get:
+      tags: [Alerts]
+      operationId: listAlertRoutes
+      summary: Who hears about which alerts (admin, CTIP-48)
+      description: >
+        One row per officer or admin whose alerts an admin narrowed. Anyone
+        with no row hears about every alert. Followed by the in-app
+        notifications and the phone pushes for new alerts.
+      responses:
+        '200':
+          description: Routes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AlertRoute' }
+
+  /alert-routes/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    put:
+      tags: [Alerts]
+      operationId: setAlertRoute
+      summary: Choose which nodes and severities one officer or admin hears about (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [node_ids, min_severity]
+              properties:
+                node_ids:
+                  type: [array, 'null']
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+                  description: null for every node; an empty list for none
+                min_severity: { $ref: '#/components/schemas/Severity' }
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlertRoute' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Alerts]
+      operationId: clearAlertRoute
+      summary: Back to every alert for this person (admin)
+      responses:
+        '204': { description: Cleared }
 
   # ------------------------------------------------------------- Discussions
   /discussions:
@@ -3029,8 +3114,13 @@ components:
       properties:
         id: { type: string, format: uuid }
         node_id: { type: string, format: uuid }
-        type: { type: string, examples: ['soil_moisture_low'] }
-        reading: { type: object, additionalProperties: true }
+        type: { type: string, examples: ['Soil moisture too low', 'Node silent', 'Node moved'] }
+        reading:
+          type: object
+          additionalProperties: true
+          description: >
+            What raised it, in words: the value and stable range, silent_for,
+            or moved (how far). Never a coordinate.
         severity: { $ref: '#/components/schemas/Severity' }
         status: { $ref: '#/components/schemas/AlertStatus' }
         assigned_to: { type: [string, 'null'], format: uuid }
@@ -3040,6 +3130,15 @@ components:
         resolved_at: { type: [string, 'null'], format: date-time }
         outcome: { type: [string, 'null'] }
         created_at: { type: string, format: date-time }
+
+    AlertRoute:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        node_ids: { type: [array, 'null'], items: { type: string, format: uuid } }
+        min_severity: { $ref: '#/components/schemas/Severity' }
+        updated_by: { type: [string, 'null'], format: uuid }
+        updated_at: { type: string, format: date-time }
 
     AlertNote:
       type: object

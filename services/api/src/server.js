@@ -2,6 +2,7 @@ import { createApp } from './app.js';
 import { createVerifier } from './auth/verifyToken.js';
 import { checkSecureConfig } from './https.js';
 import { MFA_ROLES } from './mfa.js';
+import { startSilentWatch } from './alertWatch.js';
 
 checkSecureConfig(process.env);
 
@@ -20,3 +21,6 @@ const app = createApp({
 
 const port = process.env.PORT ?? 8000;
 app.listen(port, () => console.log(`API running on http://localhost:${port}/v1`));
+
+// Silent nodes (CTIP-76): checked now and every minute while the API runs.
+startSilentWatch();
