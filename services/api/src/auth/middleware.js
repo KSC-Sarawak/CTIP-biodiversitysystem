@@ -44,9 +44,23 @@ export function allow(...roles) {
 // 403 unless an officer or admin finished the second sign-in step (VA-70): their
 // token must say aal2. `roles` are the roles that need it; `setupRoute` lets the
 // two MFA routes through so the step can be done at all.
-export function requireMfa(roles, setupRoute = false) {
+// `resetLinkRoute` also lets through a session opened from a password-reset
+// email in the last 15 minutes, so the new password can be set (POST /me/password).
+// Supabase itself still asks that session for the 6-digit code when the person has
+// an authenticator app (see the MFA_CODE_NEEDED answer there).
+// Supabase marks a session from a reset link as amr method "otp" (checked against
+// the real Auth server on 16 Nov 2026), the same as the lost-phone email link;
+// "recovery" and "magiclink" are accepted too, as older Auth versions used them.
+export const RESET_LINK_MAX_AGE_S = 15 * 60;
+const EMAIL_LINK_METHODS = ['otp', 'recovery', 'magiclink'];
+export function fromResetLink(amr, now = Date.now()) {
+  return (amr ?? []).some((a) => EMAIL_LINK_METHODS.includes(a?.method) && now / 1000 - Number(a.timestamp) <= RESET_LINK_MAX_AGE_S);
+}
+
+export function requireMfa(roles, setupRoute = false, resetLinkRoute = false) {
   return (req, res, next) => {
     if (setupRoute || !roles.includes(req.user?.role) || req.user.aal === 'aal2') return next();
+    if (resetLinkRoute && fromResetLink(req.user.amr)) return next();
     return res.status(403).json({ code: 'MFA_REQUIRED', message: 'Sign in again and enter the 6-digit code from your authenticator app.' });
   };
 }

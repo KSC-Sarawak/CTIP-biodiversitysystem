@@ -166,6 +166,36 @@ test('password reset: 202 for any address, so it never reveals who has an accoun
   assert.equal(calls[0].path.startsWith('/auth/v1/recover'), true);
 });
 
+// The link goes back to the site the request came from, only when it is ours.
+test('password reset: the link opens the site it was asked from (Cloudflare or localhost), never another site', async () => {
+  const sentTo = async (origin) => {
+    calls = [];
+    resetAttemptLimits();
+    let req = request(app).post('/v1/auth/password-reset');
+    if (origin) req = req.set('Origin', origin);
+    assert.equal((await req.send({ email: 'officer@example.com' })).status, 202);
+    const recover = calls.find((c) => c.path.startsWith('/auth/v1/recover'));
+    return new URL(recover.path, 'https://x').searchParams.get('redirect_to');
+  };
+  const before = process.env.PASSWORD_RESET_REDIRECT_URL;
+  process.env.PASSWORD_RESET_REDIRECT_URL = 'https://ctip-biodiversitysystem.pages.dev/';
+  try {
+    assert.equal(await sentTo('https://ctip-biodiversitysystem.pages.dev'), 'https://ctip-biodiversitysystem.pages.dev/');
+    assert.equal(await sentTo('https://abc123.ctip-biodiversitysystem.pages.dev'), 'https://abc123.ctip-biodiversitysystem.pages.dev/');
+    assert.equal(await sentTo('http://localhost:5173'), 'http://localhost:5173/');
+    assert.equal(await sentTo('http://127.0.0.1:4173'), 'http://127.0.0.1:4173/');
+    // Not ours, or no Origin (the mobile app): the configured address.
+    for (const other of ['https://evil.example', 'https://ctip-biodiversitysystem.pages.dev.evil.example', 'http://ctip-biodiversitysystem.pages.dev', 'https://evilctip-biodiversitysystem.pages.dev', 'http://localhost.evil.example', null]) {
+      assert.equal(await sentTo(other), 'https://ctip-biodiversitysystem.pages.dev/', `origin ${other}`);
+    }
+    delete process.env.PASSWORD_RESET_REDIRECT_URL;
+    assert.equal(await sentTo('https://evil.example'), null, 'nothing configured: Supabase uses its Site URL');
+  } finally {
+    if (before === undefined) delete process.env.PASSWORD_RESET_REDIRECT_URL;
+    else process.env.PASSWORD_RESET_REDIRECT_URL = before;
+  }
+});
+
 test('change password: needs a token; a wrong current password changes nothing', async () => {
   assert.equal((await request(app).post('/v1/me/password').send({ new_password: 'new-password' })).status, 401);
   const wrong = await request(app).post('/v1/me/password').set('Authorization', 'Bearer access-1')

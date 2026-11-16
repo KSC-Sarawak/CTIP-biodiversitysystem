@@ -22,7 +22,7 @@ import { PARK } from "../../../shared/site.js";
 // #/login?mfareset=1, which removes the old app and shows the set-up again.
 // Shown at #/login and on the Staff area page (#/staff) for anyone signed out.
 export default function Login() {
-  const { login, signIn, changePassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset, endedReason, clearEndedReason } = useStore();
+  const { login, signIn, changePassword, resetPassword, notify, apiStatus, mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset, endedReason, clearEndedReason } = useStore();
   const { query } = useRoute();
   const staff = getStaffPageContent(PARK);
   const [mode, setMode] = useState(query.mfareset ? "mfa-reset" : query.reset ? "reset" : query.expired ? "change" : "signin"); // signin | change | reset | first | mfa | mfa-setup | mfa-reset
@@ -31,6 +31,7 @@ export default function Login() {
   const [newPw, setNewPw] = useState("");
   const [pending, setPending] = useState(null); // user id waiting to choose a new password
   const [code, setCode] = useState(""); // the 6-digit code (VA-70)
+  const [resetNeedsCode, setResetNeedsCode] = useState(false); // reset link + authenticator app: the code too
   const [setup, setSetup] = useState(null); // { qr, secret, uri } while setting up the app
   const [busy, setBusy] = useState(false); // a sign-in or code check is on its way: no second click
   const [error, setError] = useState(""); // why the last sign-in failed, shown on the form
@@ -142,7 +143,30 @@ export default function Login() {
     </label>
   );
 
-  // The reset-link form and the first sign-in prompt: set the new password.
+  // The reset-link form: save the new password with the link's session. Someone
+  // with an authenticator app is then asked for its 6-digit code as well.
+  // Afterwards they sign in as usual, with the new password and the code.
+  const saveReset = async (e) => {
+    e.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    clearError();
+    const res = await resetPassword(newPw, resetNeedsCode ? code : undefined);
+    setBusy(false);
+    if (!res.ok) {
+      if (res.needCode) {
+        if (!resetNeedsCode) setCode("");
+        setResetNeedsCode(true);
+      }
+      return setError(res.message);
+    }
+    setResetNeedsCode(false);
+    setCode("");
+    switchTo("signin");
+    notify("Password changed. Sign in with your new password.");
+  };
+
+  // The first sign-in prompt: set the new password.
   const change = async (e) => {
     e.preventDefault();
     const res = await changePassword(null, newPw);
@@ -283,12 +307,20 @@ export default function Login() {
       )}
 
       {mode === "reset" && (
-        <form onSubmit={change}>
+        <form onSubmit={saveReset}>
           <h1>Choose a new password</h1>
           <p className="mute">You opened a password reset link. Choose your new password.</p>
+          {shownError && <p className="loginerr" role="alert"><Icon name="alert" size={16} /> {shownError}</p>}
           {newFields}
+          {resetNeedsCode && (
+            <>
+              <p className="mute small">Your account uses two-step sign-in, so enter the code from your authenticator app as well.</p>
+              {codeField}
+            </>
+          )}
           <div className="row wrap gap-top">
-            <button className="btn" type="submit"><Icon name="check" size={18} /> Save new password</button>
+            <button className="btn" type="submit" disabled={busy}><Icon name="check" size={18} /> {busy ? "Saving…" : "Save new password"}</button>
+            <button className="btn ghost" type="button" onClick={() => switchTo("change")}>Email me a new link</button>
           </div>
         </form>
       )}

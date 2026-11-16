@@ -5,6 +5,7 @@ import { ATTEMPT_LIMIT, ATTEMPT_WINDOW_MS, toSession } from './session.js';
 import { logAuthEvent } from './auditLog.js';
 import { supabaseFresh, supabaseService } from './supabase.js';
 import { isEmailRateLimit, emailLimitInfo, emailLimitMessage, recordEmailSent } from './emailLimit.js';
+import { linkTarget } from './resetRedirect.js';
 
 // Two-step sign-in with an authenticator app (VA-70, lecturer feedback; CTIP-50).
 // Every signed-in role (botanist, officer, admin) must use it: an access token
@@ -144,7 +145,7 @@ export const mfaHandlers = {
     const factors = await totpFactors(req.user.token);
     if (!factors) return fail(res, 502, 'AUTH_ERROR', AUTH_DOWN);
     if (!factors.some((f) => f.status === 'verified')) return fail(res, 409, 'MFA_NOT_SET_UP', 'Two-step sign-in is not set up yet, so there is nothing to reset.');
-    const emailRedirectTo = process.env.MFA_RESET_REDIRECT_URL || process.env.PASSWORD_RESET_REDIRECT_URL || undefined;
+    const emailRedirectTo = linkTarget(req, process.env.MFA_RESET_REDIRECT_URL || process.env.PASSWORD_RESET_REDIRECT_URL);
     const { error } = await supabaseFresh().auth.signInWithOtp({ email: req.user.email, options: { shouldCreateUser: false, emailRedirectTo } });
     if (isEmailRateLimit(error)) {
       const info = emailLimitInfo();

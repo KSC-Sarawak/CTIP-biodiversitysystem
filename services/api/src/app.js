@@ -33,7 +33,7 @@ export function createApp({ verify, handlers = defaultHandlers, corsOrigins = []
     } else {
       const key = `${method} ${path}`;
       const setup = MFA_SETUP_ROUTES.has(key);
-      v1[method](path, requireAuth(verify), allow(...roles), requireMfa(mfaRoles, setup),
+      v1[method](path, requireAuth(verify), allow(...roles), requireMfa(mfaRoles, setup, key === 'post /me/password'),
         requirePasswordChanged(setup || key === 'post /me/password'), handler);
     }
   }

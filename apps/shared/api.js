@@ -407,6 +407,40 @@ export async function signOutApi() {
   if (token) await apiFetch("/auth/sign-out", { method: "POST", token, timeout: 4000 });
 }
 
+/**
+ * The password-reset link's session. Like the lost-phone link it is only aal1
+ * (no 6-digit code yet), so it is kept here rather than stored: stored, the
+ * start-up load would be refused (MFA_REQUIRED) and sign it out before the new
+ * password could be saved.
+ */
+let passwordResetSession = null;
+export const hasPasswordResetSession = () => !!passwordResetSession;
+
+/**
+ * Saves the new password with the reset link's session. Someone with an
+ * authenticator app must give its 6-digit `code` too (Supabase asks for aal2):
+ * without one the answer is { ok: false, code: "MFA_CODE_NEEDED" } and the page
+ * asks for it. Afterwards the link's session is ended, so the person signs in
+ * normally with the new password and the code.
+ */
+export async function resetPasswordApi(newPassword, code) {
+  const session = passwordResetSession;
+  if (!session) return { ok: false, status: 0, code: "LINK_GONE", message: "Open the link in the reset email again, or ask for a new one." };
+  let token = session.access_token;
+  if (code) {
+    const verified = await apiFetch("/auth/mfa/verify", { method: "POST", token, body: { code } });
+    if (!verified.ok) return verified;
+    token = verified.data.access_token;
+    passwordResetSession = { ...session, ...verified.data }; // a retry uses the aal2 session
+  }
+  const res = await apiFetch("/me/password", { method: "POST", token, body: { new_password: newPassword } });
+  if (res.ok) {
+    passwordResetSession = null;
+    await apiFetch("/auth/sign-out", { method: "POST", token, timeout: 4000 });
+  }
+  return res;
+}
+
 /** POST /v1/auth/password-reset: emails a link that opens the website signed in. */
 export const passwordResetApi = (email) => apiFetch("/auth/password-reset", { method: "POST", token: null, body: { email } });
 
@@ -436,6 +470,7 @@ export function takeSessionFromUrl() {
   };
   const type = params.get("type") || "signin";
   if (type === "magiclink") mfaResetSession = session; // lost-phone link: see mfaResetApi()
+  else if (type === "recovery") passwordResetSession = session; // reset link: see resetPasswordApi()
   else setSession(session);
   return type;
 }

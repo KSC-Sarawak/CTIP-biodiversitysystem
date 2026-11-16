@@ -1,21 +1,26 @@
 # Branch `rick-3-fixes`: Monitoring rework, stable-range alerts, and easier-to-read pages
 
 *Written 16 Nov 2026. Covers everything on this branch compared with `main` (`34d1519`):
-one commit, `c94a0fd` (personal node names and stable-range alerts), plus uncommitted
-changes to 10 files and 3 new files. Web app, API and database. The mobile app is not changed.*
+two commits, `c94a0fd` (personal node names and stable-range alerts) and `2284b95` (items
+4–8), plus uncommitted changes to 10 files and 2 new files for the password reset (items
+9–10). Web app, API and database. The mobile app is not changed.*
 
 | # | What | Where | State |
 |---|---|---|---|
 | 1 | Officers and admins can give a sensor node their own name | Monitoring, API, DB | Committed |
 | 2 | Alerts come from one fixed "stable range" per reading, checked in the database | DB, settings file, script | Committed |
 | 3 | Monitoring page rebuilt: urgent things first, red parts on the charts, time slider, one Alerts section | Monitoring | Committed |
-| 4 | Monitoring: the node list is now a normal table | Monitoring | Uncommitted |
-| 5 | Account page redesigned: greeting, profile strength, password checks | Account | Uncommitted |
-| 6 | Audit log: a coloured badge per kind, a one-line change, Expand for the full change | Admin → Audit | Uncommitted |
-| 7 | Long lists show 10 rows at a time with **View more** | Species, QR tags, Dashboard | Uncommitted |
-| 8 | QR tags list shows a small preview of each code | QR tags | Uncommitted |
+| 4 | Monitoring: the node list is now a normal table | Monitoring | Committed |
+| 5 | Account page redesigned: greeting, profile strength, password checks | Account | Committed |
+| 6 | Audit log: a coloured badge per kind, a one-line change, Expand for the full change | Admin → Audit | Committed |
+| 7 | Long lists show 10 rows at a time with **View more** | Species, QR tags, Dashboard | Committed |
+| 8 | QR tags list shows a small preview of each code | QR tags | Committed |
+| 9 | Reset emails link back to the site they were asked from (Cloudflare or localhost) | API | Uncommitted |
+| 10 | "Forgot password" works again for staff with two-step sign-in | API, sign-in page | Uncommitted |
 
-Read [Before this goes live](#before-this-goes-live) before merging.
+Read [Before this goes live](#before-this-goes-live) before merging, and the
+[security problem](#security-problem-found-email-alone-can-remove-two-step-sign-in), which is
+**not fixed** on this branch.
 
 ---
 
@@ -33,7 +38,24 @@ Read [Before this goes live](#before-this-goes-live) before merging.
 - [ ] **API contract changed** (`packages/api-contract/openapi.yaml`): new route
       `PUT /sensor-nodes/{id}/nickname`, two new lists in the workspace load, and the
       `thresholds` description. The contract test asks for **two approvals**.
-- [ ] Commit the uncommitted changes (items 4–8) before opening the PR.
+- [ ] **Supabase redirect list** (main project, Authentication → URL Configuration). Without
+      it, reset links still open `localhost` (item 9):
+  - **Site URL:** `https://ctip-biodiversitysystem.pages.dev`
+  - **Redirect URLs:** add all four:
+    ```
+    https://ctip-biodiversitysystem.pages.dev/**
+    https://*.ctip-biodiversitysystem.pages.dev/**
+    http://localhost:*/**
+    http://127.0.0.1:*/**
+    ```
+- [ ] Optionally set `PASSWORD_RESET_REDIRECT_URL=https://ctip-biodiversitysystem.pages.dev/` on
+      Render. It is only used for requests with no browser address, such as the mobile app.
+- [ ] **The Render API redeploy above is also needed for item 10.** Until then, a reset on the live site
+      fails with "Sign in again and enter the 6-digit code…".
+- [ ] Delete the test account left in **Daun Sense Test**: run
+      `delete from auth.users where email = 'reset-flow-test@example.invalid';` in its SQL editor.
+- [ ] Commit the uncommitted changes (items 9–10) before opening the PR.
+- [ ] Decide what to do about the [security problem](#security-problem-found-email-alone-can-remove-two-step-sign-in).
 
 ---
 
@@ -139,14 +161,14 @@ Laid out so the most urgent thing is read first:
 **Alert cards:** the next step (assign, acknowledge) stays visible; notes and resolving are
 folded under **Notes and resolve** until needed. Cards show the reading and the stable range.
 
-## 4. Monitoring: node list as a table *(uncommitted)*
+## 4. Monitoring: node list as a table
 
 The node cards are replaced by a standard table: **Node, Status, Temp, Humidity, Soil,
 Distance, Motion, Updated**, and a rename button. Values outside the range are red. The open
 alert link sits under the status. The selected row is highlighted, and the whole row is
 still clickable. The page no longer uses the `plain` shell, so it matches the other pages.
 
-## 5. Account page redesign *(uncommitted)*
+## 5. Account page redesign
 
 `apps/web/src/pages/Account.jsx`
 
@@ -164,7 +186,7 @@ still clickable. The page no longer uses the `plain` shell, so it matches the ot
   and `-` when there is no join date.
 - The page now uses `Shell`, including while loading.
 
-## 6. Audit log *(uncommitted)*
+## 6. Audit log
 
 `apps/web/src/pages/Admin.jsx`
 
@@ -181,7 +203,7 @@ still clickable. The page no longer uses the `plain` shell, so it matches the ot
   and highlighted.
 - Columns are now *When, Who, What, Change*. An empty filter says *No entries of this kind yet.*
 
-## 7. Long lists: 10 at a time *(uncommitted)*
+## 7. Long lists: 10 at a time
 
 New hook `apps/web/src/useViewMore.jsx`: shows `step` rows, then *Showing X of Y*, **View N
 more**, **Show all** and **Show less**.
@@ -193,10 +215,140 @@ more**, **Show all** and **Show less**.
 - **Dashboard (tagged plants):** 10 rows per page by default (was 25).
 - These tables use a new `roomy` style: more padding, bigger text.
 
-## 8. QR tags: code preview *(uncommitted)*
+## 8. QR tags: code preview
 
 `apps/web/src/pages/Tags.jsx`. The tag ID cell now shows a small QR preview with the ID.
 Clicking it opens the big, scannable code. The separate **QR** button is removed.
+
+## 9. Reset emails open the right site *(uncommitted)*
+
+**Bug:** a colleague clicked the link in a password-reset email and got "localhost refused to
+connect". The email sent people to `localhost`, so it only worked on a computer running the
+dev server.
+
+**Cause:** the reset email's link address was `PASSWORD_RESET_REDIRECT_URL`, else Supabase's
+Site URL. Neither was set to the real site, so Supabase used its default, a `localhost` address.
+
+**Fix:** new `services/api/src/resetRedirect.js`. The link goes back to the site the request came
+from (the browser's `Origin` header), when that site is one of ours:
+
+- `https://ctip-biodiversitysystem.pages.dev`, and its preview copies (`https://<anything>.ctip-biodiversitysystem.pages.dev`)
+- `http://localhost:<any port>` and `http://127.0.0.1:<any port>`
+- anything in `CORS_ORIGINS`
+
+Any other address is ignored, including look-alike domains and plain `http://` for the real
+site, so a reset link can never hand a session to someone else's site. With no `Origin` (the
+mobile app), it falls back to `PASSWORD_RESET_REDIRECT_URL`, then Supabase's Site URL.
+
+Used by both emails that link back to the site: **Forgot password**
+(`POST /auth/password-reset`) and **Lost your phone?** (`POST /auth/mfa/recovery`).
+
+Supabase still refuses any address not on its Redirect URLs list and silently uses the Site URL
+instead, so the list in [Before this goes live](#before-this-goes-live) is required.
+
+Opening the site from another device by the computer's network address
+(`http://192.168.x.x:5173`) is not covered: those links fall back to the default.
+
+## 10. "Forgot password" works again with two-step sign-in *(uncommitted)*
+
+**Bug:** after opening a reset link and typing a new password, **Save new password** answered
+"Enter your email". Against the API before this fix it answered "Sign in again and enter
+the 6-digit code from your authenticator app" instead. Either way the password never changed.
+
+**Cause** (since two-step sign-in became compulsory for all staff):
+
+1. A reset link signs the person in with the email link only, no 6-digit code (an `aal1` session).
+2. The API refuses `aal1` sessions on every route except the set-up ones (`MFA_REQUIRED`),
+   including `POST /me/password`.
+3. On page load the website's workspace request got that refusal and signed the session out.
+   With no session left, Save fell through to the "email me a link" path: "Enter your email".
+4. Separately, Supabase will not change the password of an account that has an authenticator
+   app until the session has passed the 6-digit code (`aal2`).
+
+**Fix:**
+
+- **API** (`services/api/src/auth/middleware.js`, `app.js`): a session opened from an email link
+  in the last **15 minutes** may call `POST /me/password`, and nothing else.
+- **API** (`services/api/src/session.js`): when Supabase asks for the code, the answer is
+  `403 MFA_CODE_NEEDED` with a plain message.
+- **Website** (`apps/shared/api.js`): the reset link's session is kept aside in memory, not
+  stored, so the page load cannot sign it out. This is the same approach the lost-phone link already uses.
+  New `resetPasswordApi`: with a code, it first calls `POST /auth/mfa/verify` with the link's session
+  to get an `aal2` one. After saving it closes the link's session.
+- **Store** (`apps/shared/StoreProvider.js`): new `resetPassword(newPassword, code)`. The old
+  `changePassword` is unchanged; the mobile app and the first sign-in still use it.
+- **Sign-in page** (`apps/web/src/pages/Login.jsx`): the reset form shows its errors on the
+  form, shows a **6-digit code** box when the API asks for it, and has **Email me a new
+  link** for an expired link or a reloaded page.
+
+**What the person sees now:**
+
+1. **Forgot password?** → email → open the link.
+2. Type the new password, **Save new password**.
+3. If the account has an authenticator app, the same page asks for its 6-digit code. The code
+   comes from the app on the phone; no password is needed for that.
+4. Back to **Staff sign in** with "Password changed. Sign in with your new password."
+   Then they sign in as usual, password and code.
+
+Someone who has forgotten their password **and** lost their phone still cannot get back in on
+their own: **Lost your phone?** needs the password first. An admin has to help.
+
+### Checked against real Supabase (Daun Sense Test)
+
+Run on 16 Nov 2026 with the local API and a throwaway officer account. No email was needed:
+the recovery token was written straight into `auth.one_time_tokens`, and the real
+Supabase Auth turned it into a session as an email link would.
+
+| Step | Account without an app | Account with an authenticator app |
+|---|---|---|
+| Open the reset link | `aal1` session | `aal1` session |
+| Save the new password | **204, saved** | `403 MFA_CODE_NEEDED` |
+| Enter the 6-digit code | - | `aal2` session, then **204, saved** |
+| Sign in with the new password | Works, goes to app set-up | Works, asks for the code |
+
+The real run caught one wrong assumption: Supabase marks a reset-link session with the amr
+method **`otp`**, not `recovery`. The first version only accepted `recovery`, so the real flow
+still failed. `middleware.js` now accepts `otp` (and `recovery`/`magiclink` for older Auth
+versions).
+
+**Testing locally:** the website only uses your local API when `apps/web/.env` has
+`VITE_API_URL=http://localhost:8000`. Without it, the Vite dev server sends `/v1` to the Render
+API, which does not have these fixes until it is redeployed. Restart Vite after changing it.
+
+---
+
+## Security problem found: email alone can remove two-step sign-in
+
+**Not fixed on this branch. It existed before these changes.** Found while checking item 10.
+
+**What is wrong:** **Lost your phone?** (CTIP-50) is meant to need the password *and* the
+email. Step 1 (`POST /auth/mfa/recovery`) needs the password, then emails a sign-in link.
+Step 2 (`POST /auth/mfa/reset`) removes the authenticator app. It accepts any session from an
+email link in the last 15 minutes (`fromEmailLink` in `services/api/src/mfa.js`).
+
+It is meant to refuse a **password-reset** link's session, and tells the two apart by the amr
+method `recovery`. Real Supabase marks **both** links `otp` (seen in the real run above). So
+step 2 cannot tell them apart, and the password check in step 1 can be skipped.
+
+**How it could be misused:** someone who gets into a staff member's **email account only**:
+
+1. On the sign-in page, clicks **Forgot password?** for that address and opens the reset link
+   from the email. They now hold an `aal1` session without the password.
+2. Sends that session to `POST /auth/mfa/reset`. The authenticator app is removed.
+3. With no app left, Supabase lets that same session set a new password.
+4. Signs in with the new password and sets up their own authenticator app.
+
+Result: full account takeover with email access alone. Two-step sign-in is defeated.
+
+**How sure this is:** worked out from the code and the real token seen on 16 Nov. Step 2 was
+**not** run, because the local API has no `SUPABASE_SECRET_KEY`. It should be confirmed on Daun
+Sense Test before and after a fix.
+
+**Suggested fix:** give step 2 its own proof that step 1 (the password) happened, because the token
+cannot carry it. For example: when step 1 accepts the password, store a short-lived, single-use
+value for that user (in a table only the API can read). Put it in the emailed link's address
+(`emailRedirectTo` with `?mfa_reset=<value>`). Step 2 then requires and uses up that value.
+Until then, consider turning **Lost your phone?** off and letting an admin remove the app instead.
 
 ---
 
@@ -209,6 +361,8 @@ Clicking it opens the big, scannable code. The separate **QR** button is removed
   alert while it is open, however many bad readings follow.
 - QR tags: no **QR** button. Click the code preview.
 - Species, QR tags, Dashboard: only 10 rows at first.
+- Password reset: after saving, the person is sent to sign in instead of straight to the
+  Dashboard. Someone with an authenticator app is also asked for its code on the reset page.
 
 ## Tests
 
@@ -221,11 +375,25 @@ Clicking it opens the big, scannable code. The separate **QR** button is removed
 | **New** `tests/long-lists.spec.js` | Species View more and reset on search; tags 10 at a time with preview; audit badges, summary and Expand; Dashboard 10 rows |
 | `tests/helpers/mockApi.js` | Mocks the nickname route, returns `sensor_node_nicknames`, `sensor_stable_ranges`, tags, audit logs and an optional staff species list |
 
-The suites were **not re-run** when this note was written. Run before merging:
-`npm run api:test`, `npm run web:lint`, and `npx playwright test` in `apps/web`.
+| API `session.test.js` (items 9–10) | New: the reset link opens Cloudflare, a preview, `localhost` or `127.0.0.1` as asked; look-alike sites and a missing `Origin` get the fallback |
+| API `mfa-recovery.test.js` (items 9–10) | New: lost-phone link opens the site asked from; a fresh email-link session (`otp` and `recovery`) may set the password and nothing else; an old one or a password-only one may not; `MFA_CODE_NEEDED` when Supabase wants the code |
+| **New** `apps/web/tests/password-reset.spec.js` | Reset page without an app (saved, back to sign in, never "Enter your email") and with an app (asks for the code, verifies, saves with the `aal2` session) |
 
-Not tested yet: the stable-range trigger against real readings on Supabase, and
-`npm run sensor-ranges:push` against the live project.
+Results on 16 Nov, after items 9–10:
+
+| Suite | Result |
+|---|---|
+| API (`cd services/api && node --test`) | 268 pass |
+| Web lint (`npm run web:lint`) | Pass |
+| Playwright: `password-reset`, `every-page`, `auth-supabase-accounts`, `availability-security`, `account-page` | 80 pass, 10 skipped |
+| Mobile (`npm --prefix apps/mobile test`) | Pass |
+| Real Supabase (Daun Sense Test), reset flow | Pass for both cases, see item 10 |
+
+The other Playwright files were not re-run after items 9–10.
+
+Not tested yet: the stable-range trigger against real readings on Supabase,
+`npm run sensor-ranges:push` against the live project, and a real reset email from the
+Cloudflare site (needs the Render redeploy and the Redirect URLs first).
 
 ## Files
 
@@ -248,3 +416,12 @@ Not tested yet: the stable-range trigger against real readings on Supabase, and
 | `apps/web/src/App.css` | Styles for all of the above |
 | `apps/web/src/components/Bits.jsx` | Trailing newline only |
 | `services/api/test/field-and-staff.test.js`, `apps/web/tests/*` | Tests listed above |
+| `services/api/src/resetRedirect.js` | **New.** Which site an emailed link goes back to (item 9) |
+| `services/api/src/session.js` | Reset email uses it; `MFA_CODE_NEEDED` answer (items 9–10) |
+| `services/api/src/mfa.js` | Lost-phone email uses it (item 9) |
+| `services/api/src/auth/middleware.js`, `app.js` | A fresh email-link session may call `POST /me/password` (item 10) |
+| `services/api/.env.example` | Explains the redirect and the Supabase Redirect URLs |
+| `apps/shared/api.js` | Reset link's session kept aside; `resetPasswordApi` (item 10) |
+| `apps/shared/StoreProvider.js` | `resetPassword` (item 10) |
+| `apps/web/src/pages/Login.jsx` | Reset form: errors, 6-digit code, new-link button (item 10) |
+| `services/api/test/session.test.js`, `mfa-recovery.test.js`, `apps/web/tests/password-reset.spec.js` | Tests for items 9–10 |

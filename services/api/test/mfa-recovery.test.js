@@ -18,6 +18,7 @@ const people = {
   password: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'password', timestamp: now() }] },
   link: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'otp', timestamp: now() }] },
   oldlink: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'otp', timestamp: now() - EMAIL_LINK_MAX_AGE_S - 60 }] },
+  oldresetlink: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'recovery', timestamp: now() - 16 * 60 }] },
   resetlink: { sub: id, email: 'officer@example.com', user_role: 'officer', aal: 'aal1', amr: [{ method: 'recovery', timestamp: now() }] },
 };
 const verify = async (token) => {
@@ -29,6 +30,7 @@ const app = createApp({ verify, mfaRoles: MFA_ROLES });
 let calls;
 let factors;
 let otpError;
+let putNeedsAal2 = false;
 const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
 globalThis.fetch = async (input, init = {}) => {
@@ -38,6 +40,11 @@ globalThis.fetch = async (input, init = {}) => {
   calls.push({ method, path: url.pathname, body, search: url.search });
   const p = url.pathname.replace('/auth/v1', '');
   if (p === '/user' && method === 'GET') return json(200, { id, factors });
+  if (p === '/user' && method === 'PUT') {
+    // Supabase: an account with a verified app needs aal2 to change its password.
+    if (putNeedsAal2) return json(401, { code: 401, error_code: 'insufficient_aal', msg: 'AAL2 required to update password' });
+    return json(200, { id });
+  }
   if (p === '/otp') return otpError ? json(429, otpError) : json(200, {});
   if (p === `/admin/users/${id}/factors` && method === 'GET') return json(200, factors);
   const del = new RegExp(`^/admin/users/${id}/factors/([^/]+)$`).exec(p);
@@ -52,6 +59,7 @@ beforeEach(() => {
   calls = [];
   factors = [{ id: crypto.randomUUID(), factor_type: 'totp', status: 'verified' }];
   otpError = null;
+  putNeedsAal2 = false;
   resetAttemptLimits();
   resetEmailLimit();
 });
@@ -127,4 +135,36 @@ test('fromEmailLink accepts otp and magiclink only, within 15 minutes', () => {
   assert.equal(fromEmailLink([{ method: 'otp', timestamp: t / 1000 - 60 }], t), true);
   assert.equal(fromEmailLink([{ method: 'password', timestamp: t / 1000 }], t), false);
   assert.equal(fromEmailLink(undefined, t), false);
+});
+
+test('recovery: the sign-in link opens the site it was asked from', async () => {
+  const res = await request(app).post('/v1/auth/mfa/recovery').set('Authorization', 'Bearer password').set('Origin', 'http://localhost:5173');
+  assert.equal(res.status, 202);
+  const otp = calls.find((c) => c.path.endsWith('/otp'));
+  assert.equal(new URLSearchParams(otp.search).get('redirect_to'), 'http://localhost:5173/');
+});
+
+// The password-reset link's session is only aal1. It may set the new password
+// (and nothing else), and only while the link is fresh.
+test('reset link: a fresh one may set the new password; nothing else, and not an old one', async () => {
+  const ok = await request(app).post('/v1/me/password').set('Authorization', 'Bearer resetlink').send({ new_password: 'brand-new-pass' });
+  assert.equal(ok.status, 204);
+  // What the real Supabase gives a reset link: amr "otp".
+  const real = await request(app).post('/v1/me/password').set('Authorization', 'Bearer link').send({ new_password: 'brand-new-pass' });
+  assert.equal(real.status, 204);
+  assert.ok(calls.some((c) => c.path === '/auth/v1/user' && c.method === 'PUT'));
+  const other = await request(app).get('/v1/me').set('Authorization', 'Bearer resetlink');
+  assert.equal(other.status, 403);
+  assert.equal(other.body.code, 'MFA_REQUIRED');
+  const old = await request(app).post('/v1/me/password').set('Authorization', 'Bearer oldresetlink').send({ new_password: 'brand-new-pass' });
+  assert.equal(old.body.code, 'MFA_REQUIRED');
+  const notLink = await request(app).post('/v1/me/password').set('Authorization', 'Bearer password').send({ new_password: 'brand-new-pass' });
+  assert.equal(notLink.body.code, 'MFA_REQUIRED', 'a password-only session still needs the code');
+});
+
+test('reset link with an authenticator app: Supabase wants the code, so the answer says so', async () => {
+  putNeedsAal2 = true;
+  const res = await request(app).post('/v1/me/password').set('Authorization', 'Bearer resetlink').send({ new_password: 'brand-new-pass' });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'MFA_CODE_NEEDED');
 });

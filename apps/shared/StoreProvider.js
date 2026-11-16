@@ -19,6 +19,7 @@ import {
   mfaResetApi,
   signOutApi,
   passwordResetApi,
+  resetPasswordApi,
   changePasswordApi,
   tokenClaims,
   fetchPublicSpecies,
@@ -823,8 +824,21 @@ function collectionMatches(a = [], b = []) {
 
   const signIn = (id) => setUserId(id);
 
-  // Signed in through a password-reset link, with a new password: sets it.
-  // Otherwise: emails a reset link to that address.
+  // Opened a password-reset link: saves the new password with that link's
+  // session (plus the 6-digit code for someone with an authenticator app).
+  // { ok } or { ok: false, message, needCode }; afterwards they sign in again.
+  const resetPassword = async (next, code) => {
+    if (!next || next.length < 8) return { ok: false, message: "Use at least 8 characters for the new password" };
+    const clean = String(code || "").replace(/\s+/g, "");
+    if (code != null && !/^\d{6}$/.test(clean)) return { ok: false, needCode: true, message: "Enter the 6-digit code from your authenticator app" };
+    const res = noteOffline(await resetPasswordApi(next, clean || undefined));
+    if (res.ok) return { ok: true };
+    if (res.code === "MFA_CODE_NEEDED") return { ok: false, needCode: true, message: res.message };
+    return { ok: false, message: res.offline ? API_DOWN : res.message };
+  };
+
+  // With a new password and a stored session (the first sign-in after a
+  // temporary password): sets it. Otherwise: emails a reset link to that address.
   const changePassword = async (email, next) => {
     if (next && getAuthToken()) {
       if (next.length < 8) return { ok: false, message: "Use at least 8 characters for the new password" };
@@ -1684,7 +1698,7 @@ function collectionMatches(a = [], b = []) {
 
   const value = {
     db, me, role, toast, notify,
-    logout, login, signIn, changePassword, updateProfile, changeMyPassword,
+    logout, login, signIn, changePassword, resetPassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
     setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
