@@ -3098,7 +3098,10 @@ components:
         alert_id:
           type: [string, 'null']
           format: uuid
-          description: Set when the image was captured as evidence for an alert
+          description: >
+            The alert this photo is evidence for. The database sets it: a photo
+            taken from 2 minutes before a "Motion detected" alert opened, while
+            that alert is open or acknowledged, is linked to it.
         captured_at: { type: string, format: date-time }
         s3_bucket: { type: string, examples: ['sensor-images'] }
         s3_key: { type: string, examples: ['<node_id>/<image_id>.jpg'] }
