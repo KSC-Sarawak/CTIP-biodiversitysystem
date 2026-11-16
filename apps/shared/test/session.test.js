@@ -2,7 +2,7 @@ import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   getSession, setSession, getAuthToken, freshAuthToken, onSessionEnded,
-  signInApi, signOutApi, takeSessionFromUrl, tokenClaims, setStorageAdapter, restoreSession,
+  signInApi, signOutApi, takeSessionFromUrl, hasPasswordResetSession, tokenClaims, setStorageAdapter, restoreSession,
 } from "../api.js";
 
 // The apps' session (CTIP-114): signed in, renewed and ended through the API,
@@ -98,7 +98,10 @@ test("a password-reset link's session is read from the address", () => {
   globalThis.window = { location: { hash: `#access_token=${token}&expires_at=123&refresh_token=r9&token_type=bearer&type=recovery` } };
   try {
     assert.equal(takeSessionFromUrl(), "recovery");
-    assert.deepEqual(getSession(), { access_token: token, refresh_token: "r9", expires_at: 123, user: { id: "u9", email: "r@x.y" } });
+    // Kept aside for the new password, not stored: stored, the start-up load
+    // would be refused (only aal1) and sign it out before the password is saved.
+    assert.equal(getSession(), null);
+    assert.equal(hasPasswordResetSession(), true);
     window.location.hash = "#error=access_denied&error_code=otp_expired";
     assert.equal(takeSessionFromUrl(), "expired");
     window.location.hash = "#/plants?q=nepenthes";

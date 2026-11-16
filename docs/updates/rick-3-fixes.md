@@ -27,7 +27,7 @@ Read [Before this goes live](#before-this-goes-live) before merging, and the
 ## Before this goes live
 
 - [ ] **Database migration.** Tell Amberlyn, then dry-run and push
-      `supabase/migrations/20261115000000_node_nicknames_and_stable_range_alerts.sql`:
+      `supabase/migrations/20261116000000_node_nicknames_and_stable_range_alerts.sql`:
       `npx supabase db push --remote --dry-run`, then without `--dry-run`.
       It is safe to run more than once.
 - [ ] After the push, check that the tables `sensor_node_nicknames` and `sensor_stable_ranges`
@@ -399,7 +399,7 @@ Cloudflare site (needs the Render redeploy and the Redirect URLs first).
 
 | File | Change |
 |---|---|
-| `supabase/migrations/20261115000000_node_nicknames_and_stable_range_alerts.sql` | **New.** Nickname table, stable range table, alert trigger, better alert notification |
+| `supabase/migrations/20261116000000_node_nicknames_and_stable_range_alerts.sql` | **New.** Nickname table, stable range table, alert trigger, better alert notification |
 | `apps/shared/config/sensorStableRanges.json` | **New.** The one place the ranges are set |
 | `scripts/sensor-ranges.mjs` | **New.** Checks the file; prints SQL or pushes it to Supabase |
 | `package.json` | `sensor-ranges` and `sensor-ranges:push` scripts |
