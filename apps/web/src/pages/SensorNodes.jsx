@@ -115,7 +115,7 @@ export default function SensorNodes() {
         </table>
       </div>
       <p className="mute small">A node with no reading for 15 minutes is marked offline and raises a <b>Node silent</b> alert; its next reading puts it back online.
-        A node that reports a position 50 m or more from where it was installed raises <b>Node moved</b>. Alerts never include coordinates.</p>
+        Movement near the plant raises <b>Motion detected</b>, and a position 50 m or more from where the node was installed raises <b>Node moved</b>. Alerts never include coordinates.</p>
 
       <h3 className="sub" style={{ marginTop: 28 }}><Icon name="bell" size={18} /> Who hears about alerts</h3>
       <p className="mute">Each officer and admin hears about every alert unless you narrow it here. The choice applies to app notifications and phone pushes.</p>
