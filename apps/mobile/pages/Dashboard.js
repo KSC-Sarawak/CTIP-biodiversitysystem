@@ -330,6 +330,7 @@ const SORT_TAGGED = [
 
 function TaggedList({ nav, onView }) {
   const { db, role, me } = useStore();
+  const staff = can(role, 'pending');
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
   const [q, setQ] = useState('');
@@ -384,7 +385,7 @@ function TaggedList({ nav, onView }) {
               <>
                 <Mono size={13}>{p.qr_id}</Mono>
                 {/* One piece of text, so a wrapped line never starts with a dot. */}
-                <Txt v="small" color={c.ink2} style={{ fontSize: 13 }}>{[role !== 'visitor' ? p.by : null, shortDate(p.seen)].filter(Boolean).join(' · ')}</Txt>
+                <Txt v="small" color={c.ink2} style={{ fontSize: 13 }}>{[staff ? p.by : null, staff && p.seen ? shortDate(p.seen) : null].filter(Boolean).join(' · ')}</Txt>
               </>
             }
             right={<DotLabel status={p.status} />}
