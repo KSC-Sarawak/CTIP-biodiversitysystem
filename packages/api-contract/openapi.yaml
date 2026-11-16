@@ -1755,8 +1755,9 @@ paths:
 
         Alerts (CTIP-38, CTIP-48, CTIP-76, CTIP-77): database triggers on
         the stored readings open "Temperature too high" and the like
-        (outside the stable range) and "Node moved" (a GPS position 50 m or
-        more from where the node was installed). A reading also sets an
+        (outside the stable range), "Motion detected" (motion_detected true)
+        and "Node moved" (a GPS position 50 m or more from where the node was
+        installed). A reading also sets an
         offline node back to active. Officers and admins are told in the
         app, following the alert routing (see /alert-routes), and the API
         sends the same words as a phone push. No text holds a coordinate.
