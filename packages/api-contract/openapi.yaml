@@ -2477,6 +2477,17 @@ components:
         id: { type: string, format: uuid }
         full_name: { type: [string, 'null'] }
         email: { type: string, format: email }
+        username:                                            
+          type: [string, 'null']
+          pattern: '^[a-z0-9._]{3,20}$'
+          description: Lower case, unique. Null until the user sets one
+        phone:                                               
+          type: [string, 'null']
+          pattern: '^(\+?[0-9 -]{7,15})?$'
+        avatar_url:                                          
+          type: [string, 'null']
+          maxLength: 3000000
+          description: Profile photo, as a URL or data URL
         role: { $ref: '#/components/schemas/Role' }
         is_active: { type: boolean }
         deleted_at: { type: [string, 'null'], format: date-time, description: Set while deleted; removed for good 30 days later }
