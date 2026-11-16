@@ -1,9 +1,9 @@
 # Branch `rick-3-fixes`: Monitoring rework, stable-range alerts, and easier-to-read pages
 
 *Written 16 Nov 2026. Covers everything on this branch compared with `main` (`34d1519`):
-two commits, `c94a0fd` (personal node names and stable-range alerts) and `2284b95` (items
-4–8), plus uncommitted changes to 10 files and 2 new files for the password reset (items
-9–10). Web app, API and database. The mobile app is not changed.*
+`c94a0fd` (personal node names and stable-range alerts), `2284b95` (items 4–8) and
+`d266b6f` (items 9–10), plus the review fixes of 16 Nov (item 11). Web app, API and
+database; the mobile app only for item 11.*
 
 | # | What | Where | State |
 |---|---|---|---|
@@ -15,21 +15,26 @@ two commits, `c94a0fd` (personal node names and stable-range alerts) and `2284b9
 | 6 | Audit log: a coloured badge per kind, a one-line change, Expand for the full change | Admin → Audit | Committed |
 | 7 | Long lists show 10 rows at a time with **View more** | Species, QR tags, Dashboard | Committed |
 | 8 | QR tags list shows a small preview of each code | QR tags | Committed |
-| 9 | Reset emails link back to the site they were asked from (Cloudflare or localhost) | API | Uncommitted |
-| 10 | "Forgot password" works again for staff with two-step sign-in | API, sign-in page | Uncommitted |
+| 9 | Reset emails link back to the site they were asked from (Cloudflare or localhost) | API | Committed |
+| 10 | "Forgot password" works again for staff with two-step sign-in | API, sign-in page | Committed |
+| 11 | Review fixes: lost-phone reset needs its password step (security), mobile shows the stable range, two smaller fixes | API, DB, mobile, web | Committed |
 
-Read [Before this goes live](#before-this-goes-live) before merging, and the
-[security problem](#security-problem-found-email-alone-can-remove-two-step-sign-in), which is
-**not fixed** on this branch.
+Read [Before this goes live](#before-this-goes-live) before merging. The
+[security problem](#security-problem-found-email-alone-can-remove-two-step-sign-in) found while
+building item 10 is **fixed** on this branch (item 11).
 
 ---
 
 ## Before this goes live
 
-- [ ] **Database migration.** Tell Amberlyn, then dry-run and push
-      `supabase/migrations/20261116000000_node_nicknames_and_stable_range_alerts.sql`:
-      `npx supabase db push --remote --dry-run`, then without `--dry-run`.
-      It is safe to run more than once.
+- [ ] **Database migrations, before merging.** Render redeploys the API from `main` as soon as
+      this merges, and the new API needs both tables. Tell Amberlyn, then dry-run and push:
+  - `supabase/migrations/20261116000000_node_nicknames_and_stable_range_alerts.sql`
+  - `supabase/migrations/20261116120000_mfa_recovery_proofs.sql`: without it, **Lost your phone?**
+    step 1 answers "Two-step sign-in is not working right now"
+
+  `npx supabase db push --remote --dry-run`, then without `--dry-run`. Both are safe to run more
+  than once.
 - [ ] After the push, check that the tables `sensor_node_nicknames` and `sensor_stable_ranges`
       exist and that `sensor_stable_ranges` has 3 rows (temperature, humidity, soil_moisture).
 - [ ] **Redeploy the Render API.** Without it, renaming a node fails, and the Monitoring page
@@ -54,8 +59,8 @@ Read [Before this goes live](#before-this-goes-live) before merging, and the
       fails with "Sign in again and enter the 6-digit code…".
 - [ ] Delete the test account left in **Daun Sense Test**: run
       `delete from auth.users where email = 'reset-flow-test@example.invalid';` in its SQL editor.
-- [ ] Commit the uncommitted changes (items 9–10) before opening the PR.
-- [ ] Decide what to do about the [security problem](#security-problem-found-email-alone-can-remove-two-step-sign-in).
+- [ ] Try **Lost your phone?** end to end on the live site after the redeploy: sign in with the password,
+      Lost your phone?, open the new email, set up the new app.
 
 ---
 
@@ -319,7 +324,7 @@ API, which does not have these fixes until it is redeployed. Restart Vite after 
 
 ## Security problem found: email alone can remove two-step sign-in
 
-**Not fixed on this branch. It existed before these changes.** Found while checking item 10.
+**Fixed on this branch (item 11).** It existed before these changes; found while checking item 10.
 
 **What is wrong:** **Lost your phone?** (CTIP-50) is meant to need the password *and* the
 email. Step 1 (`POST /auth/mfa/recovery`) needs the password, then emails a sign-in link.
@@ -349,6 +354,32 @@ cannot carry it. For example: when step 1 accepts the password, store a short-li
 value for that user (in a table only the API can read). Put it in the emailed link's address
 (`emailRedirectTo` with `?mfa_reset=<value>`). Step 2 then requires and uses up that value.
 Until then, consider turning **Lost your phone?** off and letting an admin remove the app instead.
+
+**What was done (16 Nov, commit `9b78c72`):** the proof is kept on the server instead of in the
+link, so the emailed link and Supabase's Redirect URLs do not change:
+
+- Step 1 (`POST /auth/mfa/recovery`) now needs a **password sign-in** in the last 15 minutes
+  (`403 PASSWORD_REQUIRED` otherwise), so a reset-link session cannot do it. It leaves a proof:
+  one row per person in the new table `mfa_recovery_proofs` (migration `20261116120000`; RLS on,
+  no policies, so only the API's secret key reaches it).
+- Step 2 (`POST /auth/mfa/reset`) takes that proof and uses it up. It must be for the same
+  person, less than 15 minutes old, and from **before** the email link was opened. Otherwise
+  `403 RECOVERY_NOT_STARTED`. One password step allows one reset.
+- `fromResetLink` and `fromEmailLink` now share one helper, `services/api/src/auth/emailLink.js`.
+- Tests (`mfa-recovery.test.js`): email alone is refused; a link opened before the password step
+  is refused; one password step allows one reset; a reset-link session cannot do step 1.
+
+## 11. Review fixes (16 Nov)
+
+- **Security:** the fix above.
+- **Mobile Monitoring** (`apps/mobile/pages/Monitoring.js`): shows the same fixed stable range as
+  the website and the alert rule, colours readings against it, and no longer has the admin
+  **Edit limits** form for the per-node limits that no longer raise alerts. Alert cards show the
+  reading and its stable range.
+- **Password reset:** a retry after the new password was refused (for example too weak) no longer
+  sends the 6-digit code again, which Supabase refused as already used.
+- **Monitoring:** a personal name equal to the technical name can still be cleared
+  (**Use technical name** is offered whenever a personal name is saved).
 
 ---
 
