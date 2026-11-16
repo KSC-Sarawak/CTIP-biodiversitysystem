@@ -12,7 +12,7 @@ import { fuzzyMatch } from '../../shared/fuzzy.js';
 import { isThreatened, BLANK_SPECIES, CONSERVATION } from '../../shared/data.js';
 import { can } from '../../shared/permissions.js';
 import { useTheme, font } from '../components/Theme.js';
-import { LogoMark } from '../components/Logo.js';
+import { LogoMark } from '../components/Chrome.js';
 import Icon from '../components/Icon.js';
 import {
   Screen, Header, IconButton, TitleBlock, SearchField, SortBar, Row, Thumb, Sci, DotLabel, Notice,

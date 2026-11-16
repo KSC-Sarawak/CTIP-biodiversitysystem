@@ -3,7 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { generateMapHtml } from '../../shared/mapHtml.js';
-import { visiblePlants, shownCoords, plantView, lookupTag, extractTag } from '../../shared/selectors.js';
+import { visiblePlants, shownCoords, plantView, lookupTag, extractTag, lastUpdated } from '../../shared/selectors.js';
+import { can } from '../../shared/permissions.js';
 import { canAccess } from '../navigation/routeMeta.js';
 import { seed } from '../../shared/data.js';
 import { initialProfiles } from './helpers/demoProfiles.mjs';
@@ -87,6 +88,53 @@ test('Mobile Feature 2: Visitor Access to Published Species & Plant Records', as
     assert.ok(scanned.plant, 'Scanned result must include plant view');
     assert.equal(scanned.plant.name, 'Pitcher Plant');
     assert.equal(scanned.plant.scientific, 'Nepenthes rajah');
+  });
+
+  await t.test('Visitors cannot view Recorded date or Last updated date fields', () => {
+    const plant = mockPlants[0];
+
+    // 1. Selector level: lastUpdated returns null for visitor and non-staff
+    assert.equal(lastUpdated(mockDb, plant, 'visitor'), null, 'Visitor must receive null for lastUpdated');
+    assert.equal(lastUpdated(mockDb, plant, null), null, 'Null role must receive null for lastUpdated');
+    assert.equal(lastUpdated(mockDb, plant, 'guest'), null, 'Unknown role must receive null for lastUpdated');
+
+    // Staff roles can view lastUpdated
+    assert.equal(lastUpdated(mockDb, plant, 'botanist'), '2026-03-01T10:00:00Z');
+    assert.equal(lastUpdated(mockDb, plant, 'officer'), '2026-03-01T10:00:00Z');
+    assert.equal(lastUpdated(mockDb, plant, 'admin'), '2026-03-01T10:00:00Z');
+
+    // 2. TaggedPlant KV rows simulation
+    const buildTaggedPlantRows = (role) => {
+      const staff = can(role, 'pending');
+      const obs = mockDb.observations.filter((o) => o.specimen_id === plant.id);
+      const firstObs = obs[0];
+      const lastObs = obs[obs.length - 1];
+      const updated = lastUpdated(mockDb, plant, role);
+      return [
+        ['Height', plant.height_cm ? `${plant.height_cm} cm` : '-'],
+        ...(staff ? [
+          ['Recorded', firstObs?.observed_at],
+          ['Recorded by', plant.registered_by],
+          ['Last visit', lastObs?.observed_at],
+          ...(updated ? [['Last updated', updated]] : []),
+        ] : []),
+        ['Location', '3.803, 113.776'],
+      ];
+    };
+
+    const visitorRows = buildTaggedPlantRows('visitor');
+    const visitorFieldNames = visitorRows.map(([label]) => label);
+    assert.ok(!visitorFieldNames.includes('Recorded'), 'Visitor must not see Recorded date field');
+    assert.ok(!visitorFieldNames.includes('Last updated'), 'Visitor must not see Last updated date field');
+    assert.ok(!visitorFieldNames.includes('Last visit'), 'Visitor must not see Last visit date field');
+    assert.ok(!visitorFieldNames.includes('Recorded by'), 'Visitor must not see Recorded by field');
+
+    const botanistRows = buildTaggedPlantRows('botanist');
+    const botanistFieldNames = botanistRows.map(([label]) => label);
+    assert.ok(botanistFieldNames.includes('Recorded'), 'Botanist must see Recorded date field');
+    assert.ok(botanistFieldNames.includes('Last updated'), 'Botanist must see Last updated date field');
+    assert.ok(botanistFieldNames.includes('Last visit'), 'Botanist must see Last visit date field');
+    assert.ok(botanistFieldNames.includes('Recorded by'), 'Botanist must see Recorded by field');
   });
 });
 
