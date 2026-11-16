@@ -75,14 +75,16 @@ jobs:
           cache: npm
           cache-dependency-path: apps/mobile/package-lock.json
       - run: npm ci
-      # The runner has the Android SDK. The emulator tests call `adb devices`,
-      # which would start the adb server in the background and keep the test's
-      # output open, so the run never ends. Start it here first, detached.
-      - name: Start adb (no device needed)
+      # The runner has the Android SDK. With it, the emulator tests' `adb devices`
+      # starts the adb server, which keeps the test output open so the run never
+      # ends. Hide the SDK, as on a laptop without Android Studio: those tests
+      # then run in their no-device mode.
+      - name: npm test (no Android SDK)
         run: |
-          ADB="$(command -v adb || echo "$ANDROID_HOME/platform-tools/adb")"
-          if [ -x "$ADB" ]; then "$ADB" start-server > /dev/null 2>&1 < /dev/null || true; fi
-      - run: npm test
+          export PATH="$(echo "$PATH" | tr ':' '\n' | grep -v -i android | paste -sd: -)"
+          unset ANDROID_HOME ANDROID_SDK_ROOT ANDROID_NDK_HOME
+          if command -v adb > /dev/null; then echo "adb still on PATH: $(command -v adb)"; exit 1; fi
+          node --test --test-timeout=120000 tests/*.test.mjs
       - run: npx expo export --platform android --output-dir dist
 
   # npm audit for the security assessment (CTIP-49, CTIP-74). The full report
