@@ -23,7 +23,7 @@ export function kf(f: number, keys: number[][]): number[] {
 }
 
 export const Sfx: React.FC<{ name: string; at: number; v?: number }> = ({ name, at, v = 0.5 }) => (
-  <Sequence from={at} durationInFrames={90} layout="none"><Audio src={staticFile(`audio/sfx/${name}.wav`)} volume={v} /></Sequence>
+  <Sequence from={at} durationInFrames={90} layout="none"><Audio src={staticFile(`audio/sfx/${name}.wav`)} volume={v * 0.8} /></Sequence>
 );
 
 /** Fades and slides its children in at `at`, out at `out`. */

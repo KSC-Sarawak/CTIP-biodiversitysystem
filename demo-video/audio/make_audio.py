@@ -88,76 +88,71 @@ def chirp(base, n=3):
     return out
 
 # ---------- music ----------
+# A calm bed: warm sine pads, a soft electric piano and a light pulse. No bright noise,
+# no saturation and plain triads, so it sits under the picture without tiring the ear.
 BPM = 100; BEAT = 60 / BPM; BAR = 4 * BEAT
-CH = [(47, [62, 66, 69, 71]), (43, [62, 66, 67, 71]), (50, [62, 64, 66, 69]), (45, [61, 64, 69, 71])]
-ARP = [0, 2, 1, 3, 2, 1, 3, 2, 0, 2, 3, 1, 2, 3, 1, 2]
+CH = [(47, [59, 62, 66]), (43, [59, 62, 67]), (50, [57, 62, 66]), (45, [57, 61, 64])]   # Bm, G, D, A
+ARP = [0, 2, 1, 3, 2, 1, 3, 2]
 LEAD = [[(0, 78, 1), (1, 76, .5), (1.5, 74, .5), (2, 71, 1.5)], [(0, 74, 1), (1, 76, .5), (1.5, 78, .5), (2, 81, 1.5)],
-        [(0, 78, .75), (.75, 81, .75), (1.5, 83, .5), (2, 81, 1), (3, 78, 1)], [(0, 76, 1.5), (1.5, 73, .5), (2, 76, 2)]]
-BELLS = [[(0, 83, 2), (2.5, 78, 1)], [(0, 79, 2), (3, 81, 1)], [(0, 81, 1.5), (1.5, 78, 2)], [(1, 76, 2)]]
+        [(0, 78, 1.5), (1.5, 81, .5), (2, 78, 2)], [(0, 76, 1.5), (1.5, 73, .5), (2, 76, 2)]]
 BARS = 80
+def soft_pad(m, dur):
+    t = t_(dur); f = hz(m); x = np.zeros(len(t))
+    for det in (-0.0015, 0.0015):
+        ph = 2 * np.pi * f * (1 + det) * t
+        x += np.sin(ph) + 0.22 * np.sin(2 * ph) + 0.06 * np.sin(3 * ph)
+    return x * env(len(t), 0.9, 1.1) * 0.25
+def epiano(m, dur=1.6):
+    t = t_(dur); f = hz(m)
+    x = np.sin(2 * np.pi * f * t + 0.6 * np.sin(2 * np.pi * f * t) * np.exp(-t * 6)) * np.exp(-t * 2.6) + 0.12 * np.sin(2 * np.pi * 2 * f * t) * np.exp(-t * 5)
+    return x * env(len(t), 0.006, 0.25)
+def glass(m, dur):
+    t = t_(dur + 0.6); f = hz(m)
+    x = np.sin(2 * np.pi * f * t) + 0.15 * np.sin(2 * np.pi * 2 * f * t) * np.exp(-t * 4)
+    return x * np.exp(-t * 1.6) * env(len(t), 0.02, 0.4)
+def soft_kick():
+    t = t_(0.3); f = 44 + 50 * np.exp(-t * 26)
+    return np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 12) * env(len(t), 0.004, 0.05)
+def brush(acc=1.0):
+    t = t_(0.09); return filt(rs.randn(len(t)), "band", [1800, 4200]) * np.sin(np.pi * t / 0.09) ** 2 * acc
 def sect(bar):  # which layers play in each part of the video
-    if bar < 6: return dict(pad=1, amb=1, sparse=1)                       # opening
-    if bar < 10: return dict(pad=1, arp=.7, amb=.5, bassl=1)             # overview
-    if bar < 35: return dict(pad=1, arp=1, bass=1, drums=1, bells=18 <= bar < 26, lead=27 <= bar < 35)   # field app
-    if bar < 63: return dict(pad=1, arp=1, bass=1, drums=1, hats=1, lead=(39 <= bar < 47) or (55 <= bar < 63), bells=47 <= bar < 55)  # web portal
-    if bar < 72: return dict(pad=1, arp=.6, bells=1, amb=.4, bassl=1)     # public site (breakdown)
-    return dict(pad=1, arp=1, bass=1, drums=1, hats=1, lead=1)            # recap
+    if bar < 6: return dict(keys=.5)                                   # opening
+    if bar < 10: return dict(keys=.8, bass=.7)                         # overview
+    if bar < 35: return dict(keys=1, bass=1, pulse=1, lead=(18 <= bar < 26))   # field app
+    if bar < 63: return dict(keys=1, bass=1, pulse=1, lead=(43 <= bar < 51) or (55 <= bar < 63))  # web portal
+    if bar < 72: return dict(keys=.6, bass=.6)                         # public site (breakdown)
+    return dict(keys=1, bass=1, pulse=1, lead=1)                       # recap
 
 dur = BARS * BAR + 6
-P, A, Bs, D, L, AMB = (Track(dur) for _ in range(6))
+P, A, Bs, D, L = (Track(dur) for _ in range(5))
 duck = np.ones(int(dur * SR))
 for bar in range(BARS):
     s = sect(bar); t0 = bar * BAR; root, notes = CH[bar % 4]; last = bar == BARS - 1
     for i, m in enumerate(notes):
-        P.add(t0, pad(m, BAR + 0.9 + (4 if last else 0)), 0.5, pan=(i - 1.5) * 0.4)
-        P.add(t0, pad(m - 12, BAR + 0.9 + (4 if last else 0)), 0.1, pan=-(i - 1.5) * 0.3)
-    if s.get("arp"):
-        for k in range(16):
-            m = notes[ARP[k]] + 12
-            A.add(t0 + k * BEAT / 4, marimba(m), 0.32 * s["arp"] * (1.0 if k % 4 == 0 else 0.62 + 0.2 * rs.rand()), pan=np.sin(k * 0.9) * 0.55)
-    if s.get("sparse"):
-        for b_, m in ((0, notes[0] + 12), (1.5, notes[2] + 12), (3, notes[3] + 12)):
-            A.add(t0 + b_ * BEAT, marimba(m, 1.4), 0.3, pan=0.3 - 0.3 * b_)
+        P.add(t0, soft_pad(m, BAR + 1.2 + (4 if last else 0)), 0.5, pan=(i - 1) * 0.45)
+    P.add(t0, soft_pad(notes[0] - 12, BAR + 1.2 + (4 if last else 0)), 0.3)
+    four = notes + [notes[0] + 12]
+    if s.get("keys"):
+        for k in range(8):   # eighth notes
+            A.add(t0 + k * BEAT / 2, epiano(four[ARP[k]] + 12), 0.2 * s["keys"] * (1.0 if k % 4 == 0 else 0.6 + 0.15 * rs.rand()), pan=np.sin(k * 0.9) * 0.4)
     if s.get("bass"):
-        for b_, d_ in ((0, 1.4), (1.5, 0.9), (2.5, 1.2), (3.5, 0.4)):
-            Bs.add(t0 + b_ * BEAT, bass(root - (12 if root > 46 else 0), d_ * BEAT), 0.5)
-    if s.get("bassl"): Bs.add(t0, bass(root - (12 if root > 46 else 0), BAR) * env(int(BAR * SR), 0.05, 0.4), 0.4)
-    if s.get("drums"):
-        for b_ in (0, 2) + ((2.75,) if bar % 2 else ()):
-            D.add(t0 + b_ * BEAT, kick(), 0.85 if b_ != 2.75 else 0.5)
-            i = int((t0 + b_ * BEAT) * SR); n = int(0.28 * SR); duck[i:i + n] = np.minimum(duck[i:i + n], np.linspace(0.45, 1, n))
-        for b_ in (1, 3): D.add(t0 + b_ * BEAT, snap(), 0.35, pan=0.1)
-        for k in range(16):
-            D.add(t0 + k * BEAT / 4, shaker(1.0 if k % 4 == 2 else 0.45), 0.16 if s.get("hats") else 0.1, pan=-0.3)
-        if bar % 8 == 7:
-            for k in (13, 14, 15): D.add(t0 + k * BEAT / 4, snap(), 0.2 + 0.05 * (k - 13), pan=-0.2)
+        for b_, d_ in ((0, 1.8), (2.5, 1.4)):
+            Bs.add(t0 + b_ * BEAT, bass(root - (12 if root > 46 else 0), d_ * BEAT), 0.42 * s["bass"])
+    if s.get("pulse"):
+        for b_ in (0, 2):
+            D.add(t0 + b_ * BEAT, soft_kick(), 0.5)
+            i = int((t0 + b_ * BEAT) * SR); n = int(0.25 * SR); duck[i:i + n] = np.minimum(duck[i:i + n], np.linspace(0.7, 1, n))
+        for k in range(8):
+            D.add(t0 + k * BEAT / 2, brush(1.0 if k % 2 else 0.5), 0.035, pan=0.25)
     if s.get("lead"):
-        for b_, m, d_ in LEAD[bar % 4]: L.add(t0 + b_ * BEAT, flute(m, d_ * BEAT), 0.2)
-    if s.get("bells"):
-        for b_, m, d_ in BELLS[bar % 4]: L.add(t0 + b_ * BEAT, bell(m), 0.13, pan=0.4 if b_ < 2 else -0.4)
-    if s.get("amb"):
-        for _ in range(3):
-            AMB.add(t0 + rs.rand() * BAR, chirp(2400 + rs.rand() * 2600, 2 + rs.randint(3)), 0.05 * s["amb"] * (0.4 + rs.rand()), pan=rs.rand() * 1.8 - 0.9)
-# risers before each new part
-for bar in (10, 35, 72):
-    n = int(BAR * SR); x = filt(rs.randn(n), "band", [900, 7000]) * np.linspace(0, 1, n) ** 3
-    D.add((bar - 1) * BAR, x, 0.12)
-# forest air under the opening and the breakdown
-air = filt(rs.randn(int(dur * SR)), "band", [300, 2500]) * 0.02
-tt = np.arange(len(air)) / SR
-air *= np.clip(1 - tt / 26, 0, 1) + np.clip(1 - np.abs(tt - 162) / 12, 0, 1) * 0.7
-AMB.b += np.stack([air, np.roll(air, 900)], 1)
-# echo on the marimba
-dl = int(0.45 * SR); echo = np.zeros_like(A.b)
-echo[dl:] = A.b[:-dl][:, ::-1] * 0.34; echo[2 * dl:] += A.b[:-2 * dl] * 0.14
+        for b_, m, d_ in LEAD[bar % 4]: L.add(t0 + b_ * BEAT, glass(m - 12, d_ * BEAT), 0.16, pan=0.15)
+dl = int(0.45 * SR); echo = np.zeros_like(A.b); echo[dl:] = A.b[:-dl][:, ::-1] * 0.22
 A.b += echo
-Pb = np.stack([filt(P.b[:, c], "high", 160) for c in (0, 1)], 1)
-mix = (Pb * 0.7 + Bs.b * 0.8) * duck[:, None] + reverb(A.b, 0.25) + D.b + reverb(L.b, 0.5) + reverb(AMB.b, 0.4)
-mix = reverb(mix, 0.06)
+mix = (P.b * 0.75 + Bs.b * 0.8) * duck[:, None] + reverb(A.b, 0.3) + D.b + reverb(L.b, 0.45)
+mix = np.stack([filt(filt(mix[:, c], "low", 7000), "high", 35) for c in (0, 1)], 1)
 tt = np.arange(len(mix)) / SR
-mix *= (np.clip(tt / 1.5, 0, 1) * np.clip((dur - tt) / 5.0, 0, 1))[:, None]
-mix = np.tanh(mix / np.abs(mix).max() * 1.25)
-save("music.wav", mix, 0.85)
+mix *= (np.clip(tt / 2.0, 0, 1) * np.clip((dur - tt) / 5.0, 0, 1))[:, None]
+save("music.wav", mix, 0.7)   # normalised only: no clipping or saturation
 print("music", round(dur, 1), "s")
 
 # ---------- sound effects ----------
