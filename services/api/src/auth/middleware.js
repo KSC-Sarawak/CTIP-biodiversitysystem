@@ -1,4 +1,5 @@
 import { errors } from 'jose';
+import { EMAIL_LINK_MAX_AGE_S, signedInWith } from './emailLink.js';
 
 export const STAFF_ROLES = ['botanist', 'officer', 'admin'];
 
@@ -51,10 +52,10 @@ export function allow(...roles) {
 // Supabase marks a session from a reset link as amr method "otp" (checked against
 // the real Auth server on 16 Nov 2026), the same as the lost-phone email link;
 // "recovery" and "magiclink" are accepted too, as older Auth versions used them.
-export const RESET_LINK_MAX_AGE_S = 15 * 60;
-const EMAIL_LINK_METHODS = ['otp', 'recovery', 'magiclink'];
+export const RESET_LINK_MAX_AGE_S = EMAIL_LINK_MAX_AGE_S;
+const RESET_LINK_METHODS = ['otp', 'recovery', 'magiclink'];
 export function fromResetLink(amr, now = Date.now()) {
-  return (amr ?? []).some((a) => EMAIL_LINK_METHODS.includes(a?.method) && now / 1000 - Number(a.timestamp) <= RESET_LINK_MAX_AGE_S);
+  return signedInWith(amr, RESET_LINK_METHODS, { now }) != null;
 }
 
 export function requireMfa(roles, setupRoute = false, resetLinkRoute = false) {
