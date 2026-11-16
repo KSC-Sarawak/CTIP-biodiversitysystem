@@ -82,9 +82,11 @@ function PlantDetails({ plant, coords, onOpen, last }) {
         ...(visit?.height_cm != null ? [['Height', `${visit.height_cm} cm`]] : []),
         ...(visit?.morphology ? [['Appearance', visit.morphology]] : []),
         ...(staff && visit?.notes ? [['Notes', visit.notes]] : []),
-        ...(staff ? [['Recorded by', nameOf(db, plant.registered_by)]] : []),
-        ...(visit ? [['Last visit', longDate(visit.observed_at)]] : []),
-        ...(updated ? [['Last updated', longDate(updated)]] : []),
+        ...(staff ? [
+          ['Recorded by', nameOf(db, plant.registered_by)],
+          ...(visit ? [['Last visit', longDate(visit.observed_at)]] : []),
+          ...(updated ? [['Last updated', longDate(updated)]] : []),
+        ] : []),
       ]} />
       <View style={{ gap: 6 }}>
         <Txt v="label">Location</Txt>

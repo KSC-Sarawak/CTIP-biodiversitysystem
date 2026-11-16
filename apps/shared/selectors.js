@@ -181,7 +181,9 @@ export function bookLetters(entries) {
 }
 
 // When this plant's information last changed: the plant itself or any visit this role can see.
+// Only staff roles can view when a plant was last updated; visitors receive null.
 export function lastUpdated(db, plant, role) {
+  if (!can(role, "pending")) return null;
   const times = [plant?.updated_at, ...plantVisits(db, plant?.id, role).map((o) => o.updated_at || o.observed_at)];
   return times.filter(Boolean).sort().at(-1) || null;
 }
