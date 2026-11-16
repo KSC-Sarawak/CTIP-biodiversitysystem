@@ -69,7 +69,6 @@ import {
   acknowledgeAlertApi,
   resolveAlertApi,
   addAlertNoteApi,
-  setThresholdsApi,
   createNodeApi,
   updateNodeApi,
   getAlertRoutesApi,
@@ -1667,17 +1666,6 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
-  const setThresholds = async (nodeId, thresholds) => {
-    const res = await callApi(setThresholdsApi, nodeId, thresholds);
-    if (!res.ok) {
-      notify(`Failed to update thresholds: ${res.message}`);
-      return false;
-    }
-    setDb((d) => ({ ...d, nodes: d.nodes.map((n) => (n.id === nodeId ? { ...n, thresholds } : n)) }));
-    notify("Thresholds updated");
-    return true;
-  };
-
   // Register a node (admin, CTIP-48). Returns the new node, or null after saying why.
   const createNode = async (node) => {
     const res = await callApi(createNodeApi, node);
@@ -1811,7 +1799,7 @@ function collectionMatches(a = [], b = []) {
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
     addUser, updateUser, deleteUser, restoreUser,
-    ackAlert, resolveAlert, assignAlert, addAlertNote, setThresholds, setNodeNickname, createNode, updateNode, loadAlertRoutes, setAlertRoute, loadNodeTelemetry, loadNodeImages,
+    ackAlert, resolveAlert, assignAlert, addAlertNote, setNodeNickname, createNode, updateNode, loadAlertRoutes, setAlertRoute, loadNodeTelemetry, loadNodeImages,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
     outboxItems, syncState, syncNow, cachedTags,

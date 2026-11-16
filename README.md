@@ -16,16 +16,15 @@ an IoT node that protects endangered specimens.
 | `apps/shared` | Code shared by the web and mobile apps (API client, store, design tokens, search) |
 | `apps/firmware` | ESP32 sensor node (Arduino IDE sketch) |
 | `services/api` | REST API (Node + Express), deployed on Render |
-| `services/anomaly-detection` | Sensor anomaly detection (Python) |
 | `packages/api-contract` | OpenAPI spec, the single source of truth for the API |
 | `supabase` | Supabase CLI project: `config.toml`, SQL migrations (tables, RLS policies, storage) |
 | `infra` | Mosquitto broker config |
-| `docs` | Architecture notes and diagrams (`docs/architecture`, including `offline-sync.md`) and testing evidence (`docs/testing`) |
+| `docs` | Architecture notes and diagrams (`docs/architecture`, including `offline-sync.md`) and testing evidence (`docs/testing`; how to run every test: `docs/testing/README.md`) |
 
 ## Prerequisites
 
 - Node.js 24 and npm
-- Python 3 (for anomaly detection). Use `python`, not `python3`, on Windows
+- Python 3 (for the IoT gateway, `apps/firmware/Nodegateway.py`). Use `python`, not `python3`, on Windows
 - For the mobile app: Android Studio (Android SDK, platform tools and an emulator at
   API 30 or higher), or an Android phone with Expo Go for SDK 58
 - Arduino IDE with the ESP32 board package (for firmware only)
