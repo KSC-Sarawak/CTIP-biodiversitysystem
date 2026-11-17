@@ -1,0 +1,39 @@
+F-15 camera-trigger checks, 17 Nov 2026. Nodegateway.py from main (apps/firmware), fake camera, no network. Run: python -I test_f15.py / test_cooldown.py
+
+--- T1 registered node, source 'motion' (normal)
+    log: ['[CAMERA] TRIGGER from 0ac66bdc-db55-4a8e-a7c6-4c30daa8124b: {"source": "motion"}', '[CAMERA]   photo 0ac66bdc-db55-4a8e-a7c6-4c30daa8124b__2026-11-17T130721Z__motion__f21cf8.jpg (0 KB)']
+    files saved: ['0ac66bdc-db55-4a8e-a7c6-4c30daa8124b__2026-11-17T130721Z__motion__f21cf8.jpg']
+--- T2 source '..\\x' (path trick)
+    log: ["[CAMERA] 0ac66bdc-db55-4a8e-a7c6-4c30daa8124b skipped: unknown trigger source '..\\\\x'"]
+    files saved: []
+    saved as: 0ac66bdc-db55-4a8e-a7c6-4c30daa8124b__2026-11-17T100000Z__unknown__798513.jpg
+--- T3 save_photo with source '..\\..\\evil' directly
+    log: []
+    files saved: ['0ac66bdc-db55-4a8e-a7c6-4c30daa8124b__2026-11-17T100000Z__unknown__798513.jpg']
+    saved as: etc__2026-11-17T100000Z__motion__3ebab0.jpg
+--- T4 save_photo with node id '../../etc'
+    log: []
+    files saved: ['etc__2026-11-17T100000Z__motion__3ebab0.jpg']
+--- T5 unregistered UUID node
+    log: ["[CAMERA] '22222222-2222-4222-8222-222222222222' skipped: not a registered node"]
+    files saved: []
+--- T6 node id that is not a UUID
+    log: ["[CAMERA] '../../evil' skipped: not a registered node"]
+    files saved: []
+    trigger queue: []  telemetry queue: 0
+--- T7 MQTT trigger on unregistered node topic
+    log: ["[MQTT] ignored message from unregistered node '22222222-2222-4222-8222-222222222222'"]
+    files saved: []
+    trigger queue: []  telemetry queue: 0
+--- T8 MQTT trigger with bad JSON
+    log: ['[CAMERA] 0ac66bdc-db55-4a8e-a7c6-4c30daa8124b ignored bad trigger payload: not json']
+    files saved: []
+    trigger queue: [('0ac66bdc-db55-4a8e-a7c6-4c30daa8124b', 'motion', {'source': 'motion'})]  telemetry queue: 0
+--- T9 MQTT trigger, registered node
+    log: []
+    files saved: []
+--- files in pending folder: ['0ac66bdc-db55-4a8e-a7c6-4c30daa8124b__2026-11-17T100000Z__unknown__798513.jpg', '0ac66bdc-db55-4a8e-a7c6-4c30daa8124b__2026-11-17T130721Z__motion__f21cf8.jpg', 'etc__2026-11-17T100000Z__motion__3ebab0.jpg']
+--- anything written outside it? []
+
+10 triggers in a burst from one node -> photos taken: 1  skipped by cooldown: 9
+files: 1
