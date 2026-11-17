@@ -15,6 +15,14 @@ const notImplemented = (req, res) =>
 export function createApp({ verify, handlers = defaultHandlers, corsOrigins = [], requireHttps = false, trustProxy = false, mfaRoles = [] }) {
   const app = express();
   app.disable('x-powered-by'); // F-12: don't tell attackers we run Express
+  // ZAP (VA-10, 16 Nov): every answer says "this is exactly the type I say"
+  // (no guessing a JSON answer is a script) and "only this site may embed me".
+  // The apps' fetch calls use CORS, which this does not affect.
+  app.use((req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Cross-Origin-Resource-Policy', 'same-origin');
+    next();
+  });
   app.set('trust proxy', trustProxy);
   if (requireHttps) app.use(httpsOnly());
   app.use(cors({ origin: corsOrigins }));
