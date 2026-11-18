@@ -70,6 +70,7 @@ export const routes = [
   ['get', '/specimens/by-qr/:qrId', ANY_STAFF],
   ['get', '/specimens/:id', ANY_STAFF],
   ['patch', '/specimens/:id', ANY_STAFF],
+  ['post', '/specimens/:id/publish', OFFICER_ADMIN], // take a plant off public view, or back (migration 20261118120000)
 
   // Observations, photos, reviews, comments, sync
   ['get', '/observations', ANY_STAFF],

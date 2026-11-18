@@ -15,7 +15,7 @@ import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import LeafletMap from '../components/LeafletMap.js';
 import {
-  Txt, Sci, Mono, Chip, Section, TextLink, Row, Thumb, KV, Button, Empty, Header, IconButton, Screen, Notice, Check,
+  Txt, Sci, Mono, Chip, Section, TextLink, Row, Thumb, KV, Button, Empty, Header, IconButton, Screen, Notice, Check, Area,
 } from '../components/Bits.js';
 import PhotoNote from '../components/PhotoNote.js';
 import { longDate, coords } from '../components/format.js';
@@ -248,8 +248,11 @@ export function SpeciesProfile({ nav, params }) {
 
 export function TaggedPlant({ nav, params }) {
   usePolling(5000);
-  const { db, role, setPlantLocationHidden } = useStore();
+  const { db, role, setPlantLocationHidden, setPlantPublished } = useStore();
   const { c } = useTheme();
+  const [unpublishing, setUnpublishing] = useState(false); // reason box open
+  const [reason, setReason] = useState('');
+  const [needReason, setNeedReason] = useState(false);
   const raw = db.plants.find((p) => p.qr_id === params?.qr && !p.is_deleted);
   const p = plantView(db, raw);
   const staff = can(role, 'pending');
@@ -267,6 +270,33 @@ export function TaggedPlant({ nav, params }) {
   const where = (!p.isPublic && !staff) ? null : shownCoords(p, role);
   const updated = lastUpdated(db, p, role);
   const hideRule = hideLocationRule(p.species?.conservation_status);
+  const canPublish = can(role, 'review') && p.status === 'approved';
+
+  const confirmUnpublish = () => {
+    if (!reason.trim()) return setNeedReason(true);
+    Alert.alert(
+      'Take this plant off public view?',
+      `Visitors will no longer see ${p.qr_id} in the catalogue, on the map or by scanning its tag. Its visits stay as they are, and the botanist is told why.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unpublish',
+          style: 'destructive',
+          onPress: async () => {
+            if (await setPlantPublished(p.id, false, reason)) {
+              setUnpublishing(false);
+              setReason('');
+            }
+          },
+        },
+      ],
+    );
+  };
+  const confirmRepublish = () => Alert.alert(
+    'Publish this plant again?',
+    `${p.qr_id} will be back in the catalogue and on the public map.`,
+    [{ text: 'Cancel', style: 'cancel' }, { text: 'Publish', onPress: () => setPlantPublished(p.id, true) }],
+  );
 
   return (
     <Page hero={<Hero photos={p.photos} height={220} onBack={nav.back} />}>
@@ -282,6 +312,15 @@ export function TaggedPlant({ nav, params }) {
         {p.scientific ? <Sci size={16}>{p.scientific}{p.species?.family ? ` · ${p.species.family}` : ''}</Sci> : null}
         {staff ? <View style={{ flexDirection: 'row', gap: 8, paddingTop: 6 }}><Chip status={p.status} />{p.endangered ? <Chip status="endangered" /> : null}</View> : null}
       </View>
+      {staff && p.withdrawn ? (
+        <Notice
+          tone="warning"
+          icon="eyeOff"
+          title="Taken off public view"
+          body={p.withdrawn_reason || 'No reason was given.'}
+          meta={`${nameOf(db, p.withdrawn_by)} · ${longDate(p.withdrawn_at)}`}
+        />
+      ) : null}
       {!staff ? (
         <Txt v="body" style={{ lineHeight: 25 }}>
           {p.isPublic
@@ -364,7 +403,7 @@ export function TaggedPlant({ nav, params }) {
             <Button label="Record a revisit" icon="plus" onPress={() => nav.go('revisit', { qr: p.qr_id })} />
           )
         ) : null}
-        {role === 'officer' && (obs.find((o) => o.status === 'synced') || lastObs) ? (
+        {can(role, 'review') && (obs.find((o) => o.status === 'synced') || lastObs) ? (
           <Button
             label={obs.find((o) => o.status === 'synced') ? 'Review this record' : 'See the decision'}
             icon="clipboard"
@@ -372,7 +411,32 @@ export function TaggedPlant({ nav, params }) {
           />
         ) : null}
         {p.species ? <Button label="About this species" kind="secondary" icon="leaf" onPress={() => nav.go('species', { id: p.species.id })} /> : null}
+        {canPublish && p.withdrawn ? (
+          <Button label="Publish again" kind="secondary" icon="eye" onPress={confirmRepublish} />
+        ) : null}
+        {canPublish && !p.withdrawn && !unpublishing ? (
+          <Button label="Unpublish plant" kind="dangerText" icon="eyeOff" onPress={() => setUnpublishing(true)} />
+        ) : null}
       </View>
+      {canPublish && !p.withdrawn && unpublishing ? (
+        <Section title="Take off public view">
+          <Txt v="caption" color={c.ink2}>
+            Hides the whole plant from visitors. Its visits keep their decisions, and you can publish it again later.
+          </Txt>
+          <Area
+            label="Reason (sent to the botanist)"
+            value={reason}
+            onChangeText={(t) => { setReason(t); setNeedReason(false); }}
+            placeholder="For example: wrong species on the tag"
+            maxLength={1000}
+          />
+          {needReason ? <Txt v="caption" color={c.danger}>Add a reason so the botanist knows why.</Txt> : null}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            <Button label="Cancel" kind="secondary" flex onPress={() => { setUnpublishing(false); setReason(''); setNeedReason(false); }} />
+            <Button label="Unpublish" kind="danger" icon="eyeOff" flex onPress={confirmUnpublish} />
+          </View>
+        </Section>
+      ) : null}
     </Page>
   );
 }

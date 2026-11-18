@@ -22,6 +22,8 @@ const LOOK = {
   alert_assigned: ['thermo', 'danger'],
   alert_open: ['thermo', 'danger'],
   email_rate_limit: ['mail', 'warning'],
+  plant_unpublished: ['eyeOff', 'warning'],
+  plant_republished: ['eye', 'success'],
 };
 
 export default function Alerts({ nav }) {

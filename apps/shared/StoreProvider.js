@@ -45,6 +45,7 @@ import {
   findSpecimenByQrApi,
   createSpecimenApi,
   updateSpecimenApi,
+  setSpecimenPublishedApi,
   updateObservationApi,
   createObservationApi,
   submitObservationApi,
@@ -353,6 +354,10 @@ function collectionMatches(a = [], b = []) {
       zone_id: s.zone_id ?? null,
       endangered_override: s.endangered_override,
       is_deleted: s.is_deleted,
+      is_withdrawn: !!s.is_withdrawn,
+      withdrawn_reason: s.withdrawn_reason ?? null,
+      withdrawn_by: s.withdrawn_by ?? null,
+      withdrawn_at: s.withdrawn_at ?? null,
       photos: (obsBySpecimen.get(s.id) || []).flatMap((o) => photosByObs.get(o.id) || []),
     }));
 
@@ -1139,6 +1144,21 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
+  // Take a published plant off public view, with a reason, or put it back
+  // (POST /v1/specimens/:id/publish). Its visits keep their decisions.
+  const setPlantPublished = async (plantId, is_published, reason) => {
+    if (!can(role, "review")) return false;
+    const res = await callApi(setSpecimenPublishedApi, plantId, is_published, reason ? reason.trim() : undefined);
+    if (!res.ok) {
+      notify(res.code === "WRONG_STATUS" ? "Someone already changed this plant. Showing the latest." : `Failed to change publishing: ${res.message}`);
+      await loadFromApi(true);
+      return false;
+    }
+    notify(is_published ? "Plant is public again" : "Plant taken off public view");
+    await loadFromApi(true);
+    return true;
+  };
+
   /* ---------- observations and review ---------- */
   // Send a draft or a record waiting for a signal: POST /v1/observations/:id/submit.
   // Returns { ok, message }.
@@ -1793,7 +1813,7 @@ function collectionMatches(a = [], b = []) {
     logout, login, signIn, changePassword, resetPassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
-    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
+    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden, setPlantPublished,
     syncObservation, resubmit, reviewObservation, addComment,
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,

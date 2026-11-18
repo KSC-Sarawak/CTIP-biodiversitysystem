@@ -1276,6 +1276,48 @@ paths:
               schema: { $ref: '#/components/schemas/Specimen' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /specimens/{id}/publish:
+    post:
+      tags: [Specimens]
+      operationId: setSpecimenPublished
+      summary: Take a published plant off public view, or put it back (officer/admin)
+      description: >
+        Unpublishing hides the whole plant from visitors (catalogue, map, QR
+        page, photos) whatever its visits' decisions, and keeps those visits
+        as they are. A reason is required to unpublish; it is shown to staff
+        and sent to the botanists who tagged or recorded the plant, who are
+        also told when it is published again. Runs public.set_plant_published().
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_published]
+              additionalProperties: false
+              properties:
+                is_published: { type: boolean }
+                reason:
+                  type: string
+                  maxLength: 1000
+                  description: Required when is_published is false
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specimen' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: WRONG_STATUS when the plant is already in that state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   # ------------------------------------------------------------ Observations
   /observations:
     get:
@@ -2603,7 +2645,7 @@ components:
       type: string
       enum: [review_returned, review_approved, review_rejected, comment_reply, alert_assigned, alert_created,
              observation_submitted, observation_resubmitted, discussion_shared, discussion_post, discussion_mention,
-             email_rate_limit]
+             email_rate_limit, plant_unpublished, plant_republished]
 
     # ---------- profiles
     Profile:
@@ -2823,6 +2865,12 @@ components:
             True when lat/lng were snapped to the 0.01 degree grid because the
             plant is endangered and the caller may not see its exact spot
             (GET /workspace, GET /specimens/by-qr/{qrId}; threat T13).
+        is_withdrawn:
+          type: boolean
+          description: True when an officer or admin took the plant off public view (POST /specimens/{id}/publish)
+        withdrawn_reason: { type: [string, 'null'] }
+        withdrawn_by: { type: [string, 'null'], format: uuid }
+        withdrawn_at: { type: [string, 'null'], format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 

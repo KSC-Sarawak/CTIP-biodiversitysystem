@@ -18,7 +18,8 @@ import { sendPushToUsers } from './pushNotifications.js';
 // 200 instead of adding a second one.
 
 const SPECIMEN_COLUMNS = `id, qr_id, species_id, proposed_species_name, registered_by, lat, lng,
-  gps_accuracy_m, endangered_override, is_deleted, created_at, updated_at`;
+  gps_accuracy_m, endangered_override, is_deleted, is_withdrawn, withdrawn_reason, withdrawn_by,
+  withdrawn_at, created_at, updated_at`;
 const PHOTO_COLUMNS = 'id, observation_id, s3_bucket, s3_key, content_type, size_bytes, upload_status, caption, traits, created_at';
 const COMMENT_COLUMNS = 'id, observation_id, author_id, body, created_at';
 
@@ -44,6 +45,19 @@ const SpecimenUpdate = z.strictObject({
   proposed_species_name: text(200),
   endangered_override: z.boolean().optional(),
 }).refine((b) => Object.keys(b).length > 0, 'Send at least one field to change');
+
+const SpecimenPublish = z.strictObject({
+  is_published: z.boolean(),
+  reason: z.string().trim().max(1000).optional(),
+}).refine((b) => b.is_published || !!b.reason, { message: 'Say why the plant is being unpublished', path: ['reason'] });
+
+// Errors raised by public.set_plant_published() (migration 20261118120000).
+const PUBLISH_ERRORS = {
+  42501: [403, 'FORBIDDEN'],
+  CTNF0: [404, 'NOT_FOUND'],
+  CTST0: [409, 'WRONG_STATUS'],
+  CTRQ0: [422, 'VALIDATION_ERROR'],
+};
 
 export const ObservationCreate = z.strictObject({
   id: id.optional(),
@@ -284,6 +298,45 @@ export const fieldHandlers = {
     if (error?.code === '23503') return fail(res, 422, 'VALIDATION_ERROR', 'That species does not exist');
     if (error) return dbError(res, error);
     if (!data) return fail(res, 404, 'NOT_FOUND', 'Plant not found');
+    res.json(data);
+  },
+
+  // Take a published plant off public view (with a reason) or put it back.
+  // The database function checks the role, saves who and why, and notifies
+  // the botanists behind the plant; its visits keep their decisions.
+  'post /specimens/:id/publish': async (req, res) => {
+    if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Plant not found');
+    const body = parseBody(SpecimenPublish, req, res);
+    if (!body) return;
+    const db = supabaseAs(req.user);
+    const { data, error } = await db.rpc('set_plant_published', {
+      p_specimen_id: req.params.id,
+      p_published: body.is_published,
+      p_reason: body.reason ?? null,
+    });
+    if (error) {
+      const known = PUBLISH_ERRORS[error.code];
+      if (known) return fail(res, known[0], known[1], error.message);
+      return dbError(res, error);
+    }
+
+    // Best effort, like review decisions: the change is already saved.
+    try {
+      const { data: visits } = await db.from('observations').select('recorded_by').eq('specimen_id', req.params.id);
+      const userIds = [data.registered_by, ...(visits ?? []).map((v) => v.recorded_by)]
+        .filter((u) => u && u !== req.user.id);
+      if (userIds.length) {
+        sendPushToUsers({
+          db,
+          userIds,
+          title: body.is_published ? `Plant ${data.qr_id} is public again` : `Plant ${data.qr_id} was taken off public view`,
+          body: body.reason ? body.reason.slice(0, 150) : 'Tap to view the plant.',
+          data: { route: 'tag', params: { qr: data.qr_id } },
+          channelId: 'discussions',
+        });
+      }
+    } catch {}
+
     res.json(data);
   },
 

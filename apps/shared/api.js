@@ -629,6 +629,9 @@ export const restoreProfileApi = (id, { token } = {}) => send("POST", `/profiles
 export const findSpecimenByQrApi = (qrId, { token } = {}) => apiFetch(`/specimens/by-qr/${enc(qrId)}`, { token });
 export const createSpecimenApi = (specimen, { token } = {}) => send("POST", "/specimens", specimen, token);
 export const updateSpecimenApi = (id, changes, { token } = {}) => send("PATCH", `/specimens/${enc(id)}`, changes, token);
+// Officer/admin: take a plant off public view (reason required) or put it back.
+export const setSpecimenPublishedApi = (id, is_published, reason, { token } = {}) =>
+  send("POST", `/specimens/${enc(id)}/publish`, reason ? { is_published, reason } : { is_published }, token);
 export const createObservationApi = (obs, { token } = {}) => send("POST", "/observations", obs, token);
 export const fetchObservationApi = (id, { token } = {}) => apiFetch(`/observations/${enc(id)}`, { token });
 // Edit a draft or queued record: { height_cm?, morphology?, notes?, version }. `changes` must hold
