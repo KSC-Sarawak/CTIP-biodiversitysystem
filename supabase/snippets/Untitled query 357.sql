@@ -1,1 +1,0 @@
-delete from species where scientific_name in ('Old CE test', 'Old DD test');
