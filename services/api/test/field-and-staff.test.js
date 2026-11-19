@@ -685,7 +685,7 @@ test('workspace: null coordinates stay null', async () => {
 
 test('workspace: override and capitalised status both reduce', async () => {
   plant({ endangered_override: true });
-  plant({ qr_id: 'NIAH-0098', species_id: species('Critically Endangered').id });
+  plant({ qr_id: 'NIAH-0098', species_id: species('Endangered').id });
   plant({ qr_id: 'NIAH-0097', species_id: species('least concern').id });
   const res = await request(app).get('/v1/workspace').set(as('botanist'));
   const byTag = Object.fromEntries(res.body.specimens.map((p) => [p.qr_id, p]));
@@ -874,7 +874,7 @@ test('GET /specimens: filters, paging and bad parameters', async () => {
 });
 
 test('GET /specimens/:id: protected like the list; a species the user cannot read fails closed; deleted is 404', async () => {
-  const rare = species('critically endangered');
+  const rare = species('Endangered');
   const one = specimen({ species_id: rare.id });
   const hidden = specimen({ species_id: crypto.randomUUID() }); // species not readable by this user
   const gone = specimen({ is_deleted: true });

@@ -67,9 +67,9 @@ Species  (Nepenthes rafflesiana, Endangered)        ← catalogue, Officer
 | **Proposed species name** | What the botanist thinks the species is, as free text. It becomes a link to a species only when an Officer confirms it. |
 | **Review** | An Officer's decision on one observation: **approve**, **return** (back to the botanist to fix, reason required) or **reject** (reason required). |
 | **Observation status** | `draft` (being written) → `queued` (saved on the phone, not sent yet) → `synced`, shown as **Waiting for review** → `approved`, `returned` or `rejected`. A returned observation goes back to `synced` when the botanist resends it. |
-| **Endangered plant** | A tagged plant whose species' conservation status is **Endangered** or **Critically endangered**. See [Species conservation status](#species-conservation-status). |
+| **Endangered plant** | A tagged plant whose species' conservation status is **Endangered**. See [Species conservation status](#species-conservation-status). |
 | **Hidden plant** | A tagged plant an Officer **or** Admin has set to **hide its location** (code: `endangered_override`), for example a **vulnerable** plant, which is not hidden automatically. Treated exactly like an endangered plant for location. [D15] |
-| **Location-protected plant** | Any tagged plant whose exact location visitors must not see: an **endangered plant**, a **hidden plant**, or a plant whose species has **no conservation status yet** [D11]. |
+| **Location-protected plant** | Any tagged plant whose exact location visitors must not see: an **endangered plant** or a **hidden plant** [D11]. |
 | **Published** | A species visitors can see. A tagged plant appears to visitors only when its species is published **and** it has at least one approved observation. |
 | **Observation photo** | A photo of one tagged plant, taken during one observation. The botanist adds it; an Officer can edit its caption or remove it. |
 | **Species photo** | A reference photo in the species catalogue. Only Officers add, replace or remove species photos. When an Officer approves an observation of a species that has **no photos yet**, that observation's first photo automatically becomes the species' cover photo. Officers can replace it later with any other photo. |
@@ -90,23 +90,20 @@ plus the hide-location flag.
 
 | Status | Hides the plant's exact location from visitors? |
 |---|---|
-| *(no status yet)*: a new species until an Officer picks one | **Yes** |
-| Least concern | No |
-| Near threatened | No |
-| Vulnerable | No. An Officer or Admin can hide an individual tagged plant with the hide-location flag. |
-| **Endangered** | **Yes** |
-| **Critically endangered** | **Yes** |
+| Least concern | No. An Officer or Admin can hide an individual tagged plant with the hide-location flag. |
+| Near threatened | No. Same: hide by hand if needed. |
+| Vulnerable | No. Same: hide by hand if needed. |
+| **Endangered** | **Yes, always** (the hide-location switch is locked on) |
 
 - Write the statuses exactly as above ("Least concern", not "Least concerned").
-- **A new species starts with no status**, and its plants are location-protected until an
-  Officer picks one. This removes the old risk that a newly found, unassessed species was
-  public by default.
-- **Endangered and Critically endangered behave exactly the same** in this system: both
-  hide the location and get the same red badge. Critically endangered is kept so Officers
-  can copy a species' official IUCN status exactly (IUCN lists some Bornean plants as
-  Critically endangered).
-- Removed: Extinct in the wild, Extinct (they don't apply to living tagged plants),
-  Data deficient and Not evaluated (replaced by "no status yet").
+- **Every species must have a status.** The species form starts with none picked and
+  will not save until the Officer chooses one, so a new species is never public with a
+  status nobody chose.
+- **Only Endangered hides the location automatically.** For every other status the
+  Officer or Admin decides per tagged plant with the hide-location flag (off by default).
+- Removed (team decision, 20 Nov 2026): Critically endangered (existing species become
+  Endangered), Extinct in the wild, Extinct, Data deficient and Not evaluated (existing
+  species become "no status" until an Officer picks one).
 
 ### What the code has today (`main` at `620348e`)
 
@@ -144,7 +141,7 @@ See [code change 6](#6-nine-conservation-statuses-and-an-unsafe-default-d11).
 | | Visitor | Botanist | Officer | Admin |
 |---|:-:|:-:|:-:|:-:|
 | Ordinary tagged plants | ✅ exact | ✅ exact | ✅ exact | ✅ exact |
-| Location-protected plants (endangered, hidden, or no status yet) | ❌ **not on the map at all**, a note instead | ✅ exact [D10] | ✅ exact | ✅ exact |
+| Location-protected plants (endangered or hidden) | ❌ **not on the map at all**, a note instead | ✅ exact [D10] | ✅ exact | ✅ exact |
 
 ---
 
@@ -179,8 +176,8 @@ See [code change 6](#6-nine-conservation-statuses-and-an-unsafe-default-d11).
 - **Scan a QR tag** (or open its link) to see that tagged plant's public page. [Scope:
   "QR-enabled educational content"]
 - See **published tagged plants** on the map at their **exact location**, as long as the
-  plant is **not location-protected**: not hidden, and its species is not Endangered,
-  not Critically endangered, and has a status. [D9, D11]
+  plant is **not location-protected**: not hidden, and its species is not Endangered.
+  [D9, D11]
 
 ### Cannot
 - See a **location-protected plant on the map at all**: no pin and no rough area. [D9]
@@ -425,7 +422,7 @@ decisions said on the same point.
 | D8 | Who moderates the Discussion board? | **Admins** delete anyone's posts | Unchanged. |
 | D9 | How are location-protected plants shown to Visitors? | **Left off the map completely**, with a note that the exact location is hidden. Ordinary published tagged plants show at their exact location. | **Overrides the proposal and threat model T13**, which reduced the location to a ~1.1 km area. |
 | D10 | Can Botanists see location-protected plants' exact locations? | **Yes, all of them**: they are corporation staff doing conservation work | **Overrides threat model T13/T18**, which reduced them for botanists (except plants they registered). Consequence: a botanist's phone now holds exact endangered locations offline, so the phone's encrypted store (SQLCipher) and the phone itself must be protected. Update the threat model. |
-| D11 | Which conservation statuses do we keep? | **Least concern, Near threatened, Vulnerable, Endangered, Critically endangered.** A new species has **no status** and its plants are location-protected until an Officer picks one. | Replaces the nine-status IUCN list (CTIP-46) and the "Least concern" default. |
+| D11 | Which conservation statuses do we keep? | **Least concern, Near threatened, Vulnerable, Endangered** (changed 20 Nov 2026 from five plus "no status"). Every species must have one; the form does not pre-pick it. Only Endangered hides the location automatically; any other plant can be hidden by hand. | Replaces the nine-status IUCN list (CTIP-46) and the "Least concern" default. |
 | D12 | Who can be assigned a sensor alert? | **Active Officers only** | Admins still see, acknowledge, add notes to and resolve alerts, and receive routed notifications, but are not the named person responsible. Botanists never. |
 | D13 | Who can move a tagged plant to a new QR tag? | **Officers only, and only after the old tag is marked retired or damaged** | Today officers and admins can change the tag at any time. |
 | D14 | Who can change a user's email and name? | **Email: an Admin corrects it**, confirmed by a link to the new address. **Name: only the person themselves.** | Today nobody can change an email, and admins can change names. |
@@ -443,7 +440,7 @@ decisions said on the same point.
   [IoT table]; only officers are assigned (D12).
 - Earlier team rule "only admins delete plants" (migration
   `20261105230000_specimen_delete_admin_only.sql`). Now officers only (D4).
-- CTIP-46: the nine IUCN statuses. Now five plus "no status yet" (D11).
+- CTIP-46: the nine IUCN statuses. Now four, and a status is required (D11).
 - Threat model: Botanist "view own submissions". Botanists also see every **approved**
   observation; unfinished ones stay their own (D16).
 
@@ -511,19 +508,18 @@ plus handler checks) and **database** (Supabase RLS policies and triggers).
   the exact coordinates only inside the encrypted database.
 
 ### 6. Nine conservation statuses and an unsafe default (D11)
-- Shrink the list to the five agreed statuses in `apps/shared/data.js` (`CONSERVATION`),
+- Shrink the list to the four agreed statuses in `apps/shared/data.js` (`CONSERVATION`),
   `services/api/src/species.js` (`IUCN_STATUSES`) and `packages/api-contract/openapi.yaml`.
-  Allow **no status** (`null`).
+  The API refuses a species with no status.
 - `BLANK_SPECIES` in `apps/shared/data.js` stops defaulting to "least concern". The species
-  form must not pre-select a status.
-- Treat **no status as location-protected** everywhere the decision is made:
-  `isEndangered()` in `services/api/src/distribution.js`, `isThreatened()` in
-  `apps/shared/data.js`, and the database functions `public_plants()` and
-  `public_plant_by_tag()`.
-- Add a database check constraint so only the five values (or `null`) can be saved.
-- Before switching, convert existing species in the live database:
-  - "data deficient" and "not evaluated" become no status;
-  - "extinct" and "extinct in the wild" need an Officer to choose.
+  forms (web and mobile) must not pre-select a status and must not save without one.
+- Only "endangered" hides automatically: `isEndangered()` in
+  `services/api/src/distribution.js`, `isThreatened()` in `apps/shared/data.js`. Vulnerable
+  is no longer hidden by default.
+- Add a database check constraint so only the four values (or `null` for converted older
+  rows) can be saved.
+- Convert existing species: "critically endangered" becomes "endangered"; the other removed
+  statuses become no status until an Officer picks one.
 
 ### 7. Alerts can be assigned to anyone (D12)
 - API: `POST /alerts/:id/assign` (`services/api/src/staff.js`) accepts **any** user id; the

@@ -1,1 +1,1 @@
-update specimens set endangered_override = true where qr_id = 'NIAH-0901';
+delete from species where scientific_name in ('Old CE test', 'Old DD test');

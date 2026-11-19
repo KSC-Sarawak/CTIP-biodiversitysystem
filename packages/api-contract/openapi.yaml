@@ -2381,7 +2381,7 @@ paths:
       summary: Plant locations for the distribution map (staff)
       description: >
         One point per plant, from its latest approved observation. For an endangered
-        plant (species status endangered / critically endangered, or the specimen's
+        plant (species status endangered, or the specimen's
         endangered_override), roles other than Officer and Admin get the centre of a
         0.01 degree grid square (about 1.1 km) instead of the exact spot. The
         reduction happens in the API; the exact values are never sent (threat T13).
@@ -2661,10 +2661,13 @@ components:
 
     # ---------- species
     ConservationStatusValue:
-      description: IUCN Red List category. Any case is accepted; it is stored lower case.
+      description: >
+        One of the four agreed statuses (RBAC.md D11). Any case is accepted; it is
+        stored lower case. Create and update refuse null (422): every species must
+        have a status. Only older species whose removed status was cleared can be
+        read back as null, until an officer picks one.
       type: [string, 'null']
-      enum: ['least concern', 'near threatened', 'vulnerable', 'endangered', 'critically endangered',
-        'extinct in the wild', 'extinct', 'data deficient', 'not evaluated', null]
+      enum: ['least concern', 'near threatened', 'vulnerable', 'endangered', null]
 
     SpeciesInput:
       type: object
@@ -2680,10 +2683,11 @@ components:
         ecology: { type: [string, 'null'], minLength: 1, maxLength: 5000, description: Habitat and ecology (CTIP-149) }
 
     SpeciesCreate:
-      description: Unknown fields (is_published, created_by, ...) are rejected with 422
+      description: Unknown fields (is_published, created_by, ...) are rejected with 422. conservation_status is required (RBAC D11).
       allOf:
         - $ref: '#/components/schemas/SpeciesInput'
         - type: object
+          required: [conservation_status]
           properties:
             id:
               type: string

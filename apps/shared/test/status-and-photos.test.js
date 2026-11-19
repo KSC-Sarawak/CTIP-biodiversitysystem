@@ -20,7 +20,7 @@ test("statusKey and withStatusKey put a status in one form", () => {
 test("the catalogue (and the dashboard count) sees a capitalised Endangered species", () => {
   const db = { ...seed, plants: [], species: [
     { id: "a", scientific_name: "A", conservation_status: "Endangered" },
-    { id: "b", scientific_name: "B", conservation_status: "CRITICALLY ENDANGERED" },
+    { id: "b", scientific_name: "B", conservation_status: " ENDANGERED " },
     { id: "c", scientific_name: "C", conservation_status: "Least Concern" },
   ] };
   const view = Object.fromEntries(speciesCatalogue(db, "officer").map((s) => [s.id, s.endangered]));

@@ -69,7 +69,9 @@ beforeEach((t) => {
   t.mock.method(globalThis, 'fetch', fakePostgrest);
 });
 
-const create = (body, role = 'officer') => request(app).post('/v1/species').set(as(role)).send(body);
+// Every species needs a status (RBAC D11), so tests that are not about it get one.
+const create = (body, role = 'officer') => request(app).post('/v1/species').set(as(role))
+  .send({ conservation_status: 'least concern', ...body });
 
 test('officer creates a species: 201, with created_by from the token', async () => {
   const res = await create({ scientific_name: 'Nepenthes rajah', family: 'Nepenthaceae' });
@@ -150,10 +152,14 @@ test('update changes only the sent fields and records who changed it', async () 
   assert.equal(res.body.updated_by, users.admin);
 });
 
-test('conservation status must be an IUCN category, in any case', async () => {
-  const ok = await create({ scientific_name: 'Nepenthes rajah', conservation_status: 'Critically Endangered' });
+test('conservation status must be one of the four agreed statuses, in any case (RBAC D11)', async () => {
+  const ok = await create({ scientific_name: 'Nepenthes rajah', conservation_status: 'Endangered' });
   assert.equal(ok.status, 201);
-  assert.equal(ok.body.conservation_status, 'critically endangered');
+  assert.equal(ok.body.conservation_status, 'endangered');
+  for (const removed of ['critically endangered', 'extinct in the wild', 'extinct', 'data deficient', 'not evaluated']) {
+    const res = await create({ scientific_name: `Nepenthes ${removed}`, conservation_status: removed });
+    assert.equal(res.status, 422, removed);
+  }
   const bad = await create({ scientific_name: 'Nepenthes x', conservation_status: 'very rare' });
   assert.equal(bad.status, 422);
   assert.deepEqual(bad.body.details.fields.map((f) => f.path), ['conservation_status']);
@@ -192,4 +198,15 @@ test('soft delete: 204, the row stays, and it disappears from read, list and upd
   assert.equal((await request(app).get('/v1/species').set(as('officer'))).body.meta.total, 0);
   assert.equal((await request(app).patch(`/v1/species/${body.id}`).set(as('officer')).send({ family: 'X' })).status, 404);
   assert.equal((await request(app).delete(`/v1/species/${body.id}`).set(as('officer'))).status, 404);
+});
+
+test('a species cannot be created or saved without a status (RBAC D11)', async () => {
+  const missing = await request(app).post('/v1/species').set(as('officer')).send({ scientific_name: 'Nepenthes nostatus' });
+  assert.equal(missing.status, 422);
+  assert.deepEqual(missing.body.details.fields.map((f) => f.path), ['conservation_status']);
+  assert.equal((await create({ scientific_name: 'Nepenthes null', conservation_status: null })).status, 422);
+  const ok = await create({ scientific_name: 'Nepenthes ok', conservation_status: 'vulnerable' });
+  assert.equal(ok.status, 201);
+  const cleared = await request(app).patch(`/v1/species/${ok.body.id}`).set(as('officer')).send({ conservation_status: null });
+  assert.equal(cleared.status, 422);
 });
