@@ -686,9 +686,19 @@ export const staffHandlers = {
     res.json(data);
   },
 
+  // RBAC D12: only an active officer can be the person responsible for an alert.
+  // null clears it. The database trigger guard_alert_assignee() says the same.
   'post /alerts/:id/assign': async (req, res) => {
     const body = parseBody(Assign, req, res);
     if (!body) return;
+    if (body.assigned_to) {
+      const person = await supabaseAs(req.user).from('profiles').select('id, role, is_active')
+        .eq('id', body.assigned_to).maybeSingle();
+      if (person.error) return dbError(res, person.error);
+      if (!person.data || person.data.role !== 'officer' || !person.data.is_active) {
+        return fail(res, 422, 'VALIDATION_ERROR', 'Only an active officer can be assigned an alert');
+      }
+    }
     await updateAlert(req, res, { assigned_to: body.assigned_to });
   },
 
