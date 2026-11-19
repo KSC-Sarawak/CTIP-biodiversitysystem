@@ -33,12 +33,16 @@ const snap = (v) => Number(((Math.floor(v / GRID_DEGREES) + 0.5) * GRID_DEGREES)
 // species' conservation status, which a specimen row does not carry; pass
 // undefined when the caller cannot see the species (RLS shows botanists only
 // published ones), and the plant is treated as endangered, so it fails closed.
+//
+// Visitors (no role) get no coordinates at all for a protected plant, only the
+// location_reduced flag, so the apps show "location hidden" (RBAC D9).
 export function protectSpecimen(specimen, { role, userId, status }) {
   const statusUnknown = specimen.species_id != null && status === undefined;
   const reduce = (statusUnknown || isEndangered({ ...specimen, species: { conservation_status: status } }))
     && !EXACT_LOCATION_ROLES.includes(role)
-    && specimen.registered_by !== userId;
+    && (!role || specimen.registered_by !== userId);
   if (!reduce) return { ...specimen, location_reduced: false };
+  if (!role) return { ...specimen, lat: null, lng: null, gps_accuracy_m: null, location_reduced: true };
   return {
     ...specimen,
     lat: specimen.lat == null ? null : snap(specimen.lat),
