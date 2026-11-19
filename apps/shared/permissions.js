@@ -69,7 +69,7 @@ export const bottomLinks = (role) => {
   const map = { to: "/map", label: "Map", icon: "map" };
   const alerts = { to: "/notifications", label: "Alerts", icon: "bell", bell: true };
   if (role === "botanist") return [{ to: "/records", label: "My records", icon: "file" }, plants, { to: "/add", label: "Add plant", icon: "plus", main: true }, map, alerts];
-  if (role === "officer") return [{ to: "/review", label: "Review", icon: "clipboard" }, plants, { to: "/scan", label: "Scan/Add", icon: "qr", main: true }, map, alerts];
-  if (role === "admin") return [{ to: "/users", label: "Users", icon: "users" }, plants, { to: "/scan", label: "Scan/Add", icon: "qr", main: true }, map, alerts];
+  if (role === "officer") return [{ to: "/review", label: "Review", icon: "clipboard" }, plants, { to: "/scan", label: "Scan", icon: "qr", main: true }, map, alerts];
+  if (role === "admin") return [{ to: "/users", label: "Users", icon: "users" }, plants, { to: "/scan", label: "Scan", icon: "qr", main: true }, map, alerts];
   return [{ to: "/", label: "Home", icon: "home" }, plants, { to: "/scan", label: "Scan", icon: "qr", main: true }, map, { to: "/about", label: "About", icon: "info" }];
 };

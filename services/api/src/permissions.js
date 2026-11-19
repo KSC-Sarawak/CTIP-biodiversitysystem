@@ -6,6 +6,9 @@ export const SENSOR = 'sensor';
 
 const ANY_STAFF = ['botanist', 'officer', 'admin'];
 const OFFICER_ADMIN = ['officer', 'admin'];
+// RBAC D1 (docs/security/RBAC.md): only botanists register tagged plants and
+// create observations and their photos. Officers review; admins run the system.
+const BOTANIST = ['botanist'];
 const ADMIN = ['admin'];
 
 export const routes = [
@@ -66,26 +69,26 @@ export const routes = [
 
   // Specimens (row-level "own record" checks stay in Supabase RLS)
   ['get', '/specimens', ANY_STAFF],
-  ['post', '/specimens', ANY_STAFF],
+  ['post', '/specimens', BOTANIST],
   ['get', '/specimens/by-qr/:qrId', ANY_STAFF],
   ['get', '/specimens/:id', ANY_STAFF],
   ['patch', '/specimens/:id', ANY_STAFF],
 
   // Observations, photos, reviews, comments, sync
   ['get', '/observations', ANY_STAFF],
-  ['post', '/observations', ANY_STAFF],
+  ['post', '/observations', BOTANIST],
   ['get', '/observations/:id', ANY_STAFF],
   ['patch', '/observations/:id', ANY_STAFF],
   ['delete', '/observations/:id', ANY_STAFF],
   ['post', '/observations/:id/submit', ANY_STAFF],
   ['get', '/observations/:id/photos', ANY_STAFF],
-  ['post', '/observations/:id/photos', ANY_STAFF],
-  ['post', '/observations/:id/photos/:photoId/confirm', ANY_STAFF],
+  ['post', '/observations/:id/photos', BOTANIST],
+  ['post', '/observations/:id/photos/:photoId/confirm', BOTANIST],
   ['get', '/observations/:id/reviews', ANY_STAFF],
   ['post', '/observations/:id/reviews', OFFICER_ADMIN],
   ['get', '/observations/:id/comments', ANY_STAFF],
   ['post', '/observations/:id/comments', ANY_STAFF],
-  ['post', '/sync', ANY_STAFF],
+  ['post', '/sync', BOTANIST],
 
   // Distribution map (coordinates of endangered plants reduced by role, CTIP-88)
   ['get', '/distribution', ANY_STAFF],
