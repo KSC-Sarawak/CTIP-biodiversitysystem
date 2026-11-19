@@ -112,10 +112,13 @@ describe("Mobile Port: Automated Role & Page Verification", () => {
     }
   });
 
-  test("Screen Permissions: Admin has access to user management, audit log, and officer tools", () => {
-    const allowed = ["users", "audit", "speciesAdmin", "tags", "monitor", "alert", "alerts", "discussion", "staffMore", "tagged", "plants", "species", "tag", "map", "scan"];
+  test("Screen Permissions: Admin has user management, audit log and a read-only species list, but no tag tools (RBAC D2, D5, D6)", () => {
+    const allowed = ["users", "audit", "speciesAdmin", "monitor", "alert", "alerts", "discussion", "staffMore", "tagged", "plants", "species", "tag", "map", "scan"];
     for (const route of allowed) {
       assert.equal(canAccess("admin", route), true, `Admin should have access to '${route}'`);
+    }
+    for (const route of ["tags", "reports", "review"]) {
+      assert.equal(canAccess("admin", route), false, `Admin should not have access to '${route}'`);
     }
   });
 

@@ -250,7 +250,7 @@ export default function Specimen({ qr }) {
                 {plant.location_reduced
                   ? <p className="mute small">{REDUCED_LOCATION_NOTE}</p>
                   : plant.gps_accuracy_m != null && <p className="mute small">GPS accuracy ±{plant.gps_accuracy_m} m</p>}
-                {canReview && (
+                {can(role, "hideLocation") && (
                   <label className="check hidespot gap-top-s">
                     <input
                       type="checkbox"
