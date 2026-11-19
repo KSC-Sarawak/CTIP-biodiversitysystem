@@ -70,6 +70,13 @@ async function fakeSupabase(input, init = {}) {
 
   const filters = [...url.searchParams].filter(([k]) => !['select', 'order', 'limit', 'offset', 'on_conflict'].includes(k));
   const matches = (row) => filters.every(([k, v]) => {
+    // or=(a.eq.1,b.eq.2): any one of the eq conditions (the botanist's D16 read).
+    if (k === 'or') {
+      return v.replace(/^\(|\)$/g, '').split(',').some((cond) => {
+        const [col, op, ...want] = cond.split('.');
+        return op === 'eq' && `${row[col]}` === want.join('.');
+      });
+    }
     const [op, ...rest] = v.split('.');
     const want = rest.join('.');
     if (op === 'eq') return `${row[k]}` === want;
@@ -260,6 +267,38 @@ test("a botanist cannot submit another botanist's record", async () => {
   const obs = observation({ status: 'draft', recorded_by: crypto.randomUUID() });
   const res = await request(app).post(`/v1/observations/${obs.id}/submit`).set(as('botanist')).send({});
   assert.equal(res.status, 404);
+});
+
+/* ---------- RBAC D16: other botanists' approved observations ---------- */
+
+test("RBAC D16: a botanist reads another botanist's approved observation and its photos, not unfinished ones", async () => {
+  const someone = crypto.randomUUID();
+  const approved = observation({ status: 'approved', recorded_by: someone });
+  const waiting = observation({ status: 'synced', recorded_by: someone });
+  assert.equal((await request(app).get(`/v1/observations/${approved.id}`).set(as('botanist'))).status, 200);
+  assert.equal((await request(app).get(`/v1/observations/${approved.id}/photos`).set(as('botanist'))).status, 200);
+  assert.equal((await request(app).get(`/v1/observations/${waiting.id}`).set(as('botanist'))).status, 404);
+  const list = await request(app).get('/v1/observations').set(as('botanist'));
+  assert.deepEqual(list.body.data.map((o) => o.id), [approved.id]);
+});
+
+test("RBAC D16: comments on another botanist's approved observation stay private, and they cannot change it", async () => {
+  const approved = observation({ status: 'approved', recorded_by: crypto.randomUUID() });
+  const read = await request(app).get(`/v1/observations/${approved.id}/comments`).set(as('botanist'));
+  assert.equal(read.status, 403);
+  assert.equal(read.body.code, 'FORBIDDEN');
+  const post = await request(app).post(`/v1/observations/${approved.id}/comments`).set(as('botanist')).send({ body: 'nice' });
+  assert.equal(post.status, 403);
+  assert.equal(db.observation_comments.length, 0);
+  assert.equal((await request(app).post(`/v1/observations/${approved.id}/submit`).set(as('botanist')).send({})).status, 403);
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+  const upload = await request(app).post(`/v1/observations/${approved.id}/photos`).set(as('botanist'))
+    .field('id', crypto.randomUUID()).attach('file', jpeg, 'leaf.jpg');
+  assert.equal(upload.status, 403);
+  assert.equal(approved.status, 'approved');
+  // The officer still reads and comments.
+  assert.equal((await request(app).get(`/v1/observations/${approved.id}/comments`).set(as('officer'))).status, 200);
+  assert.equal((await request(app).post(`/v1/observations/${approved.id}/comments`).set(as('officer')).send({ body: 'ok' })).status, 201);
 });
 
 test('photo upload: stored at {observation_id}/{photo_id}.jpg, row saved, signed link returned', async () => {
@@ -633,26 +672,16 @@ const plant = (fields = {}) => {
   db.specimens.push(row);
   return row;
 };
-const onGrid = (v) => Math.abs(((v / 0.01) % 1) - 0.5) < 1e-6;
 const workspacePlant = async (role) => (await request(app).get('/v1/workspace').set(as(role))).body.specimens[0];
 
-test("workspace: another botanist's endangered plant comes back reduced", async () => {
+// RBAC D10: botanists see every plant's exact location, protected ones too.
+test("workspace: another botanist's endangered plant comes back exact (RBAC D10)", async () => {
   plant({ species_id: species('endangered').id });
   const p = await workspacePlant('botanist');
-  assert.notEqual(p.lat, EXACT.lat);
-  assert.notEqual(p.lng, EXACT.lng);
-  assert.ok(onGrid(p.lat) && onGrid(p.lng), 'snapped to the grid used by /distribution');
-  assert.equal(p.gps_accuracy_m, 1100);
-  assert.equal(p.location_reduced, true);
-});
-
-// CTIP-109: the filter is only safe while a zone is the square of the reduced point.
-test("workspace: a reduced plant's zone names the square of its reduced point, nothing finer", async () => {
-  plant({ species_id: species('endangered').id, zone_id: 'N3.81-E113.78' });
-  const p = await workspacePlant('botanist');
-  assert.equal(p.location_reduced, true);
-  const corner = (v) => (Math.floor(v / 0.01) * 0.01).toFixed(2);
-  assert.equal(p.zone_id, `N${corner(p.lat)}-E${corner(p.lng)}`);
+  assert.equal(p.lat, EXACT.lat);
+  assert.equal(p.lng, EXACT.lng);
+  assert.equal(p.gps_accuracy_m, 4);
+  assert.equal(p.location_reduced, false);
 });
 
 test('visitor workspace never holds zones', async () => {
@@ -683,30 +712,23 @@ test('workspace: null coordinates stay null', async () => {
   assert.equal(p.lng, null);
 });
 
-test('workspace: override and capitalised status both reduce', async () => {
+test('workspace: hidden, endangered and unpublished-species plants are all exact for a botanist (RBAC D10)', async () => {
   plant({ endangered_override: true });
   plant({ qr_id: 'NIAH-0098', species_id: species('Endangered').id });
-  plant({ qr_id: 'NIAH-0097', species_id: species('least concern').id });
+  plant({ qr_id: 'NIAH-0097', species_id: crypto.randomUUID() }); // species the botanist cannot read
   const res = await request(app).get('/v1/workspace').set(as('botanist'));
-  const byTag = Object.fromEntries(res.body.specimens.map((p) => [p.qr_id, p]));
-  assert.equal(byTag['NIAH-0099'].location_reduced, true, 'override with no species');
-  assert.equal(byTag['NIAH-0098'].location_reduced, true, 'status in capitals');
-  assert.equal(byTag['NIAH-0097'].lat, EXACT.lat, 'not endangered stays exact');
+  for (const p of res.body.specimens) {
+    assert.equal(p.lat, EXACT.lat, p.qr_id);
+    assert.equal(p.location_reduced, false, p.qr_id);
+  }
 });
 
-test('workspace: a species the botanist cannot see (unpublished) counts as endangered', async () => {
-  // RLS only shows botanists published species, so the status is unknown here.
-  plant({ species_id: crypto.randomUUID() });
-  const p = await workspacePlant('botanist');
-  assert.equal(p.location_reduced, true, 'unknown status fails closed');
-});
-
-test("by-qr reduces another botanist's endangered plant", async () => {
+test("by-qr gives a botanist another botanist's endangered plant exactly (RBAC D10)", async () => {
   plant({ species_id: species('endangered').id });
   const res = await request(app).get('/v1/specimens/by-qr/NIAH-0099').set(as('botanist'));
   assert.equal(res.status, 200);
-  assert.notEqual(res.body.lat, EXACT.lat);
-  assert.equal(res.body.location_reduced, true);
+  assert.equal(res.body.lat, EXACT.lat);
+  assert.equal(res.body.location_reduced, false);
   const officer = await request(app).get('/v1/specimens/by-qr/NIAH-0099').set(as('officer'));
   assert.equal(officer.body.lat, EXACT.lat);
 });
@@ -780,7 +802,7 @@ test('workspace: a changed table sends only that list', async () => {
   assert.equal(res.body.species, undefined);
 });
 
-test('workspace: a species change also resends plants, still with endangered spots reduced', async () => {
+test('workspace: a species change also resends plants, exact for a botanist (RBAC D10)', async () => {
   versionsAre({ species: 1 });
   const first = await poll('botanist');
   db.species.push({ id: 'sp1', conservation_status: 'Endangered' });
@@ -789,7 +811,7 @@ test('workspace: a species change also resends plants, still with endangered spo
   const res = await poll('botanist', first.body.cursor);
   assert.equal(res.body.species.length, 1);
   assert.equal(res.body.specimens.length, 1);
-  assert.equal(res.body.specimens[0].location_reduced, true);
+  assert.equal(res.body.specimens[0].location_reduced, false);
 });
 
 test("workspace: someone else's cursor gets a full load", async () => {
@@ -836,7 +858,7 @@ const specimen = (fields = {}) => {
   return row;
 };
 
-test('GET /specimens: endangered spots reduced for a botanist, own plants and staff exact, deleted left out', async () => {
+test('GET /specimens: every plant exact for a botanist and staff (RBAC D10), deleted left out', async () => {
   const rare = species('Endangered');
   const common = species('Least concern');
   const theirs = specimen({ species_id: rare.id });
@@ -848,8 +870,8 @@ test('GET /specimens: endangered spots reduced for a botanist, own plants and st
   assert.equal(res.status, 200);
   assert.equal(res.body.meta.total, 3);
   const byId = Object.fromEntries(res.body.data.map((s) => [s.id, s]));
-  assert.equal(byId[theirs.id].location_reduced, true);
-  assert.notEqual(byId[theirs.id].lat, EXACT.lat);
+  assert.equal(byId[theirs.id].location_reduced, false);
+  assert.equal(byId[theirs.id].lat, EXACT.lat);
   assert.equal(byId[mine.id].location_reduced, false);
   assert.equal(byId[mine.id].lat, EXACT.lat);
   assert.equal(byId[plain.id].location_reduced, false);
@@ -873,7 +895,7 @@ test('GET /specimens: filters, paging and bad parameters', async () => {
   assert.equal((await request(app).get('/v1/specimens?limit=500').set(as('officer'))).status, 422);
 });
 
-test('GET /specimens/:id: protected like the list; a species the user cannot read fails closed; deleted is 404', async () => {
+test('GET /specimens/:id: exact for a botanist like the list (RBAC D10); deleted is 404', async () => {
   const rare = species('Endangered');
   const one = specimen({ species_id: rare.id });
   const hidden = specimen({ species_id: crypto.randomUUID() }); // species not readable by this user
@@ -881,8 +903,9 @@ test('GET /specimens/:id: protected like the list; a species the user cannot rea
 
   const res = await request(app).get(`/v1/specimens/${one.id}`).set(as('botanist'));
   assert.equal(res.status, 200);
-  assert.equal(res.body.location_reduced, true);
-  assert.equal((await request(app).get(`/v1/specimens/${hidden.id}`).set(as('botanist'))).body.location_reduced, true);
+  assert.equal(res.body.location_reduced, false);
+  assert.equal(res.body.lat, EXACT.lat);
+  assert.equal((await request(app).get(`/v1/specimens/${hidden.id}`).set(as('botanist'))).body.location_reduced, false);
   assert.equal((await request(app).get(`/v1/specimens/${one.id}`).set(as('admin'))).body.lat, EXACT.lat);
   assert.equal((await request(app).get(`/v1/specimens/${gone.id}`).set(as('officer'))).status, 404);
   assert.equal((await request(app).get(`/v1/specimens/${crypto.randomUUID()}`).set(as('officer'))).status, 404);

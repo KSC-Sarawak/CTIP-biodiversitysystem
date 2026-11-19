@@ -7,9 +7,10 @@ import { fail, dbError, UUID } from './validate.js';
 // allowed it, so coordinates are reduced here, in the API, before the JSON
 // is built. The apps only ever receive the reduced numbers.
 
-// Only these roles see exact locations of endangered plants (threat model:
-// Officers "view maps", T18 limits exact exports to Officer/Admin).
-export const EXACT_LOCATION_ROLES = ['officer', 'admin'];
+// Every signed-in role sees exact locations of protected plants (RBAC D10:
+// botanists are corporation staff doing conservation work in the forest).
+// Only visitors (no role) are kept from them (D9).
+export const EXACT_LOCATION_ROLES = ['botanist', 'officer', 'admin'];
 
 // Same rule as apps/shared/selectors.js: the officer's per-plant flag, or the
 // species' status. Compared without case so "Endangered" also counts.
