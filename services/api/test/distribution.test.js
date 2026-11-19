@@ -2,7 +2,6 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { createApp } from '../src/app.js';
-import { GRID_DEGREES } from '../src/distribution.js';
 
 // A fake Supabase: fetch answers with the approved observations below (the
 // shape PostgREST returns for the embedded select), so tests run without the
@@ -72,24 +71,19 @@ test('officer and admin get exact coordinates of endangered plants', async () =>
   }
 });
 
-test('botanist gets reduced coordinates for endangered plants, never the exact ones', async () => {
-  const res = await get('botanist');
-  const body = JSON.stringify(res.body);
-  for (const exact of ['3.815372', '113.781946', '3.8153', '113.7819', '3.821444', '113.790777']) {
-    assert.ok(!body.includes(exact), `exact value ${exact} must not be sent`);
-  }
-  const rajah = byQr(res)['QR-0001'];
-  assert.equal(rajah.location_reduced, true);
-  assert.equal(rajah.precision_m, 1100);
-  assert.deepEqual([rajah.lat, rajah.lng], [3.815, 113.785]); // centre of its 0.01 degree square
-  assert.ok(Math.abs(rajah.lat - 3.815372) <= GRID_DEGREES && Math.abs(rajah.lng - 113.781946) <= GRID_DEGREES);
+test('botanist gets exact coordinates of endangered plants too (RBAC D10)', async () => {
+  const rajah = byQr(await get('botanist'))['QR-0001'];
+  assert.equal(rajah.lat, 3.815372);
+  assert.equal(rajah.lng, 113.781946);
+  assert.equal(rajah.location_reduced, false);
+  assert.equal(rajah.precision_m, 4);
 });
 
-test('the officer\'s endangered flag on one plant also reduces it, whatever the species status', async () => {
+test('a hidden plant (hide-location flag) is still endangered, and exact for a botanist (RBAC D10)', async () => {
   const shorea = byQr(await get('botanist'))['QR-0003'];
   assert.equal(shorea.endangered, true);
-  assert.equal(shorea.location_reduced, true);
-  assert.deepEqual([shorea.lat, shorea.lng], [3.825, 113.795]);
+  assert.equal(shorea.location_reduced, false);
+  assert.deepEqual([shorea.lat, shorea.lng], [3.821444, 113.790777]);
 });
 
 test('plants that are not endangered keep their coordinates for every role', async () => {

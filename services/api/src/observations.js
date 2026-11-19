@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { supabaseAs } from './supabase.js';
-import { OBS_COLUMNS, visibleTo, findObservation } from './observationAccess.js';
+import { OBS_COLUMNS, visibleTo, findObservation, ownOrStaff, PRIVATE_TALK_MESSAGE } from './observationAccess.js';
 import { parseBody, fail, dbError, UUID } from './validate.js';
 import { detectImageType, stripMetadata, EXTENSIONS } from './images.js';
 import { sendPushToUsers } from './pushNotifications.js';
@@ -120,6 +120,7 @@ export const observationHandlers = {
     const obs = await findObservation(supabaseAs(req.user), req);
     if (obs.error) return dbError(res, obs.error);
     if (!obs.data) return notFound(res);
+    if (!ownOrStaff(obs.data, req.user)) return fail(res, 403, 'FORBIDDEN', PRIVATE_TALK_MESSAGE);
     const { data, error } = await supabaseAs(req.user)
       .from('observation_reviews')
       .select(REVIEW_COLUMNS)
