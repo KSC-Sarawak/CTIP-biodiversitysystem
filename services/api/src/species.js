@@ -9,10 +9,11 @@ import { parseBody, fail, dbError, validationError, UUID } from './validate.js';
 const COLUMNS = `id, scientific_name, common_name, family, genus, description, conservation_status,
   cultural_significance, ecology, is_published, is_deleted, created_by, updated_by, created_at, updated_at`;
 
-// IUCN Red List categories (CTIP-46), stored lower case as the apps show them.
-// Same list as CONSERVATION in apps/shared/data.js. Any case is accepted.
-export const IUCN_STATUSES = ['least concern', 'near threatened', 'vulnerable', 'endangered',
-  'critically endangered', 'extinct in the wild', 'extinct', 'data deficient', 'not evaluated'];
+// The four agreed conservation statuses (RBAC.md D11), stored lower case as
+// the apps show them. Same list as CONSERVATION in apps/shared/data.js. Any
+// case is accepted. Every species must have one: it cannot be left out on
+// create or cleared to null.
+export const IUCN_STATUSES = ['least concern', 'near threatened', 'vulnerable', 'endangered'];
 
 const text = (max) => z.string().trim().min(1).max(max);
 const fields = {
@@ -21,7 +22,7 @@ const fields = {
   family: text(100).nullable(),
   genus: text(100).nullable(),
   description: text(5000).nullable(),
-  conservation_status: z.string().trim().toLowerCase().pipe(z.enum(IUCN_STATUSES)).nullable(),
+  conservation_status: z.string().trim().toLowerCase().pipe(z.enum(IUCN_STATUSES)),
   cultural_significance: text(5000).nullable(),
   ecology: text(5000).nullable(), // habitat and ecology (CTIP-149)
 };
@@ -35,7 +36,6 @@ const SpeciesCreate = z.strictObject({
   family: fields.family.optional(),
   genus: fields.genus.optional(),
   description: fields.description.optional(),
-  conservation_status: fields.conservation_status.optional(),
   cultural_significance: fields.cultural_significance.optional(),
   ecology: fields.ecology.optional(),
 });

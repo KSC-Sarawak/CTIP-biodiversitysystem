@@ -9,7 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useStore } from '../../shared/store.js';
 import { visiblePlants, speciesMedia } from '../../shared/selectors.js';
 import { fuzzyMatch } from '../../shared/fuzzy.js';
-import { isThreatened, BLANK_SPECIES, CONSERVATION } from '../../shared/data.js';
+import { isThreatened, BLANK_SPECIES, CONSERVATION, statusKey } from '../../shared/data.js';
 import { can } from '../../shared/permissions.js';
 import { useTheme, font } from '../components/Theme.js';
 import { LogoMark } from '../components/Chrome.js';
@@ -319,7 +319,11 @@ export function SpeciesFormModal({ species, onClose, onSave, onManagePhotos }) {
   const [commonName, setCommonName] = useState(species.common_name || '');
   const [family, setFamily] = useState(species.family || '');
   const [genus, setGenus] = useState(species.genus || '');
-  const [conservationStatus, setConservationStatus] = useState(species.conservation_status || 'least concern');
+  // RBAC D11: never pre-pick a status. A missing or removed one must be chosen.
+  const [conservationStatus, setConservationStatus] = useState(() => {
+    const st = statusKey(species.conservation_status);
+    return CONSERVATION.includes(st) ? st : '';
+  });
   const [description, setDescription] = useState(species.description || '');
   const [ecology, setEcology] = useState(species.ecology || '');
   const [culturalSignificance, setCulturalSignificance] = useState(species.cultural_significance || '');
@@ -328,6 +332,9 @@ export function SpeciesFormModal({ species, onClose, onSave, onManagePhotos }) {
   const handleSubmit = async () => {
     if (!scientificName.trim()) {
       return Alert.alert('Scientific name required', 'Please provide a binomial scientific name.');
+    }
+    if (!CONSERVATION.includes(conservationStatus)) {
+      return Alert.alert('Conservation status required', 'Choose the species\' conservation status before saving.');
     }
     setSaving(true);
     try {
@@ -395,7 +402,7 @@ export function SpeciesFormModal({ species, onClose, onSave, onManagePhotos }) {
           </View>
 
           <View style={{ gap: 6 }}>
-            <Txt v="label" style={{ fontSize: 15 }}>IUCN Conservation Status</Txt>
+            <Txt v="label" style={{ fontSize: 15 }}>Conservation status (required)</Txt>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
               {CONSERVATION.map((st) => {
                 const selected = conservationStatus === st;
