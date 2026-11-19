@@ -66,11 +66,14 @@ Species  (Nepenthes rafflesiana, Endangered)        ← catalogue, Officer
 | **Proposed species name** | What the botanist thinks the species is, as free text. It becomes a link to a species only when an Officer confirms it. |
 | **Review** | An Officer's decision on one observation: **approve**, **return** (back to the botanist to fix, reason required) or **reject** (reason required). |
 | **Observation status** | `draft` (being written) → `queued` (saved on the phone, not sent yet) → `synced`, shown as **Waiting for review** → `approved`, `returned` or `rejected`. A returned observation goes back to `synced` when the botanist resends it. |
-| **Endangered plant** | A tagged plant whose species' conservation status is **Endangered** or **Critically Endangered**. |
-| **Hidden plant** | A tagged plant an Officer has set to **hide its location** (code: `endangered_override`), for example a vulnerable plant. Treated exactly like an endangered plant for location. |
+| **Endangered plant** | A tagged plant whose species' conservation status is **Endangered**. |
+| **Hidden plant** | A tagged plant an Officer and Admin has set to **hide its location** (code: `endangered_override`), for example a endangered plant. Treated exactly like an endangered plant for location. |
 | **Published** | A species visitors can see. A tagged plant appears to visitors only when its species is published **and** it has at least one approved observation. |
-| **Observation photo** vs **species photo** | An observation photo is taken of one tagged plant on one visit. A species photo is a reference picture in the catalogue. Different owners, different rules. |
-
+| **Observation photo** vs **species photo** | An observation photo is a photo of a specific individual plant. A species photo is a reference picture in the catalogue. Species photos can be observation photos. Species photos can also be overwritten to be a non-observation photo. Different owners, different rules. |
+| **Sensor node** | An IoT device installed next to a tagged plant (usually an endangered one). It sends readings (temperature, humidity, soil moisture, motion, GPS) and webcam images. |
+| **Alert** | Raised automatically when a sensor node reads something wrong: a reading out of range, motion, the node moved, or the node went silent. Each alert has a severity (`low`, `medium`, `high`, `critical`) and a status: `open` → `acknowledged` → `resolved`. |
+| **Alert routing** | An **Admin-only setting** that decides **who is notified** (bell and phone push) when a new alert is raised. For each officer or admin, the admin picks which nodes (some or all) and the minimum severity. Someone with no routing setting is notified about every alert. Routing only controls notifications: every officer and admin can still **see and act on every alert**. (Code: `alert_routes` table, `/alert-routes` routes.) |
+| **Assigning an alert** | Naming the **one person responsible** for one alert. They get an "Alert assigned to you" notification and push. Different from routing: routing is "who hears about new alerts", assigning is "who deals with this alert". |
 ---
 
 ## The four roles
@@ -127,7 +130,7 @@ Species  (Nepenthes rafflesiana, Endangered)        ← catalogue, Officer
 - **Scan a QR tag** (or open its link) to see that tagged plant's public page. [Scope:
   "QR-enabled educational content"]
 - See **published tagged plants** on the map at their **exact location**, as long as the
-  plant is **not hidden** and its species is **not Endangered or Critically Endangered**.
+  plant is **not hidden** and its species is **not Endangered**.
   [D9]
 
 ### Cannot
@@ -201,7 +204,6 @@ Species  (Nepenthes rafflesiana, Endangered)        ← catalogue, Officer
 - **Tagged plants:**
   - link a tagged plant to a species;
   - set the **hide-location flag** (for example to hide a vulnerable plant);
-  - change a tagged plant's QR tag. [Existing]
 - **Delete and restore tagged plants** (soft delete, restorable). [D4]
 - See **exact locations** of all tagged plants. [Threat model T13/T18]
 - **Species:**
@@ -227,6 +229,7 @@ Species  (Nepenthes rafflesiana, Endangered)        ← catalogue, Officer
 - **Register tagged plants or create observations** (first observations or revisits).
   Officers review field work; they do not create it. [D1]
 - Edit a botanist's observation directly. [D7]
+- change a tagged plant's QR tag. [Existing]
 - Register, edit or delete **sensor nodes**, change their alert limits, or decide who
   receives which alerts. [IoT table]
 - Manage user accounts or read the audit log. [Threat model]
@@ -246,9 +249,10 @@ from deleting and restoring tagged plants. [D2]
   - see every account;
   - create accounts (by invitation email or with a temporary password);
   - approve new accounts and give them a role;
-  - change a user's role, name or email;
+  - change a user's role, but not name and email;
   - turn accounts on and off;
   - delete accounts (restorable for 30 days, then removed for good). [Scope, Threat model]
+  - set the hide-location flag
 - **Sensor nodes:** register, edit (including alert limits) and delete nodes; manage device
   keys. [IoT table, Proposal]
 - **Alert routing:** decide which officers or admins hear about which node's alerts, and
@@ -261,14 +265,14 @@ from deleting and restoring tagged plants. [D2]
 - **View**, read-only, all species (including unpublished), all tagged plants with exact
   locations, and all observations, so they can act on alerts and delete the right tagged
   plant. [D6]
-- **Delete and restore tagged plants** (soft delete). [D4]
 - **Discussion moderation:** delete **anyone's** thread or post. [D8] Admins can also start
   threads and reply.
 
 ### Cannot
+- **Delete and restore tagged plants** (soft delete). [D4]
 - **Review observations** (approve, return or reject). [D2]
 - **Change species:** add, edit, publish, delete, or manage species photos. [D2]
-- Link a tagged plant to a species, set the hide-location flag, or change a tagged plant's
+- Link a tagged plant to a species, or change a tagged plant's
   QR tag. [D2]
 - Edit or remove observation photos. [D2]
 - **Print, retire or delete QR tags.** [D5]
@@ -299,7 +303,7 @@ from deleting and restoring tagged plants. [D2]
 | Register a tagged plant (with its first observation) | ❌ | ✅ | ❌ | ❌ |
 | Propose a species name | ❌ | ✅ | ❌ | ❌ |
 | Link to a species, set hide-location flag, change QR tag | ❌ | ❌ | ✅ | ❌ |
-| Delete or restore a tagged plant | ❌ | ❌ | ✅ | ✅ |
+| Delete or restore a tagged plant | ❌ | ❌ | ✅ | ❌ |
 | **Observations** | | | | |
 | Record a revisit (new observation) | ❌ | ✅ | ❌ | ❌ |
 | See observations | approved data on public pages | own | all | 👁 all |
@@ -334,7 +338,7 @@ decisions said on the same point.
 | D1 | Who registers tagged plants and records observations? | **Botanists only** | **Overrides the proposal**, which said officers record plants too. Update the proposal. |
 | D2 | How much can an Admin do compared with an Officer? | **System work only** | Admins manage users, sensors, alert routing, alerts and the audit log. No review, species, tagged-plant or tag changes, no reports. |
 | D3 | What does a Botanist do about species? | **Propose a species name only** | An Officer confirms it and links the tagged plant. Matches the proposal's "botanists enter the species themselves". |
-| D4 | Who deletes and restores tagged plants? | **Officers and admins** | Soft delete only. Replaces the earlier rule "officers cannot delete plants". |
+| D4 | Who deletes and restores tagged plants? | **Officers** | Soft delete only. Replaces the earlier rule "officers cannot delete plants". |
 | D5 | Who creates and manages QR tags? | **Officers print, retire and delete; botanists make field tags and kept tags** | Admins lose tag management (follows D2). |
 | D6 | What can an Admin see? | **Everything, read-only, with exact locations** | Needed for alerts near endangered plants and for D4. |
 | D7 | How does an Officer fix a wrong observation? | **Through review only** (return with a reason) | Unchanged. |
