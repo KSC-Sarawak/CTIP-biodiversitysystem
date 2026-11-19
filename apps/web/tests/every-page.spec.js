@@ -9,7 +9,7 @@ const PUBLIC = ["#/", "#/about", "#/contact", "#/staff", "#/book", "#/plants", `
 const STAFF = {
   botanist: ["#/dashboard", "#/add", "#/records", "#/notifications", "#/discussion", "#/account"],
   officer: ["#/dashboard", "#/review", "#/reports", "#/species", "#/monitoring", "#/tags", "#/notifications", "#/discussion", "#/account"],
-  admin: ["#/dashboard", "#/species", "#/monitoring", "#/users", "#/audit", "#/tags", "#/notifications", "#/discussion", "#/account"],
+  admin: ["#/dashboard", "#/species", "#/monitoring", "#/users", "#/audit", "#/notifications", "#/discussion", "#/account"],
 };
 
 const NODE = "aaaaaaaa-0000-4000-8000-0000000000aa";
