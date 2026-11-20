@@ -1219,3 +1219,31 @@ test('alert routing: an admin narrows what an officer hears about, and resets it
   assert.equal(cleared.status, 204);
   assert.equal(db.alert_routes.length, 0);
 });
+
+test('alerts: only an active officer can be assigned (RBAC D12)', async () => {
+  const inactiveOfficer = crypto.randomUUID();
+  db.profiles.push(
+    { id: users.officer, role: 'officer', is_active: true },
+    { id: users.admin, role: 'admin', is_active: true },
+    { id: users.botanist, role: 'botanist', is_active: true },
+    { id: inactiveOfficer, role: 'officer', is_active: false },
+  );
+  const alert = { id: crypto.randomUUID(), status: 'open', severity: 'high', assigned_to: null };
+  db.alerts.push(alert);
+  const assign = (assigned_to, role = 'admin') => request(app).post(`/v1/alerts/${alert.id}/assign`).set(as(role)).send({ assigned_to });
+
+  for (const who of [users.admin, users.botanist, inactiveOfficer, crypto.randomUUID()]) {
+    const res = await assign(who);
+    assert.equal(res.status, 422, `assigning ${who} should be refused`);
+    assert.equal(res.body.code, 'VALIDATION_ERROR');
+  }
+  assert.equal(alert.assigned_to, null); // nothing was saved
+
+  const ok = await assign(users.officer);
+  assert.equal(ok.status, 200);
+  assert.equal(alert.assigned_to, users.officer);
+  assert.equal((await assign(users.officer, 'officer')).status, 200); // officers assign too
+  assert.equal((await assign(null)).status, 200); // and anyone allowed can clear it
+  assert.equal(alert.assigned_to, null);
+  assert.equal((await assign(users.officer, 'botanist')).status, 403);
+});
