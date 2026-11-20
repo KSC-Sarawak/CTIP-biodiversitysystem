@@ -98,8 +98,8 @@ export const STATUS_TONE = {
   // A record on this phone that could not be sent, or that changed elsewhere (offline-sync.md §6).
   sync_failed: "warning", sync_conflict: "warning",
   returned: "warning", acknowledged: "warning", vulnerable: "warning", "near threatened": "warning", medium: "warning",
-  rejected: "danger", endangered: "danger", "critically endangered": "danger", "extinct in the wild": "danger", extinct: "danger", open: "danger", high: "danger", faulty: "danger", retired: "danger",
-  draft: "neutral", queued: "neutral", unused: "neutral", offline: "neutral", low: "neutral", unknown: "neutral", "data deficient": "neutral", "not evaluated": "neutral",
+  rejected: "danger", endangered: "danger", open: "danger", high: "danger", faulty: "danger", retired: "danger",
+  draft: "neutral", queued: "neutral", unused: "neutral", offline: "neutral", low: "neutral", unknown: "neutral",
 };
 
 // Plain-language names for record statuses. The database values stay the same.
