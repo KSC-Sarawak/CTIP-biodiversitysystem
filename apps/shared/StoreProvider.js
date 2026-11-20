@@ -48,6 +48,8 @@ import {
   createSpecimenApi,
   updateSpecimenApi,
   deleteSpecimenApi,
+  updateObservationPhotoApi,
+  deleteObservationPhotoApi,
   restoreSpecimenApi,
   retagSpecimenApi,
   updateObservationApi,
@@ -967,11 +969,29 @@ function collectionMatches(a = [], b = []) {
   };
 
   /* ---------- plants and photos ---------- */
-  const setPlantPhotos = (plantId, photos) => {
-    setDb((d) => ({
-      ...d,
-      plants: d.plants.map((p) => (p.id === plantId ? { ...p, photos } : p)),
-    }));
+  // A tagged plant's photos, saved through the API (an officer on any plant, a
+  // botanist on their own observations). Only what changed is sent: changed
+  // captions, then removed photos. Answers { ok, message }.
+  const setPlantPhotos = async (plantId, photos) => {
+    const before = db.plants.find((p) => p.id === plantId)?.photos || [];
+    const saved = before.filter((p) => p.observation_id);
+    try {
+      for (const p of photos) {
+        const old = saved.find((o) => o.id === p.id);
+        const caption = (p.caption || "").trim();
+        if (!old || (old.caption || "").trim() === caption) continue;
+        const res = await callApi(updateObservationPhotoApi, p.observation_id, p.id, caption || null);
+        if (!res.ok) return { ok: false, message: `Caption not saved: ${res.message}` };
+      }
+      for (const old of saved) {
+        if (photos.some((p) => p.id === old.id)) continue;
+        const res = await callApi(deleteObservationPhotoApi, old.observation_id, old.id);
+        if (!res.ok && res.status !== 404) return { ok: false, message: `A photo was not removed: ${res.message}` };
+      }
+      return { ok: true };
+    } finally {
+      await loadFromApi(true); // show what was really saved, also after a failure part way
+    }
   };
 
   // The plant already registered on a tag, if any: { id, registered_by, observations }.

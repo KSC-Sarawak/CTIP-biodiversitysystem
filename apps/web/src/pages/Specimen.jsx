@@ -333,8 +333,17 @@ export default function Specimen({ qr }) {
       {editing && (
         <PhotoEditor
           photos={plant.photos}
+          captions
+          requireCaptions={false}
+          min={0}
+          allowUpload={false}
+          arrange={false}
           onClose={() => setEditing(false)}
-          onSave={(list) => { setPlantPhotos(plant.id, list); setEditing(false); notify("Photos saved"); }}
+          onSave={async (list) => {
+            setEditing(false);
+            const res = await setPlantPhotos(plant.id, list);
+            notify(res.ok ? "Photos saved" : res.message);
+          }}
         />
       )}
     </>
