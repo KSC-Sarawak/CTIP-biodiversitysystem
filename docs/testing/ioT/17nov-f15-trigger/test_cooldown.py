@@ -1,7 +1,7 @@
 import sys, os, importlib.util, tempfile, queue
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(here, "stubs"))
-spec = importlib.util.spec_from_file_location("gw", os.path.join(here, "work", "Nodegateway.py"))
+spec = importlib.util.spec_from_file_location("gw", os.path.join(here, "..", "..", "..", "..", "apps", "firmware", "Nodegateway.py"))
 gw = importlib.util.module_from_spec(spec); spec.loader.exec_module(gw)
 logs=[]; gw.log=lambda p,t: logs.append(t)
 gw.PENDING_DIR=tempfile.mkdtemp(); gw.upload=lambda p: True; gw.retry_pending=lambda: None
@@ -11,6 +11,7 @@ class C:
     def loop_stop(s): pass
     def disconnect(s): pass
 gw.SENSOR_KEY="test"; gw.MQTT_USER="u"; gw.MQTT_PASSWORD="p"
+gw.CA_CERT=os.path.abspath(__file__)  # any existing file: the fake client never opens it
 gw.make_client=lambda: C()
 class Cam:
     def take_jpeg(s): return b"x"

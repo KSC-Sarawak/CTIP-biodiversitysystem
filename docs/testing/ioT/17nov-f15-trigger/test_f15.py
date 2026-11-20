@@ -1,7 +1,7 @@
 import sys, os, json, importlib.util, tempfile, types
 here = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(here, "stubs"))
-spec = importlib.util.spec_from_file_location("gw", os.path.join(here, "work", "Nodegateway.py"))
+spec = importlib.util.spec_from_file_location("gw", os.path.join(here, "..", "..", "..", "..", "apps", "firmware", "Nodegateway.py"))
 gw = importlib.util.module_from_spec(spec); spec.loader.exec_module(gw)
 logs = []
 gw.log = lambda part, text: logs.append(f"[{part}] {text}")

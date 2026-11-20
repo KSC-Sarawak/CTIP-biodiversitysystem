@@ -1,4 +1,4 @@
-F-15 camera-trigger checks, 17 Nov 2026. Nodegateway.py from main (apps/firmware), fake camera, no network. Run: python -I test_f15.py / test_cooldown.py
+F-15 camera-trigger checks, 17 Nov 2026. Nodegateway.py from main (apps/firmware), fake camera, no network. Run: python -I test_f15.py / test_cooldown.py (stubs/ stands in for paho-mqtt and requests; the scripts load apps/firmware/Nodegateway.py)
 
 --- T1 registered node, source 'motion' (normal)
     log: ['[CAMERA] TRIGGER from 0ac66bdc-db55-4a8e-a7c6-4c30daa8124b: {"source": "motion"}', '[CAMERA]   photo 0ac66bdc-db55-4a8e-a7c6-4c30daa8124b__2026-11-17T130721Z__motion__f21cf8.jpg (0 KB)']
