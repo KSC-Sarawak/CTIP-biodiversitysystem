@@ -303,7 +303,7 @@ export function TaggedPlant({ nav, params }) {
         ]} />
         {/* Only when an approximate spot is actually shown: a visitor gets no coordinates at all (RBAC D9). */}
         {p.location_reduced && where ? <Txt v="caption" color={c.ink2}>{REDUCED_LOCATION_NOTE}</Txt> : null}
-        {where && can(role, 'review') ? (
+        {where && can(role, 'hideLocation') ? (
           <Check
             label={HIDE_LOCATION_LABEL}
             hint={hideRule.hint}
