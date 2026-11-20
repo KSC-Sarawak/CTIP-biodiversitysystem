@@ -6,7 +6,7 @@ export const SENSOR = 'sensor';
 
 const ANY_STAFF = ['botanist', 'officer', 'admin'];
 const OFFICER_ADMIN = ['officer', 'admin'];
-// RBAC D1 (RBAC.md): only botanists register tagged plants and
+// RBAC D1 (docs/security/RBAC.md): only botanists register tagged plants and
 // create observations and their photos. Officers review; admins run the system.
 const BOTANIST = ['botanist'];
 // RBAC D2 and D5: data work (review, species, reports, printing and retiring
