@@ -629,6 +629,9 @@ export const restoreProfileApi = (id, { token } = {}) => send("POST", `/profiles
 export const findSpecimenByQrApi = (qrId, { token } = {}) => apiFetch(`/specimens/by-qr/${enc(qrId)}`, { token });
 export const createSpecimenApi = (specimen, { token } = {}) => send("POST", "/specimens", specimen, token);
 export const updateSpecimenApi = (id, changes, { token } = {}) => send("PATCH", `/specimens/${enc(id)}`, changes, token);
+// RBAC D4: officers only. A deleted plant leaves every list; its tag and records stay.
+export const deleteSpecimenApi = (id, { token } = {}) => send("DELETE", `/specimens/${enc(id)}`, undefined, token);
+export const restoreSpecimenApi = (id, { token } = {}) => send("POST", `/specimens/${enc(id)}/restore`, undefined, token);
 export const createObservationApi = (obs, { token } = {}) => send("POST", "/observations", obs, token);
 export const fetchObservationApi = (id, { token } = {}) => apiFetch(`/observations/${enc(id)}`, { token });
 // Edit a draft or queued record: { height_cm?, morphology?, notes?, version }. `changes` must hold

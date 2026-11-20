@@ -78,6 +78,9 @@ export const routes = [
   ['get', '/specimens/by-qr/:qrId', ANY_STAFF],
   ['get', '/specimens/:id', ANY_STAFF],
   ['patch', '/specimens/:id', ANY_STAFF],
+  // RBAC D4: only officers delete and restore tagged plants (soft delete).
+  ['delete', '/specimens/:id', OFFICER],
+  ['post', '/specimens/:id/restore', OFFICER],
 
   // Observations, photos, reviews, comments, sync
   ['get', '/observations', ANY_STAFF],

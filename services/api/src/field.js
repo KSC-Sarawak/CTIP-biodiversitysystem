@@ -88,6 +88,26 @@ export const EDITABLE = ['draft', 'queued'];
 export const isDuplicate = (error, constraint) => error?.code === '23505' && error.message.includes(constraint);
 const obsNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Observation not found');
 const plantNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Plant not found');
+
+// RBAC D4: officers delete a tagged plant (soft delete) and restore it. A
+// deleted plant leaves every list, the map and the public pages; its tag stays
+// taken and its observations are kept, so a restore brings it back as it was.
+// The database trigger guard_specimen_update() lets only officers change
+// is_deleted (migration 20261120070000).
+async function setPlantDeleted(req, res, deleted) {
+  if (!UUID.test(req.params.id)) return plantNotFound(res);
+  const { data, error } = await supabaseAs(req.user)
+    .from('specimens')
+    .update({ is_deleted: deleted })
+    .eq('id', req.params.id)
+    .eq('is_deleted', !deleted)
+    .select(SPECIMEN_COLUMNS)
+    .maybeSingle();
+  if (error) return dbError(res, error);
+  if (!data) return plantNotFound(res); // no such plant, or already deleted (or not deleted)
+  if (deleted) return res.status(204).end();
+  res.json(data);
+}
 const photoNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Photo not found');
 const changedMeanwhile = (res) =>
   fail(res, 409, 'VERSION_CONFLICT', 'This record changed since you opened it. Refresh and try again.');
@@ -291,6 +311,9 @@ export const fieldHandlers = {
     if (!data) return fail(res, 404, 'NOT_FOUND', 'Plant not found');
     res.json(data);
   },
+
+  'delete /specimens/:id': (req, res) => setPlantDeleted(req, res, true),
+  'post /specimens/:id/restore': (req, res) => setPlantDeleted(req, res, false),
 
   // A new observation of a plant: the first one after registering, or a revisit.
   'post /observations': async (req, res) => {

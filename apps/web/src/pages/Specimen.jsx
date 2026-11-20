@@ -10,6 +10,7 @@ import PhotoEditor from "../components/PhotoEditor.jsx";
 import PublicPlant from "./PublicPlant.jsx";
 import { Chip, Empty, Modal, Mono, Sci } from "../components/Bits.jsx";
 import { useConfirm } from "../useConfirm.jsx";
+import { go } from "../useRoute.js";
 import { decisionPrompt } from "../decisionPrompt.jsx";
 import { useStore } from "../../../shared/store.js";
 import { can } from "../../../shared/permissions.js";
@@ -22,7 +23,7 @@ const height = (cm) => (cm == null ? "-" : cm >= 100 ? `${(cm / 100).toFixed(cm 
 // One tagged plant (a specimen): the page a QR tag opens.
 // Tabs: Overview and Photos for everyone; Visits, Sensor and Discussion for staff.
 export default function Specimen({ qr }) {
-  const { db, me, role, setPlantPhotos, setPlantSpecies, setPlantLocationHidden, reviewObservation, notify } = useStore();
+  const { db, me, role, setPlantPhotos, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, reviewObservation, notify } = useStore();
   const staff = can(role, "pending");
   const canReview = can(role, "review");
   const [tab, setTab] = useState("overview");
@@ -77,6 +78,17 @@ export default function Specimen({ qr }) {
     setPlantLocationHidden(plant.id, hide);
   };
 
+  // RBAC D4: officers delete a plant (soft delete, restorable from Tagged plants > Deleted plants).
+  const deletePlant = async () => {
+    const ok = await ask({
+      title: "Delete tagged plant",
+      confirmLabel: "Delete plant",
+      word: "DELETE",
+      body: <p>Delete <b>{plant.qr_id}</b>? It leaves every list, the map and the public pages. Its tag stays taken and its records are kept, so an officer can restore it later.</p>,
+    });
+    if (ok && (await setPlantDeleted(plant.id, true))) go("/dashboard/all");
+  };
+
   return (
     <>
       {confirmDialog}
@@ -119,6 +131,7 @@ export default function Specimen({ qr }) {
           )}
           {coords && <a className="btn ghost" href={"#/map/" + plant.qr_id}><Icon name="pin" size={16} /> Show on map</a>}
           {can(role, "tags") && <a className="btn ghost" href="#/tags"><Icon name="printer" size={16} /> Print tags</a>}
+          {can(role, "deletePlants") && <button type="button" className="btn ghost" onClick={deletePlant}><Icon name="trash" size={16} /> Delete plant</button>}
         </div>
       </section>
 
