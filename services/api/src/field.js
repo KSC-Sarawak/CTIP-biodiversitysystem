@@ -75,6 +75,8 @@ const PhotoNotes = z.strictObject({
   traits: z.array(z.enum(['Whole plant', 'Tree trunk', 'Bark', 'Leaf', 'Flower', 'Fruit', 'Seed', 'Root'])).max(8),
 });
 
+const PhotoCaption = z.strictObject({ caption: text(200) });
+
 const SpecimenList = z.object({
   species_id: id.optional(),
   unresolved: z.enum(['true', 'false']).optional(), // true: no species linked yet
@@ -128,6 +130,24 @@ async function setPlantDeleted(req, res, deleted) {
   res.json(data);
 }
 const photoNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Photo not found');
+
+// The photo named in the path, when this user may change it: an officer any
+// photo, a botanist only photos on their own observations. Answers
+// { db, photo } or sends the error and answers null.
+async function photoToChange(req, res) {
+  const db = supabaseAs(req.user);
+  const obs = await observationOr404(db, req, res);
+  if (!obs) return null;
+  if (req.user.role !== 'officer' && obs.recorded_by !== req.user.id) {
+    fail(res, 403, 'FORBIDDEN', 'You can change photos only on your own observations.');
+    return null;
+  }
+  const { data: photo, error } = await db.from('observation_photos').select(PHOTO_COLUMNS)
+    .eq('id', req.params.photoId).eq('observation_id', obs.id).maybeSingle();
+  if (error) { dbError(res, error); return null; }
+  if (!photo) { photoNotFound(res); return null; }
+  return { db, photo };
+}
 const changedMeanwhile = (res) =>
   fail(res, 409, 'VERSION_CONFLICT', 'This record changed since you opened it. Refresh and try again.');
 
@@ -581,6 +601,37 @@ export const fieldHandlers = {
     if (updated.error) return dbError(res, updated.error);
     if (!updated.data) return fail(res, 403, 'FORBIDDEN', 'You cannot change this photo');
     res.json((await withSignedUrls(db, [updated.data]))[0]);
+  },
+
+  // RBAC: an officer may edit the caption of, or remove, a photo on any
+  // observation; a botanist only on their own. Visitors never reach these.
+  'patch /observations/:id/photos/:photoId': async (req, res) => {
+    if (!UUID.test(req.params.id) || !UUID.test(req.params.photoId)) return photoNotFound(res);
+    const body = parseBody(PhotoCaption, req, res);
+    if (!body) return;
+    const found = await photoToChange(req, res);
+    if (!found) return;
+    const { db, photo } = found;
+    const { data, error } = await db.from('observation_photos').update({ caption: body.caption ?? null })
+      .eq('id', photo.id).select(PHOTO_COLUMNS).maybeSingle();
+    if (error) return dbError(res, error);
+    if (!data) return fail(res, 403, 'FORBIDDEN', 'You cannot change this photo');
+    res.json((await withSignedUrls(db, [data]))[0]);
+  },
+
+  // Removes the record, then the file. The file goes second so a refused
+  // delete never leaves a record that points at nothing.
+  'delete /observations/:id/photos/:photoId': async (req, res) => {
+    if (!UUID.test(req.params.id) || !UUID.test(req.params.photoId)) return photoNotFound(res);
+    const found = await photoToChange(req, res);
+    if (!found) return;
+    const { db, photo } = found;
+    const { data, error } = await db.from('observation_photos').delete().eq('id', photo.id).select('id').maybeSingle();
+    if (error) return dbError(res, error);
+    if (!data) return fail(res, 403, 'FORBIDDEN', 'You cannot remove this photo');
+    const key = photoPath(photo.s3_key);
+    if (key) await db.storage.from(PHOTO_BUCKET).remove([key]);
+    res.status(204).end();
   },
 
   'get /observations/:id/comments': async (req, res) => {

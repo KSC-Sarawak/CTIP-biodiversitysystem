@@ -1603,6 +1603,50 @@ paths:
               schema: { $ref: '#/components/schemas/ObservationPhoto' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /observations/{id}/photos/{photoId}:
+    patch:
+      tags: [Photos]
+      operationId: updateObservationPhoto
+      summary: Change a photo's caption (Officer any photo, Botanist own observations)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: photoId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                caption: { type: string, maxLength: 200, nullable: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservationPhoto' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Photos]
+      operationId: deleteObservationPhoto
+      summary: Remove a photo and its file (Officer any photo, Botanist own observations)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: photoId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /observations/{id}/reviews:
     get:
       tags: [Reviews]

@@ -97,6 +97,8 @@ export const routes = [
   ['get', '/observations/:id/photos', ANY_STAFF],
   ['post', '/observations/:id/photos', BOTANIST],
   ['post', '/observations/:id/photos/:photoId/confirm', BOTANIST],
+  ['patch', '/observations/:id/photos/:photoId', BOTANIST_OFFICER], // caption: officer any, botanist own
+  ['delete', '/observations/:id/photos/:photoId', BOTANIST_OFFICER], // remove: officer any, botanist own
   ['get', '/observations/:id/reviews', ANY_STAFF],
   ['post', '/observations/:id/reviews', OFFICER],
   ['get', '/observations/:id/comments', ANY_STAFF],
