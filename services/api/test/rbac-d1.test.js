@@ -1,4 +1,4 @@
-// RBAC D1 (RBAC.md, 19 Nov 2026): only botanists register tagged
+// RBAC D1 (docs/security/RBAC.md, 19 Nov 2026): only botanists register tagged
 // plants, create observations and add observation photos. Officers and admins
 // get 403 from the API (the database refuses them too, migration
 // 20261119120000_rbac_d1_botanist_only_create.sql).
