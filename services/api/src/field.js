@@ -7,6 +7,7 @@ import { protectSpecimen } from './distribution.js';
 import { OBS_COLUMNS, findObservation, ownOrStaff, PRIVATE_TALK_MESSAGE } from './observationAccess.js';
 import { isFullLink, isWebLink } from './photoLinks.js';
 import { sendPushToUsers } from './pushNotifications.js';
+import { photoPath } from './photoLinks.js';
 
 // Field work: a botanist registers a plant on a QR tag (specimen), records
 // observations of it, adds photos and comments, and sends records for review.
@@ -626,14 +627,21 @@ export const fieldHandlers = {
 };
 
 // Field photos are private: each row gets a link that works for a day.
-// Rows saved by older app builds may hold a full link instead of a Storage path.
+// Rows saved by older app builds may hold a full link instead of a Storage
+// path; a link into our own photo bucket is signed by its path too (it never
+// opens as it is, the bucket being private). Any other web link is kept.
+// Visitors' rows are signed with the visitor client: the storage policy
+// "obs photos: visitors read published" lets it sign only published photos.
 export async function withSignedUrls(db, rows) {
-  const paths = rows.map((r) => r.s3_key).filter((k) => k && !isFullLink(k));
+  const paths = [...new Set(rows.map((r) => photoPath(r.s3_key)).filter(Boolean))];
   const signed = new Map();
   if (paths.length) {
     const { data, error } = await db.storage.from(PHOTO_BUCKET).createSignedUrls(paths, SIGNED_FOR);
     if (error) console.warn('observation photo links not signed:', error.message);
     for (const item of data ?? []) if (item?.signedUrl) signed.set(item.path, item.signedUrl);
   }
-  return rows.map((r) => ({ ...r, url: signed.get(r.s3_key) ?? (isWebLink(r.s3_key) ? r.s3_key : null) }));
+  return rows.map((r) => {
+    const path = photoPath(r.s3_key);
+    return { ...r, url: path ? signed.get(path) ?? null : isWebLink(r.s3_key) ? r.s3_key : null };
+  });
 }
