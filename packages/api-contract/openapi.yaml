@@ -1290,6 +1290,39 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /specimens/{id}/retag:
+    post:
+      tags: [Specimens]
+      operationId: retagSpecimen
+      summary: Move a tagged plant to a new QR tag (officer only, RBAC D13)
+      description: >
+        For a tag that is lost, damaged or unreadable. The old tag is marked
+        `old_tag` (retired or damaged) first and is never reused; then the plant
+        moves to the new, unused tag. The plant and its observations stay the same.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [qr_id, old_tag]
+              properties:
+                qr_id: { type: string, maxLength: 64, description: The new, unused tag }
+                old_tag: { type: string, enum: [retired, damaged] }
+      responses:
+        '200':
+          description: The plant on its new tag
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specimen' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /specimens/{id}/restore:
     post:
       tags: [Specimens]
