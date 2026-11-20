@@ -30,6 +30,7 @@ function rest(table, url, method, body, single) {
   const filters = [...url.searchParams].filter(([k]) => !['select', 'limit', 'order'].includes(k));
   const match = (r) => filters.every(([k, v]) => {
     if (v === 'is.null') return r[k] == null;
+    if (v.startsWith('lt.')) return r[k] != null && `${r[k]}` < v.slice(3);
     return `${r[k]}` === v.replace(/^eq\./, '');
   });
   if (method === 'GET') {
@@ -170,4 +171,27 @@ test('an admin can no longer change another person\'s name (PATCH /profiles/:id)
   const res = await request(app).patch(`/v1/profiles/${ids.botanist}`).set(as('admin')).send({ full_name: 'Someone Else' });
   assert.equal(res.status, 422);
   assert.equal(profiles.find((p) => p.id === ids.botanist).full_name, 'Bo Tanist');
+});
+
+test('an admin cannot correct their own email (RBAC.md: nobody changes their own email)', async () => {
+  const res = await correct('me@example.com', 'admin', ids.admin);
+  assert.equal(res.status, 403);
+  assert.equal(res.body.code, 'FORBIDDEN');
+  assert.equal(requests.length, 0);
+  assert.ok(!calls.some((c) => c.path === '/auth/v1/invite'));
+});
+
+test('an expired, unconfirmed correction gives its address back on the next request', async () => {
+  const first = await correct('stale@example.com');
+  assert.equal(first.status, 202);
+  const stale = placeholderOf('stale@example.com');
+  assert.ok(stale);
+  requests[0].expires_at = new Date(Date.now() - 60_000).toISOString();
+  // Any later correction, even for another person, clears it first.
+  profiles.push({ id: ids.officer, email: 'officer@example.com', role: 'officer', deleted_at: null });
+  authUsers.set(ids.officer, { id: ids.officer, email: 'officer@example.com', user_metadata: {} });
+  const other = await correct('officer.new@example.com', 'admin', ids.officer);
+  assert.equal(other.status, 202);
+  assert.ok(!authUsers.has(stale.id), 'the expired placeholder was removed');
+  assert.ok(!requests.some((r) => r.new_email === 'stale@example.com'), 'the expired request was removed');
 });
