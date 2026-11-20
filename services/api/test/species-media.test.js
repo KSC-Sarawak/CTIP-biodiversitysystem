@@ -130,7 +130,7 @@ test('officer uploads a photo with a caption: stored in species-media and record
 });
 
 test('the stored file has no location metadata', async () => {
-  await upload('admin', JPEG);
+  await upload('officer', JPEG);
   const [file] = Object.values(stored);
   assert.ok(file.includes(Buffer.from('pixels')), 'the picture was stored');
   assert.ok(!file.includes(GPS));
@@ -182,7 +182,7 @@ const remove = (role, id, species = SPECIES) => request(app).delete(`/v1/species
 test('officer edits a caption and moves the cover photo, without re-uploading', async () => {
   const first = (await upload('officer', JPEG, { caption: 'Old', is_primary: 'true' })).body;
   const second = (await upload('officer', PNG, { caption: 'Leaf' }, 'b.png')).body;
-  const res = await edit('admin', first.id, { caption: 'Lower pitcher', sort_order: 1 });
+  const res = await edit('officer', first.id, { caption: 'Lower pitcher', sort_order: 1 });
   assert.equal(res.status, 200);
   assert.equal(res.body.caption, 'Lower pitcher');
   assert.equal(Object.keys(stored).length, 2, 'no new file');
@@ -201,11 +201,11 @@ test('edit is validated: empty body, unknown fields and blank captions get 422; 
 
 test('delete removes the record and its file', async () => {
   const { id } = (await upload('officer', JPEG, { caption: 'A' })).body;
-  const res = await remove('admin', id);
+  const res = await remove('officer', id);
   assert.equal(res.status, 204);
   assert.deepEqual(media, []);
   assert.deepEqual(stored, {});
-  assert.equal((await remove('admin', id)).status, 404);
+  assert.equal((await remove('officer', id)).status, 404);
 });
 
 test('only Officer and Admin can edit or delete photos', async () => {

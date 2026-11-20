@@ -168,7 +168,7 @@ function SpeciesCatalogue({ nav, params, onView }) {
   // the loaded list, which also has unpublished species. A tag ID, whole or in part,
   // is always looked up among the plants already loaded, and browsing without a
   // search term keeps the full list with its sorts.
-  const apiMode = !can(role, 'species') && !isTagSearch(q) && cleanTerm(q).length >= 2;
+  const apiMode = !can(role, 'allPlants') && !isTagSearch(q) && cleanTerm(q).length >= 2;
   const search = useSpeciesSearch({ q: apiMode ? q : '', family: apiMode ? family : undefined });
   const shown = apiMode ? search.items : local.shown;
   const loading = apiMode ? search.loading : local.loading;
