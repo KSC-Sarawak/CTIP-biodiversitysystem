@@ -228,7 +228,7 @@ function DeletedPlants() {
       ) : (
         <div className="tablewrap">
           <table>
-            <thead><tr><th scope="col">Tag</th><th scope="col">Species</th><th scope="col">Recorded by</th><th scope="col">Deleted</th><th scope="col"><span className="sr">Actions</span></th></tr></thead>
+            <thead><tr><th scope="col">Tag</th><th scope="col">Species</th><th scope="col">Recorded by</th><th scope="col">Last changed</th><th scope="col"><span className="sr">Actions</span></th></tr></thead>
             <tbody>
               {deleted.map((p) => (
                 <tr key={p.id}>

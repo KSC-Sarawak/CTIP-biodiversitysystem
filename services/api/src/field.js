@@ -96,7 +96,18 @@ const plantNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Plant not found');
 // is_deleted (migration 20261120070000).
 async function setPlantDeleted(req, res, deleted) {
   if (!UUID.test(req.params.id)) return plantNotFound(res);
-  const { data, error } = await supabaseAs(req.user)
+  const db = supabaseAs(req.user);
+  // An observation waiting for review would drop out of every review queue
+  // while still "waiting", so it must be decided first.
+  if (deleted) {
+    const waiting = await db.from('observations').select('id')
+      .eq('specimen_id', req.params.id).eq('status', 'synced').eq('is_deleted', false).limit(1);
+    if (waiting.error) return dbError(res, waiting.error);
+    if (waiting.data.length) {
+      return fail(res, 409, 'REVIEW_IN_PROGRESS', 'This plant has an observation waiting for review. Approve, return or reject it before deleting the plant.');
+    }
+  }
+  const { data, error } = await db
     .from('specimens')
     .update({ is_deleted: deleted })
     .eq('id', req.params.id)
