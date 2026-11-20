@@ -15,7 +15,7 @@ export default function NewSpeciesButton({ guess, onCreated }) {
       </button>
       {open && (
         <SpeciesForm
-          species={{ ...BLANK_SPECIES, scientific_name: guess?.trim() || "", conservation_status: "not evaluated" }}
+          species={{ ...BLANK_SPECIES, scientific_name: guess?.trim() || "", conservation_status: "" }}
           offerPublish
           onClose={() => setOpen(false)}
           onSaved={(species) => {
