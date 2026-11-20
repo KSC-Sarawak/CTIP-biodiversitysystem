@@ -40,6 +40,8 @@ import {
   updateMeApi,
   createProfileApi,
   updateProfileApi,
+  correctEmailApi,
+  confirmEmailChangeApi,
   deleteProfileApi,
   restoreProfileApi,
   findSpecimenByQrApi,
@@ -590,6 +592,7 @@ function collectionMatches(a = [], b = []) {
       // Out of the address and the history, then on to setting a new password.
       const next = fromLink === "recovery" ? "#/login?reset=1"
         : fromLink === "magiclink" ? "#/login?mfareset=1" // lost-phone link
+        : fromLink === "emailchange" ? "#/login?emailchange=1" // RBAC D14: admin's email correction
         : fromLink === "expired" ? "#/login?expired=1" : "#/dashboard";
       window.history.replaceState(null, "", window.location.pathname + window.location.search + next);
       window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -1642,6 +1645,19 @@ function collectionMatches(a = [], b = []) {
     await loadFromApi(true);
   };
 
+  // RBAC D14: the email changes only once the person clicks the link sent to the new address.
+  const correctEmail = async (id, email) => {
+    const res = await callApi(correctEmailApi, id, email.trim().toLowerCase());
+    if (!res.ok) { notify(`Could not send the confirmation: ${res.message}`); return false; }
+    notify(`Confirmation link sent to ${res.data.pending_email}. The email changes when they click it (within 24 hours).`);
+    return true;
+  };
+  // The link from that email: finish the change. Answers { ok, email } or { ok: false, message }.
+  const confirmEmailChange = async () => {
+    const res = await confirmEmailChangeApi();
+    return res.ok ? { ok: true, email: res.data.email } : { ok: false, message: res.message };
+  };
+
   // Deleted accounts are off at once and can be restored for 30 days.
   const deleteUser = async (id) => {
     const res = await callApi(deleteProfileApi, id);
@@ -1838,7 +1854,7 @@ function collectionMatches(a = [], b = []) {
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
-    addUser, updateUser, deleteUser, restoreUser,
+    addUser, updateUser, deleteUser, restoreUser, correctEmail, confirmEmailChange,
     ackAlert, resolveAlert, assignAlert, addAlertNote, setNodeNickname, createNode, updateNode, loadAlertRoutes, setAlertRoute, loadNodeTelemetry, loadNodeImages,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,
