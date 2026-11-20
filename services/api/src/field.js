@@ -275,6 +275,11 @@ export const fieldHandlers = {
     if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Plant not found');
     const body = parseBody(SpecimenUpdate, req, res);
     if (!body) return;
+    // RBAC D2 and D15: an admin may only hide or show a plant's location.
+    // The database trigger guard_specimen_update() says the same.
+    if (req.user.role === 'admin' && Object.keys(body).some((k) => k !== 'endangered_override')) {
+      return fail(res, 403, 'FORBIDDEN', 'An admin can only hide or show a plant\'s location.');
+    }
     const { data, error } = await supabaseAs(req.user)
       .from('specimens')
       .update(body)
