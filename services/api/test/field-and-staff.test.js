@@ -1008,6 +1008,44 @@ test('photo confirm: an uploaded photo is returned as it is; a pending one is ma
   assert.equal((await confirm({ id: crypto.randomUUID() })).status, 404);
 });
 
+test('photo caption and remove: an officer on any observation, a botanist only on their own, an admin never', async () => {
+  const obs = observation({ status: 'approved' });
+  const photo = () => {
+    const row = { id: crypto.randomUUID(), observation_id: obs.id, s3_bucket: 'observation-photos',
+      s3_key: `${obs.id}/${crypto.randomUUID()}.jpg`, upload_status: 'uploaded', caption: null };
+    db.observation_photos.push(row);
+    stored.push(row.s3_key);
+    return row;
+  };
+  const a = photo();
+  const b = photo();
+  const caption = (p, who, body = { caption: 'Leaf, new growth' }) =>
+    request(app).patch(`/v1/observations/${obs.id}/photos/${p.id}`).set(as(who)).send(body);
+  const remove = (p, who) => request(app).delete(`/v1/observations/${obs.id}/photos/${p.id}`).set(as(who));
+
+  const byOfficer = await caption(a, 'officer');
+  assert.equal(byOfficer.status, 200);
+  assert.equal(a.caption, 'Leaf, new growth');
+  assert.equal((await caption(a, 'officer', { caption: 'x'.repeat(201) })).status, 422);
+  assert.equal((await caption(a, 'officer', { caption: 'ok', url: 'x' })).status, 422);
+  assert.equal((await caption(a, 'admin')).status, 403);
+  assert.equal((await remove(a, 'admin')).status, 403);
+  assert.equal(db.observation_photos.length, 2);
+
+  assert.equal((await remove(a, 'officer')).status, 204);
+  assert.ok(!db.observation_photos.some((p) => p.id === a.id));
+  assert.ok(!stored.includes(a.s3_key), 'the file is removed too');
+  assert.equal((await remove(a, 'officer')).status, 404);
+
+  // The botanist who recorded it may change it; another botanist may not.
+  assert.equal((await caption(b, 'botanist', { caption: '' })).status, 200);
+  assert.equal(b.caption, null);
+  obs.recorded_by = crypto.randomUUID();
+  assert.equal((await caption(b, 'botanist')).status, 403);
+  assert.equal((await remove(b, 'botanist')).status, 403);
+  assert.ok(db.observation_photos.some((p) => p.id === b.id));
+});
+
 /* ---------- CTIP-16: POST /sync ---------- */
 
 const syncItem = (fields = {}) => ({
