@@ -301,7 +301,7 @@ export function TaggedPlant({ nav, params }) {
           ['Location', where ? <Mono size={14}>{coords(where.lat, where.lng)}</Mono> : p.lat == null ? 'Not captured when recorded.' : HIDDEN_NOTE],
         ]} />
         {p.location_reduced ? <Txt v="caption" color={c.ink2}>{REDUCED_LOCATION_NOTE}</Txt> : null}
-        {where && can(role, 'review') ? (
+        {where && can(role, 'hideLocation') ? (
           <Check
             label={HIDE_LOCATION_LABEL}
             hint={hideRule.hint}
