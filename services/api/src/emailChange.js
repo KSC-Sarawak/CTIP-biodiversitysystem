@@ -44,13 +44,31 @@ async function cancelPending(svc, userId) {
   return null;
 }
 
+// Drops requests nobody confirmed in time, with their placeholder accounts, so
+// an old placeholder never keeps holding an address (it would block a new
+// account or a new correction for it).
+async function dropExpired(svc) {
+  const old = await svc.from('email_change_requests').select('id, placeholder_id')
+    .is('done_at', null).lt('expires_at', new Date().toISOString());
+  if (old.error) return old.error;
+  for (const row of old.data) {
+    if (row.placeholder_id) await svc.auth.admin.deleteUser(row.placeholder_id);
+    await svc.from('email_change_requests').delete().eq('id', row.id);
+  }
+  return null;
+}
+
 export const emailChangeHandlers = {
   'post /profiles/:id/email': async (req, res) => {
     if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'User not found');
+    // RBAC.md: nobody changes their own email, admins included.
+    if (req.params.id === req.user.id) return fail(res, 403, 'FORBIDDEN', 'Another admin must correct your email.');
     const body = parseBody(NewEmail, req, res);
     if (!body) return;
     const svc = supabaseService();
     if (!svc) return noService(res);
+    const expiredError = await dropExpired(svc);
+    if (expiredError) return dbError(res, expiredError);
 
     const db = supabaseAs(req.user);
     const target = await db.from('profiles').select('id, email, deleted_at').eq('id', req.params.id).maybeSingle();
@@ -91,7 +109,13 @@ export const emailChangeHandlers = {
     const placeholderId = invited.data.user.id;
     // The sign-up trigger made a profile for the placeholder: remove it so it
     // never appears as a new account on the Users page.
-    await svc.from('profiles').delete().eq('id', placeholderId);
+    const removed = await svc.from('profiles').delete().eq('id', placeholderId);
+    if (removed.error) {
+      // Never leave a placeholder that could show up (and be approved) as a new account.
+      await svc.auth.admin.deleteUser(placeholderId);
+      await svc.from('email_change_requests').delete().eq('id', requestId);
+      return dbError(res, removed.error);
+    }
     const linked = await svc.from('email_change_requests').update({ placeholder_id: placeholderId }).eq('id', requestId);
     if (linked.error) return dbError(res, linked.error);
 
