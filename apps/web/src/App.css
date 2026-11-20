@@ -2395,3 +2395,6 @@ kbd { padding: 0 6px; border: 1px solid var(--line); border-bottom-width: 2px; b
 @keyframes acctFill { from { stroke-dasharray: 0 100; } }
 @keyframes acctGlow { 0%, 100% { box-shadow: var(--shadow); } 50% { box-shadow: 0 0 0 6px var(--acc-soft), var(--shadow); } }
 .deletedplants { margin-top: 24px; }
+.retagform { display: grid; gap: 14px; }
+.retagform fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.retagform label > input:not([type="radio"]) { display: block; width: 100%; margin-top: 6px; }

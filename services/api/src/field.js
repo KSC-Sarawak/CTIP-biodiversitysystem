@@ -39,6 +39,13 @@ const SpecimenCreate = z.strictObject({
   lng: coord(180),
   gps_accuracy_m: z.number().min(0).nullable().optional(),
 });
+// RBAC D13: move a plant to a new tag. The old tag is first marked retired
+// (lost) or damaged; it is never reused.
+const SpecimenRetag = z.strictObject({
+  qr_id: z.string().trim().min(1).max(64),
+  old_tag: z.enum(['retired', 'damaged']),
+});
+
 const SpecimenUpdate = z.strictObject({
   species_id: id.nullable().optional(),
   proposed_species_name: text(200),
@@ -324,6 +331,38 @@ export const fieldHandlers = {
   },
 
   'delete /specimens/:id': (req, res) => setPlantDeleted(req, res, true),
+
+  // RBAC D13: only officers re-tag a plant, and only after its old tag is
+  // marked retired or damaged. This marks the old tag first (as the officer
+  // chose), then moves the plant; the plant and its records stay the same.
+  // The database (guard_specimen_update(), migration 20261120080000) refuses
+  // a tag change while the old tag is still in use, and the tag trigger
+  // refuses a new tag that is taken, retired or kept for a botanist.
+  'post /specimens/:id/retag': async (req, res) => {
+    if (!UUID.test(req.params.id)) return plantNotFound(res);
+    const body = parseBody(SpecimenRetag, req, res);
+    if (!body) return;
+    const db = supabaseAs(req.user);
+    const plant = await db.from('specimens').select('id, qr_id').eq('id', req.params.id).eq('is_deleted', false).maybeSingle();
+    if (plant.error) return dbError(res, plant.error);
+    if (!plant.data) return plantNotFound(res);
+    const newTag = body.qr_id.toUpperCase();
+    if (newTag === plant.data.qr_id) return fail(res, 422, 'SAME_TAG', 'Pick a different tag from the one the plant has now.');
+    if (plant.data.qr_id) {
+      const old = await db.from('qr_tags').update({ status: body.old_tag }).eq('qr_id', plant.data.qr_id).select('qr_id').maybeSingle();
+      if (old.error) return dbError(res, old.error);
+    }
+    const { data, error } = await db.from('specimens').update({ qr_id: newTag }).eq('id', plant.data.id)
+      .select(SPECIMEN_COLUMNS).maybeSingle();
+    if (!error && data) return res.json(data);
+    if (!error) return plantNotFound(res);
+    if (error.code === '23505') return fail(res, 409, 'TAG_IN_USE', `Tag ${newTag} is already on another plant. Pick an unused tag.`);
+    if (error.code === '23503') return fail(res, 422, 'TAG_NOT_FOUND', `Tag ${newTag} is not in the tag list. Make it on the QR tags page first.`);
+    if (error.code === 'CTTG0') return fail(res, 409, 'TAG_RETIRED', `Tag ${newTag} has been retired or is damaged. Pick an unused tag.`);
+    if (error.code === 'CTTG1') return fail(res, 409, 'TAG_RESERVED', `Tag ${newTag} is kept for a botanist. Pick another unused tag.`);
+    if (error.code === 'CTTG2') return fail(res, 409, 'OLD_TAG_IN_USE', `Tag ${plant.data.qr_id} must be marked retired or damaged first.`);
+    return dbError(res, error);
+  },
   'post /specimens/:id/restore': (req, res) => setPlantDeleted(req, res, false),
 
   // A new observation of a plant: the first one after registering, or a revisit.

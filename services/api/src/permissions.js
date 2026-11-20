@@ -81,6 +81,8 @@ export const routes = [
   // RBAC D4: only officers delete and restore tagged plants (soft delete).
   ['delete', '/specimens/:id', OFFICER],
   ['post', '/specimens/:id/restore', OFFICER],
+  // RBAC D13: only officers move a plant to a new tag (after the old one is retired or damaged).
+  ['post', '/specimens/:id/retag', OFFICER],
 
   // Observations, photos, reviews, comments, sync
   ['get', '/observations', ANY_STAFF],

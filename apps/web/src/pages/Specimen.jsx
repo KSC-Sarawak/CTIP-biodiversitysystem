@@ -23,13 +23,14 @@ const height = (cm) => (cm == null ? "-" : cm >= 100 ? `${(cm / 100).toFixed(cm 
 // One tagged plant (a specimen): the page a QR tag opens.
 // Tabs: Overview and Photos for everyone; Visits, Sensor and Discussion for staff.
 export default function Specimen({ qr }) {
-  const { db, me, role, setPlantPhotos, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, reviewObservation, notify } = useStore();
+  const { db, me, role, setPlantPhotos, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, retagPlant, reviewObservation, notify } = useStore();
   const staff = can(role, "pending");
   const canReview = can(role, "review");
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState(false);
   const [showReviewPanel, setShowReviewPanel] = useState(false);
   const [qrBig, setQrBig] = useState(false); // QR code enlarged for scanning
+  const [retagging, setRetagging] = useState(false); // RBAC D13: "Move to a new tag" popup
   const [decided, setDecided] = useState(null); // the decision just made here, for the "done" panel
   const [ask, confirmDialog] = useConfirm();
 
@@ -131,9 +132,22 @@ export default function Specimen({ qr }) {
           )}
           {coords && <a className="btn ghost" href={"#/map/" + plant.qr_id}><Icon name="pin" size={16} /> Show on map</a>}
           {can(role, "tags") && <a className="btn ghost" href="#/tags"><Icon name="printer" size={16} /> Print tags</a>}
+          {can(role, "retag") && <button type="button" className="btn ghost" onClick={() => setRetagging(true)}><Icon name="qr" size={16} /> Move to a new tag</button>}
           {can(role, "deletePlants") && <button type="button" className="btn ghost" onClick={deletePlant}><Icon name="trash" size={16} /> Delete plant</button>}
         </div>
       </section>
+
+      {retagging && (
+        <RetagDialog
+          plant={plant}
+          tags={db.tags}
+          onClose={() => setRetagging(false)}
+          onMove={async (qrId, oldTag) => {
+            const moved = await retagPlant(plant.id, qrId, oldTag);
+            if (moved) { setRetagging(false); go("/tag/" + moved); }
+          }}
+        />
+      )}
 
       {/* Saved without its record (an earlier send failed half-way): only the botanist who tagged it can finish it. */}
       {visits.length === 0 && me?.id === plant.registered_by && can(role, "add") && (
@@ -666,5 +680,44 @@ function Sensor({ db, node }) {
       <p className="mute small">Alert limits: {node.thresholds.temp_max}°C max, {node.thresholds.moisture_min}% soil moisture min.</p>
       <a className="btn ghost" href="#/monitoring"><Icon name="activity" size={16} /> Open Monitoring</a>
     </div>
+  );
+}
+
+// RBAC D13: an officer moves a plant to a new tag when its tag is lost, damaged or
+// unreadable. The old tag is marked first (retired or damaged) and never reused;
+// the plant and its records stay the same.
+function RetagDialog({ plant, tags, onClose, onMove }) {
+  const [oldTag, setOldTag] = useState("");
+  const [qrId, setQrId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const unused = (tags || []).filter((t) => t.status === "unused" && t.batch_label !== "reserved").map((t) => t.qr_id);
+  const ready = oldTag && qrId.trim() && qrId.trim().toUpperCase() !== plant.qr_id;
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!ready) return;
+    setBusy(true);
+    await onMove(qrId.trim().toUpperCase(), oldTag);
+    setBusy(false);
+  };
+  return (
+    <Modal title="Move to a new tag" onClose={onClose}>
+      <form className="retagform" onSubmit={submit}>
+        <p>Use this when tag <Mono>{plant.qr_id}</Mono> is lost, damaged or cannot be scanned. The plant and its records stay the same; only the tag changes.</p>
+        <fieldset>
+          <legend><b>1. First, mark the old tag {plant.qr_id}</b></legend>
+          <label className="inline"><input type="radio" name="old-tag" value="retired" checked={oldTag === "retired"} onChange={() => setOldTag("retired")} /> Retired (lost or removed)</label>
+          <label className="inline"><input type="radio" name="old-tag" value="damaged" checked={oldTag === "damaged"} onChange={() => setOldTag("damaged")} /> Damaged (still there but unreadable)</label>
+          <span className="mute small">The old tag can never be used again.</span>
+        </fieldset>
+        <label><b>2. New tag</b>
+          <input value={qrId} onChange={(e) => setQrId(e.target.value)} list="retag-unused" placeholder="An unused tag, e.g. NIAH-0100" autoComplete="off" />
+        </label>
+        <datalist id="retag-unused">{unused.map((q) => <option key={q} value={q} />)}</datalist>
+        <div className="row">
+          <button className="btn" type="submit" disabled={!ready || busy}><Icon name="qr" size={16} /> Mark old tag and move</button>
+          <button className="btn ghost" type="button" onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
