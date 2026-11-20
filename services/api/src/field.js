@@ -4,7 +4,7 @@ import { supabaseAs } from './supabase.js';
 import { parseBody, fail, dbError, validationError, UUID } from './validate.js';
 import { detectImageType, stripMetadata, EXTENSIONS, receiveFile } from './images.js';
 import { protectSpecimen } from './distribution.js';
-import { OBS_COLUMNS, findObservation } from './observationAccess.js';
+import { OBS_COLUMNS, findObservation, ownOrStaff, PRIVATE_TALK_MESSAGE } from './observationAccess.js';
 import { isFullLink, isWebLink } from './photoLinks.js';
 import { sendPushToUsers } from './pushNotifications.js';
 
@@ -187,7 +187,10 @@ async function ownDraftOrError(db, req, res, version) {
   const obs = await observationOr404(db, req, res);
   if (!obs) return null;
   if (obs.recorded_by !== req.user.id) {
-    fail(res, 403, 'FORBIDDEN', 'Only the botanist who recorded this can change it. Officers use the review instead.');
+    // RBAC D16: another botanist can read an approved observation but never change it.
+    fail(res, 403, 'FORBIDDEN', req.user.role === 'botanist'
+      ? 'This observation was recorded by another botanist. You can read it but not change it.'
+      : 'Only the botanist who recorded this can change it. Officers use the review instead.');
     return null;
   }
   if (!EDITABLE.includes(obs.status)) {
@@ -408,6 +411,8 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    // RBAC D16: another botanist's approved observation is readable, never sendable.
+    if (obs.recorded_by !== req.user.id) return fail(res, 403, 'FORBIDDEN', 'Only the botanist who recorded this can send it.');
 
     const { comment, ...edits } = body;
     let changes;
@@ -512,6 +517,8 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    // RBAC D1/D16: photos go only on the botanist's own observation.
+    if (obs.recorded_by !== req.user.id) return fail(res, 403, 'FORBIDDEN', 'You can add photos only to your own observations.');
 
     const already = await db.from('observation_photos').select(PHOTO_COLUMNS).eq('id', photoId).maybeSingle();
     if (already.error) return dbError(res, already.error);
@@ -556,6 +563,7 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    if (!ownOrStaff(obs, req.user)) return fail(res, 403, 'FORBIDDEN', 'You can change photos only on your own observations.');
     const { data: photo, error } = await db.from('observation_photos').select(PHOTO_COLUMNS)
       .eq('id', req.params.photoId).eq('observation_id', obs.id).maybeSingle();
     if (error) return dbError(res, error);
@@ -579,6 +587,7 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    if (!ownOrStaff(obs, req.user)) return fail(res, 403, 'FORBIDDEN', PRIVATE_TALK_MESSAGE);
     const { data, error } = await db.from('observation_comments').select(COMMENT_COLUMNS)
       .eq('observation_id', req.params.id).order('created_at');
     if (error) return dbError(res, error);
@@ -592,6 +601,7 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    if (!ownOrStaff(obs, req.user)) return fail(res, 403, 'FORBIDDEN', PRIVATE_TALK_MESSAGE);
     const { data, error } = await db
       .from('observation_comments')
       .insert({ observation_id: obs.id, author_id: req.user.id, body: body.body })
