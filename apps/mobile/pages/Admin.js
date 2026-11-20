@@ -96,13 +96,13 @@ export function StaffMore({ nav }) {
     { icon: 'dashboard', label: 'Staff dashboard', go: 'dashboard' },
     { icon: 'user', label: 'Account settings', go: 'account' },
     can(role, 'monitor') && { icon: 'activity', label: 'Monitoring', go: 'monitor' },
-    can(role, 'species') && { icon: 'leaf', label: 'Species', go: 'speciesAdmin' },
+    can(role, 'viewSpecies') && { icon: 'leaf', label: 'Species', go: 'speciesAdmin' },
     can(role, 'tags') && { icon: 'qr', label: 'QR tags', go: 'tags' },
     can(role, 'reports') && { icon: 'chart', label: 'Reports', go: 'reports' },
     can(role, 'audit') && { icon: 'shield', label: 'Audit log', go: 'audit' },
     can(role, 'discuss') && { icon: 'chat', label: 'Discussion', go: 'discussion' },
     { icon: 'map', label: 'Plant map', go: 'map' },
-    !can(role, 'species') && { icon: 'leaf', label: 'Species catalogue', go: 'plants' },
+    !can(role, 'viewSpecies') && { icon: 'leaf', label: 'Species catalogue', go: 'plants' },
     { icon: 'book', label: 'Plant book', go: 'book' },
   ].filter(Boolean);
 

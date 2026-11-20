@@ -8,7 +8,7 @@ export const NEEDS = {
   records: "records",
   review: "review",
   reports: "reports",
-  species: "species",
+  species: "viewSpecies", // admins open it read-only (RBAC D6); changes need "species"
   monitoring: "monitor",
   nodes: "nodes",
   users: "users",
