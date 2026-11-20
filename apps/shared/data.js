@@ -54,7 +54,7 @@ export function hideLocationRule(status, override, choice = null) {
 
 // The same two sentences everywhere a plant's location is not shown exactly.
 export const REDUCED_LOCATION_NOTE = "Approximate area, about 1.1 km across. The exact spot is protected.";
-export const HIDDEN_LOCATION_NOTE = "Location hidden to protect this plant.";
+export const HIDDEN_LOCATION_NOTE = "This plant's exact location is hidden to protect it.";
 
 // What a field photo can be tagged as showing. The API accepts only these.
 export const PHOTO_TRAITS = ["Whole plant", "Tree trunk", "Bark", "Leaf", "Flower", "Fruit", "Seed", "Root"];

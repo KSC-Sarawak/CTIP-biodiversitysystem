@@ -381,7 +381,11 @@ export const staffHandlers = {
             });
           }
         }
-        out.specimens = Array.from(specimenMap.values());
+        // RBAC D9: a protected plant reaches visitors with no coordinates,
+        // even if public_plants() ever sent them.
+        const statusOf = new Map(out.species.map((s) => [s.id, s.conservation_status ?? null]));
+        out.specimens = Array.from(specimenMap.values()).map((s) =>
+          protectSpecimen(s, { role: null, userId: null, status: statusOf.get(s.species_id) }));
         out.observations = obsList;
       }
       if (pubPhotos?.length) {

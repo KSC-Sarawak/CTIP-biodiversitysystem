@@ -35,7 +35,7 @@ const species = {
 // What public_plant_by_tag() returns for each tag.
 const plants = {
   'NIAH-0001': { qr_id: 'NIAH-0001', species_id: COMMON, lat: 3.81234, lng: 113.77561, location_reduced: false },
-  'NIAH-0002': { qr_id: 'NIAH-0002', species_id: RAJAH, lat: 3.815, lng: 113.775, location_reduced: true },
+  'NIAH-0002': { qr_id: 'NIAH-0002', species_id: RAJAH, lat: null, lng: null, location_reduced: true },
   // The function missed that this species is endangered: the API must still reduce it.
   'NIAH-0003': { qr_id: 'NIAH-0003', species_id: RAJAH, lat: 3.81234, lng: 113.77561, location_reduced: false },
   'NIAH-0004': { qr_id: 'NIAH-0004', species_id: COMMON, lat: null, lng: null, location_reduced: false },
@@ -84,16 +84,16 @@ test('a published plant opens without a token, with its species and only public 
   }
 });
 
-test('an endangered plant never shows its exact spot', async () => {
+test('an endangered plant shows no location at all, only the hidden flag (RBAC D9)', async () => {
   const res = await request(app).get('/v1/public/tags/NIAH-0002');
   assert.equal(res.status, 200);
-  assert.deepEqual([res.body.lat, res.body.lng, res.body.location_reduced], [3.815, 113.775, true]);
+  assert.deepEqual([res.body.lat, res.body.lng, res.body.location_reduced], [null, null, true]);
 });
 
-test('the API reduces an endangered spot even if the database function did not', async () => {
+test('the API removes an endangered location even if the database function did not', async () => {
   const res = await request(app).get('/v1/public/tags/NIAH-0003');
   assert.equal(res.status, 200);
-  assert.deepEqual([res.body.lat, res.body.lng, res.body.location_reduced], [3.815, 113.775, true]);
+  assert.deepEqual([res.body.lat, res.body.lng, res.body.location_reduced], [null, null, true]);
 });
 
 test('a plant with no GPS fix keeps no location', async () => {
