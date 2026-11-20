@@ -388,16 +388,19 @@ export const staffHandlers = {
           protectSpecimen(s, { role: null, userId: null, status: statusOf.get(s.species_id) }));
         out.observations = obsList;
       }
+      // Tagged-plant photos: the bucket is private, so a /object/public/ link
+      // never opened and visitors saw blank boxes. They get signed links now,
+      // for plants whose location is hidden too (only the location is
+      // protected; plant details and photos stay visible).
       if (pubPhotos?.length) {
-        out.observation_photos = pubPhotos.map((p) => ({
+        const signed = await withSignedUrls(db, pubPhotos);
+        out.observation_photos = signed.map((p) => ({
           id: p.id,
           observation_id: p.observation_id,
           s3_key: p.s3_key,
           s3_bucket: p.s3_bucket,
           created_at: p.created_at,
-          url: p.s3_key && !p.s3_key.startsWith('http')
-            ? `${process.env.SUPABASE_URL}/storage/v1/object/public/${p.s3_bucket || 'observation-photos'}/${p.s3_key}`
-            : p.s3_key,
+          url: p.url,
         }));
       }
       res.json(out);
