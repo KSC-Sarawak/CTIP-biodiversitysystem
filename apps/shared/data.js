@@ -157,6 +157,7 @@ export const seed = {
   species_media: [],
   zones: [],
   plants: initialPublicPlants,
+  deletedPlants: [], // RBAC D4: officers only (see StoreProvider loadFromApi)
   observations: initialPublicObservations,
   reviews: [],
   comments: [],

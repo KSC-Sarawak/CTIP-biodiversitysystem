@@ -21,7 +21,7 @@ export const ROLE_LABEL = {
 const PERMS = {
   visitor: [],
   botanist: ["bell", "add", "editPhotos", "pending", "records", "discuss"],
-  officer: ["bell", "editPhotos", "pending", "allPlants", "review", "reports", "viewSpecies", "species", "monitor", "tags", "hideLocation", "discuss"],
+  officer: ["bell", "editPhotos", "pending", "allPlants", "review", "reports", "viewSpecies", "species", "monitor", "tags", "hideLocation", "deletePlants", "discuss"],
   // RBAC D2 and D6: admins run the system (users, sensors, alerts, audit) and only
   // view data, including unpublished species ("viewSpecies" opens the Species page
   // read-only; "species" is the right to change them). The one data change they make
