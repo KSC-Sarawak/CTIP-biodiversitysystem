@@ -23,6 +23,7 @@ const rolesOf = (method, path) => routes.find(([m, p]) => m === method && p === 
 
 let profiles;
 let specimens;
+let observations;
 let patches;
 const json = (status, body) => new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -33,11 +34,12 @@ beforeEach((t) => {
     { id: crypto.randomUUID(), qr_id: 'NIAH-0001', species_id: null, registered_by: ids.botanist, is_deleted: false },
     { id: crypto.randomUUID(), qr_id: 'NIAH-0002', species_id: null, registered_by: ids.botanist, is_deleted: true },
   ];
+  observations = [];
   t.mock.method(globalThis, 'fetch', async (input, init = {}) => {
     const url = new URL(typeof input === 'string' ? input : input.url);
     const method = init.method ?? 'GET';
     const table = url.pathname.replace('/rest/v1/', '');
-    const rows = { profiles, specimens }[table] ?? [];
+    const rows = { profiles, specimens, observations }[table] ?? [];
     const single = /vnd\.pgrst\.object/.test(new Headers(init.headers).get('Accept') ?? '');
     const filters = [...url.searchParams].filter(([k]) => !['select', 'limit', 'order'].includes(k));
     const match = (r) => filters.every(([k, v]) => `${r[k]}` === v.replace(/^eq\./, ''));
@@ -92,4 +94,16 @@ test('botanists and admins get 403 and nothing changes', async () => {
   assert.equal(patches.length, 0);
   assert.equal(specimens[0].is_deleted, false);
   assert.equal(specimens[1].is_deleted, true);
+});
+
+test('D4: a plant with an observation waiting for review cannot be deleted yet', async () => {
+  const plant = specimens[0];
+  observations.push({ id: crypto.randomUUID(), specimen_id: plant.id, status: 'synced', is_deleted: false });
+  const res = await del(plant.id);
+  assert.equal(res.status, 409);
+  assert.equal(res.body.code, 'REVIEW_IN_PROGRESS');
+  assert.equal(plant.is_deleted, false);
+  observations[0].status = 'approved';
+  assert.equal((await del(plant.id)).status, 204);
+  assert.equal(plant.is_deleted, true);
 });
