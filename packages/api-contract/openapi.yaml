@@ -1282,13 +1282,15 @@ paths:
       description: >
         Sets is_deleted. The plant leaves every list, the map and the public pages.
         Its QR tag stays taken and its observations are kept, so it can be restored.
-        404 when there is no such plant or it is already deleted.
+        404 when there is no such plant or it is already deleted. 409
+        REVIEW_IN_PROGRESS while an observation of the plant is waiting for review.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
         '204': { description: Deleted }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /specimens/{id}/restore:
     post:
