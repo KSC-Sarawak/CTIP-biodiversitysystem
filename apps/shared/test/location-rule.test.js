@@ -1,7 +1,7 @@
 // apps/shared/test/location-rule.test.js
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hideLocationRule, isThreatened, THREATENED } from "../data.js";
+import { BLANK_SPECIES, CONSERVATION, hideLocationRule, isThreatened, THREATENED } from "../data.js";
 import { isExactProtected, tileServerZoom, TILE_LAYERS } from "../mapConfig.js";
 import { generateMapHtml } from "../mapHtml.js";
 import { plantView, shownCoords } from "../selectors.js";
@@ -10,9 +10,8 @@ test("isThreatened normalizes status and matches case-insensitively", () => {
   assert.equal(isThreatened("endangered"), true);
   assert.equal(isThreatened("Endangered"), true);
   assert.equal(isThreatened("  ENDANGERED  "), true);
-  assert.equal(isThreatened("critically endangered"), true);
-  assert.equal(isThreatened("Critically Endangered"), true);
-  assert.equal(isThreatened("CRITICALLY ENDANGERED"), true);
+  // RBAC D11: critically endangered is no longer a status (it became endangered).
+  assert.equal(isThreatened("critically endangered"), false);
 
   assert.equal(isThreatened("vulnerable"), false);
   assert.equal(isThreatened("Vulnerable"), false);
@@ -25,7 +24,7 @@ test("isThreatened normalizes status and matches case-insensitively", () => {
 });
 
 test("endangered species have exact coordinates locked to hidden", () => {
-  for (const status of ["endangered", "critically endangered", "Endangered", "Critically Endangered"]) {
+  for (const status of ["endangered", "Endangered", " ENDANGERED "]) {
     const rule = hideLocationRule(status, false, false);
     assert.equal(rule.locked, true);
     assert.equal(rule.on, true);
@@ -33,16 +32,20 @@ test("endangered species have exact coordinates locked to hidden", () => {
   }
 });
 
-test("vulnerable species are hidden by default but can be published by officer choice", () => {
-  // on by default
-  assert.equal(hideLocationRule("vulnerable", false).on, true);
-  assert.equal(hideLocationRule("vulnerable", false).locked, false);
-  assert.equal(hideLocationRule("Vulnerable", false).on, true);
-  assert.equal(hideLocationRule("Vulnerable", false).locked, false);
-  assert.match(hideLocationRule("vulnerable", false).hint, /On by default for vulnerable species/);
+test("vulnerable and other statuses are shown until an officer or admin hides the plant (RBAC D11)", () => {
+  for (const status of ["vulnerable", "Vulnerable", "near threatened", "least concern"]) {
+    assert.equal(hideLocationRule(status, false).on, false, status);
+    assert.equal(hideLocationRule(status, false).locked, false, status);
+    assert.doesNotMatch(hideLocationRule(status, false).hint, /On by default/);
+    // the flag, or ticking it on this screen, hides it
+    assert.equal(hideLocationRule(status, true).on, true, status);
+    assert.equal(hideLocationRule(status, false, true).on, true, status);
+  }
+});
 
-  // officer can untick to publish location
-  assert.equal(hideLocationRule("vulnerable", false, false).on, false);
+test("only the four agreed statuses, and a new species has none picked (RBAC D11)", () => {
+  assert.deepEqual(CONSERVATION, ["least concern", "near threatened", "vulnerable", "endangered"]);
+  assert.equal(BLANK_SPECIES.conservation_status, "");
 });
 
 test("plantView and shownCoords protect endangered species from public visitors while staff see exact spots", () => {
