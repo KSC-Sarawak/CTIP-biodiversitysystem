@@ -21,8 +21,12 @@ export const ROLE_LABEL = {
 const PERMS = {
   visitor: [],
   botanist: ["bell", "add", "editPhotos", "pending", "records", "discuss"],
-  officer: ["bell", "editPhotos", "pending", "allPlants", "review", "reports", "species", "monitor", "tags", "discuss"],
-  admin: ["bell", "pending", "allPlants", "review", "reports", "species", "monitor", "nodes", "users", "audit", "tags", "discuss"],
+  officer: ["bell", "editPhotos", "pending", "allPlants", "review", "reports", "viewSpecies", "species", "monitor", "tags", "hideLocation", "discuss"],
+  // RBAC D2 and D6: admins run the system (users, sensors, alerts, audit) and only
+  // view data, including unpublished species ("viewSpecies" opens the Species page
+  // read-only; "species" is the right to change them). The one data change they make
+  // is hiding a plant's location (D15).
+  admin: ["bell", "pending", "allPlants", "viewSpecies", "monitor", "nodes", "users", "audit", "hideLocation", "discuss"],
 };
 
 export const can = (role, perm) => (PERMS[role] || []).includes(perm);
@@ -55,7 +59,6 @@ const STAFF_LINKS = {
     { to: "/monitoring", label: "Monitoring", icon: "activity", badge: "alerts" },
     { to: "/nodes", label: "Sensor nodes", icon: "settings" },
     { to: "/discussion", label: "Discussion", icon: "chat", badge: "discussion" },
-    { to: "/tags", label: "QR tags", icon: "qr" },
     { to: "/audit", label: "Audit log", icon: "shield" },
   ],
 };

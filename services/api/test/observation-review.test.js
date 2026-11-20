@@ -117,12 +117,12 @@ test('officer approves: 201, status becomes approved, reviewer and time recorded
 test('reject and request changes need a reason', async () => {
   const target = observations[1];
   for (const decision of ['reject', 'return']) {
-    const res = await review('admin', target.id, { decision, observation_version: 3 });
+    const res = await review('officer', target.id, { decision, observation_version: 3 });
     assert.equal(res.status, 422);
     assert.equal(res.body.details.fields[0].path, 'comment');
   }
   assert.deepEqual(rpcCalls, []);
-  const ok = await review('admin', target.id, { decision: 'return', observation_version: 3, comment: 'Photo is blurry, please retake' });
+  const ok = await review('officer', target.id, { decision: 'return', observation_version: 3, comment: 'Photo is blurry, please retake' });
   assert.equal(ok.status, 201);
   assert.equal(target.status, 'returned');
 });
@@ -145,7 +145,7 @@ test('stale version gets 409 VERSION_CONFLICT; already reviewed or draft gets 40
   assert.equal(draft.status, 409);
   assert.equal(draft.body.code, 'WRONG_STATUS');
   await review('officer', observations[0].id, { decision: 'approve', observation_version: 1 });
-  const twice = await review('admin', observations[0].id, { decision: 'reject', observation_version: 1, comment: 'no' });
+  const twice = await review('officer', observations[0].id, { decision: 'reject', observation_version: 1, comment: 'no' });
   assert.equal(twice.body.code, 'WRONG_STATUS');
   assert.equal(reviews.length, 1);
 });

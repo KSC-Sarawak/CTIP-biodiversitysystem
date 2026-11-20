@@ -25,7 +25,7 @@ test("species: ten at a time, View more adds ten, a search starts over", async (
 });
 
 test("tags: ten at a time with a small QR preview that opens the big one", async ({ page }) => {
-  const state = newState({ role: "admin" });
+  const state = newState({ role: "officer" }); // QR tags are officer work (RBAC D5)
   state.tags = Array.from({ length: 14 }, (_, i) => ({ qr_id: `NIAH-${String(i + 1).padStart(4, "0")}`, status: "unused", batch_label: "2026-11-A", created_at: "2026-11-01T00:00:00Z" }));
   await open(page, state, "#/tags");
   await expect(page.locator("tbody tr")).toHaveCount(10);

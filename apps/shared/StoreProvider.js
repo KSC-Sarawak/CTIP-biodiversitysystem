@@ -1521,7 +1521,7 @@ function collectionMatches(a = [], b = []) {
   // are updated, then removed photos are deleted. A failure part way leaves the
   // photos already saved in place (no "delete all, insert again").
   const setSpeciesMedia = async (speciesId, list) => {
-    if (!can(role, "species")) return { ok: false, message: "Only officers and admins can change species photos" };
+    if (!can(role, "species")) return { ok: false, message: "Only officers can change species photos" };
     const bad = list.map((p) => p.file && photoProblem(p.file)).find(Boolean);
     if (bad) return { ok: false, message: bad };
     const k = list.findIndex((p) => !p.caption?.trim());

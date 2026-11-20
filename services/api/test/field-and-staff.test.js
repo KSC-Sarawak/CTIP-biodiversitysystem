@@ -471,7 +471,9 @@ test('botanist cannot release a printed tag', async () => {
 test('an officer cannot make a batch labelled reserved', async () => {
   // "reserved" marks a tag kept on one botanist's phone: an officer's batch with
   // that label would be refused to every botanist.
-  for (const role of ['officer', 'admin']) {
+  // Admins cannot make tags at all (RBAC D5).
+  assert.equal((await request(app).post('/v1/qr-tags/batch').set(as('admin')).send({ count: 1 })).status, 403);
+  for (const role of ['officer']) {
     for (const count of [1, 5]) {
       const res = await request(app).post('/v1/qr-tags/batch').set(as(role)).send({ count, batch_label: 'reserved' });
       assert.equal(res.status, 403, `${role} ${count}`);
@@ -484,6 +486,21 @@ test('an officer cannot make a batch labelled reserved', async () => {
   const one = await request(app).post('/v1/qr-tags/batch').set(as('botanist')).send({ count: 1, batch_label: 'reserved' });
   assert.equal(one.status, 201);
   assert.equal(one.body[0].batch_label, 'reserved');
+});
+
+// RBAC D2 and D15 (docs: RBAC.md): an admin may hide or show a plant's
+// location, and change nothing else about it.
+test('admin: may set only the hide-location flag on a plant', async () => {
+  const row = { id: crypto.randomUUID(), qr_id: 'NIAH-0001', species_id: null, endangered_override: false, registered_by: users.botanist };
+  db.specimens.push(row);
+  const other = await request(app).patch(`/v1/specimens/${row.id}`).set(as('admin')).send({ proposed_species_name: 'Rafflesia' });
+  assert.equal(other.status, 403);
+  assert.equal(other.body.code, 'FORBIDDEN');
+  const mixed = await request(app).patch(`/v1/specimens/${row.id}`).set(as('admin')).send({ endangered_override: true, species_id: null });
+  assert.equal(mixed.status, 403);
+  const hide = await request(app).patch(`/v1/specimens/${row.id}`).set(as('admin')).send({ endangered_override: true });
+  assert.equal(hide.status, 200);
+  assert.equal(row.endangered_override, true);
 });
 
 test('botanist keeps 20 tags in one request for a survey (CTIP-147)', async () => {
