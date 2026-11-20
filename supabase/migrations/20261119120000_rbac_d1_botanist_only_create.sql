@@ -1,4 +1,4 @@
--- RBAC D1 (docs/security/RBAC.md, agreed 19 Nov 2026): only botanists register
+-- RBAC D1 (RBAC.md, agreed 19 Nov 2026): only botanists register
 -- tagged plants and create observations (first observations and revisits),
 -- and only a botanist adds photos to their own observation. Officers review
 -- field work; they do not create it. Admins do system work only.
