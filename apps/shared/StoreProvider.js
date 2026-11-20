@@ -47,6 +47,7 @@ import {
   updateSpecimenApi,
   deleteSpecimenApi,
   restoreSpecimenApi,
+  retagSpecimenApi,
   updateObservationApi,
   createObservationApi,
   submitObservationApi,
@@ -1165,6 +1166,19 @@ function collectionMatches(a = [], b = []) {
     return true;
   };
 
+  // RBAC D13: an officer moves a plant to a new tag after marking the old one
+  // retired or damaged. Returns the new tag id, or null when refused.
+  const retagPlant = async (plantId, qrId, oldTag) => {
+    const res = await callApi(retagSpecimenApi, plantId, qrId, oldTag);
+    if (!res.ok) {
+      notify(`Could not move the plant: ${res.message}`);
+      return null;
+    }
+    notify(`Plant moved to tag ${res.data.qr_id}. The old tag is marked ${oldTag}.`);
+    await loadFromApi(true);
+    return res.data.qr_id;
+  };
+
   /* ---------- observations and review ---------- */
   // Send a draft or a record waiting for a signal: POST /v1/observations/:id/submit.
   // Returns { ok, message }.
@@ -1819,7 +1833,7 @@ function collectionMatches(a = [], b = []) {
     logout, login, signIn, changePassword, resetPassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
-    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden, setPlantDeleted,
+    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, retagPlant,
     syncObservation, resubmit, reviewObservation, addComment,
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
