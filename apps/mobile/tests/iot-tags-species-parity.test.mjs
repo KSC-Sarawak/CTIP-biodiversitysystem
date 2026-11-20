@@ -15,12 +15,12 @@ test('IoT Dashboard, QR Tag Actions, and Species Parity Suite', async (t) => {
 
   await t.test('Route access rules for species and tags', () => {
     assert.equal(canAccess('officer', 'speciesAdmin'), true);
-    assert.equal(canAccess('admin', 'speciesAdmin'), true);
+    assert.equal(canAccess('admin', 'speciesAdmin'), true); // RBAC D6: opens read-only
     assert.equal(canAccess('botanist', 'speciesAdmin'), false);
     assert.equal(canAccess('visitor', 'speciesAdmin'), false);
 
     assert.equal(canAccess('officer', 'tags'), true);
-    assert.equal(canAccess('admin', 'tags'), true);
+    assert.equal(canAccess('admin', 'tags'), false); // RBAC D5
     assert.equal(canAccess('botanist', 'tags'), false);
 
     assert.equal(canAccess('officer', 'tagQr'), true);
@@ -46,9 +46,9 @@ test('IoT Dashboard, QR Tag Actions, and Species Parity Suite', async (t) => {
     assert.equal(canDelete('unused', 'botanist'), false);
   });
 
-  await t.test('Species permissions: officer and admin can manage species, visitors and botanists cannot', () => {
+  await t.test('Species permissions: only officers manage species (RBAC D2)', () => {
     assert.equal(can('officer', 'species'), true);
-    assert.equal(can('admin', 'species'), true);
+    assert.equal(can('admin', 'species'), false);
     assert.equal(can('botanist', 'species'), false);
     assert.equal(can('visitor', 'species'), false);
   });

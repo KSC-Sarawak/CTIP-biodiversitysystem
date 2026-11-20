@@ -9,6 +9,11 @@ const OFFICER_ADMIN = ['officer', 'admin'];
 // RBAC D1 (RBAC.md): only botanists register tagged plants and
 // create observations and their photos. Officers review; admins run the system.
 const BOTANIST = ['botanist'];
+// RBAC D2 and D5: data work (review, species, reports, printing and retiring
+// tags) is for officers. Admins run the system and only view data (D6).
+const OFFICER = ['officer'];
+// D5: botanists make one field tag or kept tags; officers print batches. Admins do neither.
+const BOTANIST_OFFICER = ['botanist', 'officer'];
 const ADMIN = ['admin'];
 
 export const routes = [
@@ -52,23 +57,23 @@ export const routes = [
 
   // QR tags
   ['get', '/qr-tags', ANY_STAFF],
-  ['post', '/qr-tags/batch', ANY_STAFF], // botanists: one tag at a time (CTIP-27)
+  ['post', '/qr-tags/batch', BOTANIST_OFFICER], // botanists: one tag at a time (CTIP-27)
   ['get', '/qr-tags/:qrId', ANY_STAFF],
-  ['delete', '/qr-tags/:qrId', ANY_STAFF], // botanists: only their own kept tags (CTIP-116)
-  ['post', '/qr-tags/:qrId/retire', OFFICER_ADMIN],
+  ['delete', '/qr-tags/:qrId', BOTANIST_OFFICER], // botanists: only their own kept tags (CTIP-116)
+  ['post', '/qr-tags/:qrId/retire', OFFICER],
 
   // Species
   ['get', '/species', OFFICER_ADMIN],
-  ['post', '/species', OFFICER_ADMIN],
+  ['post', '/species', OFFICER],
   ['get', '/species/:id', OFFICER_ADMIN],
-  ['patch', '/species/:id', OFFICER_ADMIN],
-  ['delete', '/species/:id', OFFICER_ADMIN],
-  ['post', '/species/:id/publish', OFFICER_ADMIN],
-  ['post', '/species/:id/restore', OFFICER_ADMIN],
+  ['patch', '/species/:id', OFFICER],
+  ['delete', '/species/:id', OFFICER],
+  ['post', '/species/:id/publish', OFFICER],
+  ['post', '/species/:id/restore', OFFICER],
   ['get', '/species/:id/media', OFFICER_ADMIN],
-  ['post', '/species/:id/media', OFFICER_ADMIN],
-  ['patch', '/species/:id/media/:mediaId', OFFICER_ADMIN],
-  ['delete', '/species/:id/media/:mediaId', OFFICER_ADMIN],
+  ['post', '/species/:id/media', OFFICER],
+  ['patch', '/species/:id/media/:mediaId', OFFICER],
+  ['delete', '/species/:id/media/:mediaId', OFFICER],
 
   // Specimens (row-level "own record" checks stay in Supabase RLS)
   ['get', '/specimens', ANY_STAFF],
@@ -88,7 +93,7 @@ export const routes = [
   ['post', '/observations/:id/photos', BOTANIST],
   ['post', '/observations/:id/photos/:photoId/confirm', BOTANIST],
   ['get', '/observations/:id/reviews', ANY_STAFF],
-  ['post', '/observations/:id/reviews', OFFICER_ADMIN],
+  ['post', '/observations/:id/reviews', OFFICER],
   ['get', '/observations/:id/comments', ANY_STAFF],
   ['post', '/observations/:id/comments', ANY_STAFF],
   ['post', '/sync', BOTANIST],
@@ -138,6 +143,6 @@ export const routes = [
   ['delete', '/me/push-token', ANY_STAFF],
 
   // Reports
-  ['get', '/reports/observations', OFFICER_ADMIN],
-  ['get', '/reports/species', OFFICER_ADMIN],
+  ['get', '/reports/observations', OFFICER],
+  ['get', '/reports/species', OFFICER],
 ];
