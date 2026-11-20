@@ -1,0 +1,197 @@
+main 5eb934f
+ok 1 - API errors get one consistent user message
+ok 2 - the API address: Render by default in Node, /v1 added to a set address
+ok 3 - levenshteinDistance computes correct edit distances
+ok 4 - fuzzyMatch matches exact, subsequence, multi-token, and typo variants
+ok 3 - test/helpers/fakeServer.js
+ok 6 - isThreatened normalizes status and matches case-insensitively
+ok 7 - endangered species have exact coordinates locked to hidden
+ok 8 - vulnerable species are hidden by default but can be published by officer choice
+ok 9 - plantView and shownCoords protect endangered species from public visitors while staff see exact spots
+ok 10 - other species are the officer's choice and start from what is saved
+ok 11 - every wording says that details and photos stay visible
+ok 12 - only an exact protected spot limits the map tiles
+ok 13 - the mobile map page's script is valid JavaScript
+ok 14 - a draft opens only for the person who started it
+ok 15 - a draft from before drafts had an owner still opens when its tag is scanned
+ok 16 - a draft is never written to plain AsyncStorage when the encrypted database is not available
+ok 17 - memory outbox: add then list returns only that user's records, oldest first
+ok 18 - memory outbox: get returns the record, or null
+ok 19 - memory outbox: photos come back by position
+ok 20 - memory outbox: update merges shallowly and sets updated_at
+ok 21 - memory outbox: markPhotoUploaded drops the photo bytes
+ok 22 - memory outbox: firstPhoto answers the lowest-position photo or null
+ok 23 - memory outbox: remove deletes the record and its photos
+ok 24 - memory outbox: removePhoto deletes one photo and keeps the others
+ok 25 - memory outbox: resetInterrupted turns sending into pending
+ok 26 - memory outbox: count gives pending, failed and conflict for one user
+ok 27 - memory outbox: add is all or nothing
+ok 28 - sqlite outbox: add then list returns only that user's records, oldest first
+ok 29 - sqlite outbox: get returns the record, or null
+ok 30 - sqlite outbox: photos come back by position
+ok 31 - sqlite outbox: update merges shallowly and sets updated_at
+ok 32 - sqlite outbox: markPhotoUploaded drops the photo bytes
+ok 33 - sqlite outbox: firstPhoto answers the lowest-position photo or null
+ok 34 - sqlite outbox: remove deletes the record and its photos
+ok 35 - sqlite outbox: removePhoto deletes one photo and keeps the others
+ok 36 - sqlite outbox: resetInterrupted turns sending into pending
+ok 37 - sqlite outbox: count gives pending, failed and conflict for one user
+ok 38 - sqlite outbox: add is all or nothing
+ok 39 - memory outbox: results are copies, so callers cannot change stored state
+ok 40 - sqlite outbox: every method throws OUTBOX_UNAVAILABLE when there is no database
+ok 41 - sqlite outbox: stores the record JSON in data and the key fields as columns
+ok 42 - migrate runs each migration once and sets user_version
+ok 43 - migrate keeps a pre-CTIP-44 drafts table
+ok 44 - migrate rolls back a failing migration and throws
+ok 45 - outbox_records is indexed by user and created_at
+ok 46 - reserved_tags holds one row per kept tag, with its owner and whether this phone made it
+ok 47 - matches scientific name, common name, family and genus, ignoring case
+ok 48 - results are sorted by scientific name
+ok 49 - family filter narrows the results
+ok 50 - pages like the API and reports the total
+ok 51 - an empty term returns nothing
+ok 52 - the term is cleaned like the online search
+ok 53 - cleanSpeciesRow keeps only public fields and cuts the description to 200 characters
+ok 54 - cacheIsFresh is true for 24 hours after the last refresh
+ok 55 - shouldUseCache: page 1 may use the cache; later pages only when already offline
+ok 56 - addPlant reports failure and keeps the draft when the outbox write fails
+ok 57 - saveFirst answers queued: true when the sync is still running after waitMs
+ok 58 - saveFirst answers queued: false when the sync sent the record in time
+ok 59 - saveFirst keeps the record and answers queued when the sync throws
+ok 60 - waitAtMost answers the result in time, or null after the wait
+ok 61 - a new plant record carries phone-made ids and the capture time
+ok 62 - a revisit of a plant made on this phone has no specimen id and points at its record
+ok 63 - outbox photos keep the camera's id and only the fields the outbox stores
+ok 64 - a revisit with no GPS fix saves no location
+ok 65 - after a save only the camera's own cache files are deleted, never a gallery original
+ok 66 - the saved screen's thumbnail comes from the photo's bytes, so it shows after the file is deleted
+ok 67 - the backoff waits 30 s, 60 s, 120 s, then every 300 s
+ok 68 - only a run that got through and sent something resets the backoff
+ok 69 - a record still on the phone is listed once: its server twin is hidden
+ok 70 - counts: waiting is pending + sending; unsent is failed + conflict
+ok 71 - the sync bar says how many wait and when the last send was
+ok 72 - the toast after Sync now only says offline when the store says offline
+ok 73 - a failed record's notice follows its action, in the design's words
+ok 74 - an edit of a record deleted on another device offers only Delete from this phone
+ok 75 - a VALIDATION_ERROR record gets the fix_record notice
+ok 76 - fixRecord changes only the text fields and keeps the record's ids
+ok 77 - a new tag keeps the record's ids and only goes back to the specimen step if the plant was never made
+ok 78 - a manual sync puts only wait_review records back to pending
+ok 79 - deleting a plant from the phone also deletes the revisits that wait for it
+ok 80 - the sign-out alert title counts records
+ok 81 - a row on this phone has the plant's name, tag, status and a screen-reader label
+ok 82 - conflictRows lists only fields that differ
+ok 83 - new plant goes specimen, observation, photos, submit, then leaves the outbox
+ok 84 - observed_at sent is the capture time, not the sync time
+ok 85 - network drop mid-photo: the next run sends only the missing photos, each stored once
+ok 86 - drop after the server stored a step: the replay stores it once
+ok 87 - the record stays until submit is confirmed
+ok 88 - server specimen id is written back and used by a queued revisit of that plant
+ok 89 - a revisit sent after its plant has left the outbox still uses the server's plant id
+ok 90 - a revisit waits while its plant has not synced
+ok 91 - TAG_IN_USE fails that record with pick_tag and the next record still syncs
+ok 92 - 401 stops the run and leaves every record pending
+ok 93 - 403 MFA_REQUIRED stops the run and leaves every record pending
+ok 94 - offline stops the run with stoppedBy offline and counts an attempt
+ok 95 - another user's records are neither sent nor listed
+ok 96 - records left sending by a killed app are sent on the next run
+ok 97 - two runs at once send nothing twice
+ok 98 - a record saved during a run is sent in the same burst
+ok 99 - packBatches keeps each batch at 20 items or fewer and under 80,000 characters
+ok 100 - 413 on a photo fails the record with remove_photo
+ok 101 - a per-item DB_ERROR is retried later, and the other items of the batch go on
+ok 102 - a user switch mid-run stops the run before anything is sent as the new user
+ok 103 - run(B) during run(A) returns B's own summary
+ok 104 - a submit that landed is done when the officer has returned the record meanwhile
+ok 105 - a submit that landed is done when the officer has approved the record meanwhile
+ok 106 - a WRONG_STATUS submit answer is done when the server holds a decided record
+ok 107 - a resumed submit of a record still queued sends it for review
+ok 108 - a record that always gets 500 doesn't stop younger records from syncing
+ok 109 - a retired tag fails the record with pick_tag
+ok 110 - 429 stops the run
+ok 111 - REVIEW_IN_PROGRESS fails the record with wait_review
+ok 112 - a conflicting edit keeps the server copy and is counted, changing nothing
+ok 113 - an edit that is accepted leaves the outbox without a submit
+ok 114 - an edit of a record deleted on another device fails with record_gone, not a retry that can never work
+ok 115 - editRecord carries base_version and only the changed editable fields
+ok 116 - keep mine resends with the server version and adds a comment
+ok 117 - keep mine while offline keeps the choice and sends the comment after the edit lands
+ok 118 - a failed keep-mine comment is sent on the next run, and the edit is not sent again
+ok 119 - keep theirs removes the phone's edit and adds a comment
+ok 120 - keep theirs keeps the conflict when the comment can't be sent
+ok 121 - a conflict is never resolved without the botanist's choice
+ok 122 - keep mine is refused when the record was already sent for review
+ok 123 - resolveConflict refuses a record that is not in conflict
+ok 124 - an edit only sends the fields the botanist changed, against the version the form opened with
+ok 125 - classify and actionFor follow the error rules
+ok 126 - a record deleted from the phone during its createSpecimen call is skipped without an error
+ok 127 - a record deleted from the phone during its sync call is skipped without an error
+ok 128 - a record deleted from the phone during its uploadPhoto call is skipped without an error
+ok 129 - a record deleted from the phone during its submit call is skipped without an error
+ok 130 - lookupTagOffline uses the cached tag list when the workspace is empty
+ok 131 - lookupTagOffline marks a tag used by a record on this phone as used
+ok 132 - lookupTagOffline answers unchecked for an unknown tag while offline
+ok 133 - lookupTagOffline prefers the loaded workspace over the cached list
+ok 134 - tag cache rows hold no coordinates
+ok 135 - a revisit of a plant made on this phone points at its outbox record
+ok 136 - reservedToCreate tops up to 3, not counting tags used on this phone
+ok 137 - nextReservedTag skips tags used by a record on this phone
+ok 138 - isReservedForOther hides another botanist's reserved tags
+ok 139 - tagCacheRows saves another botanist's kept tag as kept
+ok 140 - a cached kept tag scans as kept with no signal
+ok 141 - two top-ups at once make one run
+ok 142 - a failed top-up lets the next one run
+ok 143 - another botanist's kept tag is not offered as unused, online or offline
+ok 144 - top-up never runs while keeping offline tags is off
+ok 145 - the keep-offline setting is on by default, kept per person, and a no-op with no database
+ok 146 - two phones signed in to one account never offer the same kept tag
+ok 147 - after a load the phone keeps only its kept tags still free on the server, or taken by its own records
+ok 148 - turning kept tags off releases this phone's free tags and the ones kept before per-phone tags, never another phone's
+ok 149 - countPlants sorts most first and leaves out plants with no value
+ok 150 - countPlants folds the smallest groups into Other, which cannot be picked
+ok 151 - the plant book holds published species only, and no plant locations
+ok 152 - old http image links are upgraded, and development addresses are left alone
+ok 153 - a photo link is kept between refreshes, then swapped before it expires
+ok 154 - signing in swaps a cached visitor photo link for the signed one straight away
+ok 155 - sign-in stores the session the API returns and sends no old token
+ok 156 - a wrong password stores nothing
+ok 157 - a token with time left is used as it is
+ok 158 - a token about to expire is renewed once, however many calls ask at the same time
+ok 159 - a refused refresh ends the session and tells the app
+ok 160 - API unreachable during a refresh: keep the session and the old token
+ok 161 - the expiry is read from the token when the session does not say
+ok 162 - sign-out forgets the session straight away and tells the API
+ok 163 - a password-reset link's session is read from the address
+ok 164 - tokenClaims reads base64url without padding
+ok 165 - custom storage adapter persists and restores session across app restarts
+ok 166 - uses a session another tab renewed instead of spending an old refresh token
+ok 167 - a refresh that loses the race to another tab keeps the session
+ok 168 - a forced refresh asked for while a normal one runs is run after it, not dropped
+ok 169 - two forced refreshes at once share one request
+ok 170 - an unchanged picture is not downloaded again, even on a forced refresh
+ok 171 - cleanTerm drops characters the API would reject
+ok 172 - cleanTerm keeps hybrid signs, apostrophes, dots and hyphens
+ok 173 - cleanTerm keeps at most 100 characters
+ok 174 - buildSpeciesQuery sends nothing until there is something to search
+ok 175 - buildSpeciesQuery leaves empty values out and defaults the page size
+ok 176 - isTagSearch spots whole and partial tag IDs, not species names
+ok 177 - a response for an older search is ignored
+ok 178 - pages are added in order and the end is known
+ok 179 - page 1 replaces what was shown, and a failure keeps the results so far
+ok 180 - summarize gives the first sentence, or a short cut at a word
+ok 181 - searchErrorMessage explains a missing connection and passes other messages on
+ok 182 - picking a species fills the name and an empty appearance
+ok 183 - picking a species never overwrites what the botanist wrote
+ok 184 - a species with no description leaves the appearance empty
+ok 185 - isStillPicked follows the name, ignoring case and spaces
+ok 186 - statusKey and withStatusKey put a status in one form
+ok 187 - the catalogue (and the dashboard count) sees a capitalised Endangered species
+ok 188 - visitors get no map pin for an endangered plant, even with the API's reduced point
+ok 189 - sniffFileKind reads what a file really is
+ok 190 - a video renamed to .jpg is refused with the reason; a real JPG passes
+ok 191 - outboxStatus maps every outbox state to a status with STATUS_TEXT wording
+ok 192 - tagUrl without a browser points at the plant page on the live site
+ok 193 - the tag ID can be read back from the link the way the scanner does
+# tests 198
+# pass 198
+# fail 0
