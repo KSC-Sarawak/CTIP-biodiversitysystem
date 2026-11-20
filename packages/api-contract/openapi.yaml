@@ -1931,7 +1931,7 @@ paths:
     post:
       tags: [Alerts]
       operationId: assignAlert
-      summary: Assign an alert to a staff member (officer/admin)
+      summary: Assign an alert to an active officer (officer/admin call it; RBAC D12)
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -1949,6 +1949,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Alert' }
+        '422': { $ref: '#/components/responses/ValidationError' }
 
   /alerts/{id}/acknowledge:
     post:
