@@ -1275,6 +1275,36 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Specimen' }
         '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Specimens]
+      operationId: deleteSpecimen
+      summary: Soft-delete a tagged plant (officer only, RBAC D4)
+      description: >
+        Sets is_deleted. The plant leaves every list, the map and the public pages.
+        Its QR tag stays taken and its observations are kept, so it can be restored.
+        404 when there is no such plant or it is already deleted.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /specimens/{id}/restore:
+    post:
+      tags: [Specimens]
+      operationId: restoreSpecimen
+      summary: Undo a tagged plant's soft delete (officer only, RBAC D4)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The plant, no longer deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specimen' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------ Observations
   /observations:

@@ -45,6 +45,8 @@ import {
   findSpecimenByQrApi,
   createSpecimenApi,
   updateSpecimenApi,
+  deleteSpecimenApi,
+  restoreSpecimenApi,
   updateObservationApi,
   createObservationApi,
   submitObservationApi,
@@ -355,6 +357,15 @@ function collectionMatches(a = [], b = []) {
       is_deleted: s.is_deleted,
       photos: (obsBySpecimen.get(s.id) || []).flatMap((o) => photosByObs.get(o.id) || []),
     }));
+    // RBAC D4: deleted plants, for the officers' "Deleted plants" list and its Restore button.
+    const deletedPlants = w.specimens.filter((s) => s.is_deleted).map((s) => ({
+      id: s.id,
+      qr_id: s.qr_id,
+      species_id: s.species_id,
+      proposed_species: s.proposed_species_name || "",
+      registered_by: s.registered_by,
+      updated_at: s.updated_at ?? null,
+    }));
 
     // The database allows one plant per tag, deleted plants included.
     const assignedTagIds = new Set(w.specimens.map((s) => s.qr_id).filter(Boolean));
@@ -449,6 +460,7 @@ function collectionMatches(a = [], b = []) {
       const spEqual = collectionMatches(prevDb.species, w.species);
       const mediaEqual = collectionMatches(prevDb.species_media, species_media);
       const plEqual = collectionMatches(prevDb.plants, finalPlants);
+      const delEqual = collectionMatches(prevDb.deletedPlants, deletedPlants);
       const obsEqual = collectionMatches(prevDb.observations, finalObs);
       const tagsEqual = collectionMatches(prevDb.tags, tags);
       const revEqual = collectionMatches(prevDb.reviews, reviews);
@@ -478,7 +490,7 @@ function collectionMatches(a = [], b = []) {
       const postsEqual = collectionMatches(prevDb.discussionPosts, discussionPosts);
       const dirEqual = collectionMatches(prevDb.directory, directory);
 
-      const hasChanges = !spEqual || !mediaEqual || !plEqual || !obsEqual || !tagsEqual ||
+      const hasChanges = !spEqual || !mediaEqual || !plEqual || !delEqual || !obsEqual || !tagsEqual ||
         !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !nicksEqual || !rangesEqual || !telemetryEqual ||
         !notifsEqual || !auditEqual || !profEqual || !zonesEqual ||
         !discEqual || !audEqual || !postsEqual || !dirEqual;
@@ -493,6 +505,7 @@ function collectionMatches(a = [], b = []) {
         species: spEqual ? prevDb.species : w.species,
         species_media: mediaEqual ? prevDb.species_media : species_media,
         plants: plEqual ? prevDb.plants : finalPlants,
+        deletedPlants: delEqual ? prevDb.deletedPlants : deletedPlants,
         observations: obsEqual ? prevDb.observations : finalObs,
         tags: tagsEqual ? prevDb.tags : tags,
         reviews: revEqual ? prevDb.reviews : reviews,
@@ -1135,6 +1148,19 @@ function collectionMatches(a = [], b = []) {
       return false;
     }
     notify(endangered_override ? "Exact location hidden from the public" : "Location no longer hidden");
+    await loadFromApi(true);
+    return true;
+  };
+
+  // RBAC D4: an officer deletes a tagged plant (soft delete) or restores it.
+  // DELETE /v1/specimens/:id and POST /v1/specimens/:id/restore. Returns true when done.
+  const setPlantDeleted = async (plantId, deleted) => {
+    const res = await callApi(deleted ? deleteSpecimenApi : restoreSpecimenApi, plantId);
+    if (!res.ok) {
+      notify(`Could not ${deleted ? "delete" : "restore"} the plant: ${res.message}`);
+      return false;
+    }
+    notify(deleted ? "Plant deleted. Restore it from Tagged plants > Deleted plants." : "Plant restored");
     await loadFromApi(true);
     return true;
   };
@@ -1793,7 +1819,7 @@ function collectionMatches(a = [], b = []) {
     logout, login, signIn, changePassword, resetPassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
-    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
+    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden, setPlantDeleted,
     syncObservation, resubmit, reviewObservation, addComment,
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
