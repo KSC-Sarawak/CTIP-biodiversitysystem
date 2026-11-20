@@ -298,7 +298,8 @@ export function TaggedPlant({ nav, params }) {
             ['Last visit', longDate(lastObs?.observed_at)],
             ...(updated ? [['Last updated', longDate(updated)]] : []),
           ] : []),
-          ['Location', where ? <Mono size={14}>{coords(where.lat, where.lng)}</Mono> : p.lat == null ? 'Not captured when recorded.' : HIDDEN_NOTE],
+          // RBAC D9: a visitor gets no coordinates for a protected plant, so check the flag before "not captured".
+          ['Location', where ? <Mono size={14}>{coords(where.lat, where.lng)}</Mono> : (!staff && p.endangered) || p.lat != null ? HIDDEN_NOTE : 'Not captured when recorded.'],
         ]} />
         {p.location_reduced ? <Txt v="caption" color={c.ink2}>{REDUCED_LOCATION_NOTE}</Txt> : null}
         {where && can(role, 'review') ? (
