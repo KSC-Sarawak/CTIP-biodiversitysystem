@@ -27,6 +27,16 @@ export default function Login() {
   const staff = getStaffPageContent(PARK);
   const [mode, setMode] = useState(query.mfareset ? "mfa-reset" : query.reset ? "reset" : query.expired ? "change" : "signin"); // signin | change | reset | first | mfa | mfa-setup | mfa-reset
   const [email, setEmail] = useState("");
+  // RBAC D14: an admin's email correction, confirmed from the link (#/login?emailchange=1).
+  const [emailChange, setEmailChange] = useState(query.emailchange ? { busy: true } : null);
+  const { confirmEmailChange } = useStore();
+  useEffect(() => {
+    if (!query.emailchange) return;
+    confirmEmailChange().then((r) => {
+      setEmailChange(r.ok ? { ok: true, email: r.email } : { ok: false, message: r.message });
+      if (r.ok) setEmail(r.email);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [pw, setPw] = useState("");
   const [newPw, setNewPw] = useState("");
   const [pending, setPending] = useState(null); // user id waiting to choose a new password
@@ -224,6 +234,13 @@ export default function Login() {
             )}
             <label>Email or username<input value={email} onChange={(e) => { setEmail(e.target.value); clearError(); }} placeholder="name@sfc.my" autoComplete="username" required /></label>
             <label>Password<PasswordInput value={pw} onChange={(e) => { setPw(e.target.value); clearError(); }} autoComplete="current-password" required /></label>
+            {emailChange && (
+              <div className="callout" role="status">
+                <p>{emailChange.busy ? "Confirming your new email…"
+                  : emailChange.ok ? <>Your email is now <b>{emailChange.email}</b>. Sign in with it and your usual password.</>
+                  : emailChange.message}</p>
+              </div>
+            )}
             {shownError && <p className="loginerr" role="alert"><Icon name="alert" size={16} /> {shownError}</p>}
             <p className="login-forgot">
               <button type="button" className="textlink" onClick={() => switchTo("change")}>Forgot password?</button>

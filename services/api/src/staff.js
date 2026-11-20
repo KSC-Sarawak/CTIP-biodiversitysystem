@@ -115,8 +115,8 @@ const Me = z.strictObject({
     .nullable().optional(),
 }).refine((b) => Object.keys(b).length > 0, 'Send at least one field to change');
 
+// RBAC D14: no full_name. Each person edits their own name (PATCH /me).
 const ProfileUpdate = z.strictObject({
-  full_name: z.string().trim().min(1).max(200).optional(),
   role: z.enum(ROLES).optional(),
   is_active: z.boolean().optional(),
 }).refine((b) => Object.keys(b).length > 0, 'Send at least one field to change');
