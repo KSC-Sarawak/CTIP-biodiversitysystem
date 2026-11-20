@@ -163,7 +163,8 @@ test('sending the same plant again (retry) returns it with 200, not a second pla
 test('a tag already on another plant gets 409 TAG_IN_USE; an unknown tag 422 TAG_NOT_FOUND', async () => {
   tag('NIAH-0001');
   await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
-  const taken = await request(app).post('/v1/specimens').set(as('officer')).send({ qr_id: 'NIAH-0001' });
+  // A second botanist on the same tag (RBAC D1: only botanists register plants).
+  const taken = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-0001' });
   assert.equal(taken.status, 409);
   assert.equal(taken.body.code, 'TAG_IN_USE');
   const unknown = await request(app).post('/v1/specimens').set(as('botanist')).send({ qr_id: 'NIAH-9999' });
@@ -957,7 +958,7 @@ test('photo confirm: an uploaded photo is returned as it is; a pending one is ma
   assert.equal(already.status, 200);
   assert.equal(already.body.upload_status, 'uploaded');
   assert.ok(already.body.url);
-  const ok = await confirm(arrived, 'officer');
+  const ok = await confirm(arrived);
   assert.equal(ok.status, 200);
   assert.equal(arrived.upload_status, 'uploaded');
   const notYet = await confirm(missing);
