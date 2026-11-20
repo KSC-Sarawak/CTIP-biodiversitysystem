@@ -7,14 +7,19 @@ import { CAPTION_MAX, PHOTO_MAX_MB, PHOTO_TYPES, nowIso, photoFileProblem, uid }
 // Popup from the whiteboard sketch: upload icon on the left, close on the right,
 // numbered photo cards you drag to arrange, and a Save button.
 // The first card is the primary photo. Arrow buttons do the same job as dragging on a phone.
-// captions: every photo needs a caption (species catalogue). min: fewest photos the list may keep.
+// captions: show a caption box under each photo. requireCaptions: every photo needs one
+// (species catalogue). min: fewest photos the list may keep. allowUpload / arrange: off
+// for a tagged plant's photos, which are added on a visit and keep the order they were taken.
 export default function PhotoEditor({
   photos = [],
   observationPhotos = [],
   onSave,
   onClose,
   captions = false,
+  requireCaptions = captions,
   min = 1,
+  allowUpload = true,
+  arrange = true,
 }) {
   const [list, setList] = useState(photos);
   const [from, setFrom] = useState(null);
@@ -85,7 +90,7 @@ export default function PhotoEditor({
   const setCaption = (id, caption) => setList(list.map((p) => (p.id === id ? { ...p, caption } : p)));
 
   const save = () => {
-    const k = captions ? list.findIndex((p) => !p.caption?.trim()) : -1;
+    const k = requireCaptions ? list.findIndex((p) => !p.caption?.trim()) : -1;
     if (k >= 0) return setErr(`Add a caption to photo ${k + 1}`);
     onSave(list.map((p, i) => ({ ...p, is_primary: i === 0 })));
   };
@@ -95,11 +100,13 @@ export default function PhotoEditor({
       <div className="glass pop editor wide" role="dialog" aria-label="Arrange photos" onClick={(e) => e.stopPropagation()}>
         <div className="pophead" style={{ flexWrap: "wrap", gap: 10 }}>
           <div className="row wrap" style={{ alignItems: "center", gap: 8 }}>
-            <label className="upl" title="Upload photos from device">
-              <Icon name="upload" />
-              <span className="sr">Upload photos</span>
-              <input type="file" accept={PHOTO_TYPES.join(",")} multiple hidden onChange={add} />
-            </label>
+            {allowUpload && (
+              <label className="upl" title="Upload photos from device">
+                <Icon name="upload" />
+                <span className="sr">Upload photos</span>
+                <input type="file" accept={PHOTO_TYPES.join(",")} multiple hidden onChange={add} />
+              </label>
+            )}
             {observationPhotos.length > 0 && (
               <button
                 type="button"
@@ -111,7 +118,7 @@ export default function PhotoEditor({
               </button>
             )}
           </div>
-          <p className="hint">Drag to arrange photos</p>
+          <p className="hint">{arrange ? "Drag to arrange photos" : "Edit captions or remove photos"}</p>
           <button className="ic" onClick={onClose} aria-label="Close"><Icon name="x" /></button>
         </div>
 
@@ -155,7 +162,7 @@ export default function PhotoEditor({
             <div className={captions ? "pslot" : undefined} key={p.id}>
               <div
                 className={"pcard" + (from === k ? " dragging" : "")}
-                draggable
+                draggable={arrange}
                 onDragStart={() => setFrom(k)}
                 onDragEnd={() => setFrom(null)}
                 onDragOver={(e) => e.preventDefault()}
@@ -167,12 +174,16 @@ export default function PhotoEditor({
                 <Img src={p.url} alt={p.caption || ""} />
                 <span className="num">{k + 1}</span>
                 <div className="acts">
-                  <button onClick={() => move(k, k - 1)} disabled={k === 0} aria-label="Move earlier">
-                    <Icon name="chevL" size={15} />
-                  </button>
-                  <button onClick={() => move(k, k + 1)} disabled={k === list.length - 1} aria-label="Move later">
-                    <Icon name="chevR" size={15} />
-                  </button>
+                  {arrange && (
+                    <>
+                      <button onClick={() => move(k, k - 1)} disabled={k === 0} aria-label="Move earlier">
+                        <Icon name="chevL" size={15} />
+                      </button>
+                      <button onClick={() => move(k, k + 1)} disabled={k === list.length - 1} aria-label="Move later">
+                        <Icon name="chevR" size={15} />
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => setList(list.filter((x) => x.id !== p.id))}
                     disabled={list.length <= min}
@@ -199,7 +210,9 @@ export default function PhotoEditor({
 
         {err && <p className="editerr" role="alert">{err}</p>}
         <p className="editnote">
-          JPG, PNG or WebP, up to {PHOTO_MAX_MB} MB each.{captions && " Every photo needs a caption."} The first photo is the primary photo. If no one chooses one, the oldest photo is used.
+          {arrange
+            ? <>JPG, PNG or WebP, up to {PHOTO_MAX_MB} MB each.{requireCaptions && " Every photo needs a caption."} The first photo is the primary photo. If no one chooses one, the oldest photo is used.</>
+            : <>Captions can be up to {CAPTION_MAX} characters. A removed photo is deleted for everyone.</>}
         </p>
         <button className="btn" onClick={save}>Save</button>
       </div>

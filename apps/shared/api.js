@@ -653,6 +653,11 @@ export const deleteSpecimenApi = (id, { token } = {}) => send("DELETE", `/specim
 export const restoreSpecimenApi = (id, { token } = {}) => send("POST", `/specimens/${enc(id)}/restore`, undefined, token);
 // RBAC D13: officers only. `old_tag` is "retired" (lost) or "damaged".
 export const retagSpecimenApi = (id, qr_id, old_tag, { token } = {}) => send("POST", `/specimens/${enc(id)}/retag`, { qr_id, old_tag }, token);
+// RBAC: officers on any observation, botanists on their own.
+export const updateObservationPhotoApi = (obsId, photoId, caption, { token } = {}) =>
+  send("PATCH", `/observations/${enc(obsId)}/photos/${enc(photoId)}`, { caption }, token);
+export const deleteObservationPhotoApi = (obsId, photoId, { token } = {}) =>
+  send("DELETE", `/observations/${enc(obsId)}/photos/${enc(photoId)}`, undefined, token);
 export const createObservationApi = (obs, { token } = {}) => send("POST", "/observations", obs, token);
 export const fetchObservationApi = (id, { token } = {}) => apiFetch(`/observations/${enc(id)}`, { token });
 // Edit a draft or queued record: { height_cm?, morphology?, notes?, version }. `changes` must hold
