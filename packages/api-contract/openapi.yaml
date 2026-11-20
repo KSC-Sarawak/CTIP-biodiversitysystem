@@ -854,7 +854,8 @@ paths:
         Saves the correction and emails a confirmation link (a Supabase
         invitation) to the NEW address. Nothing changes until the link is
         clicked (POST /auth/email-change/confirm); the link lasts 24 hours. A
-        second correction replaces the first. Needs SUPABASE_SECRET_KEY on the
+        second correction replaces the first. An admin cannot correct their own
+        email (403): another admin must. Needs SUPABASE_SECRET_KEY on the
         server (else 503).
       parameters:
         - $ref: '#/components/parameters/Id'
