@@ -14,7 +14,7 @@ export const NEEDS = {
   reviewItem: "review",
   monitor: "monitor",
   alert: "monitor",
-  speciesAdmin: "species",
+  speciesAdmin: "viewSpecies", // admins open it read-only (RBAC D6)
   tags: "tags",
   reports: "reports",
   users: "users",

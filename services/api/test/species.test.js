@@ -145,11 +145,11 @@ test('list is paged, counts the total, and can filter by is_published', async ()
 
 test('update changes only the sent fields and records who changed it', async () => {
   const { body } = await create({ scientific_name: 'Nepenthes rajah', family: 'Nepenthaceae' });
-  const res = await request(app).patch(`/v1/species/${body.id}`).set(as('admin')).send({ common_name: 'Giant pitcher' });
+  const res = await request(app).patch(`/v1/species/${body.id}`).set(as('officer')).send({ common_name: 'Giant pitcher' });
   assert.equal(res.status, 200);
   assert.equal(res.body.common_name, 'Giant pitcher');
   assert.equal(res.body.family, 'Nepenthaceae');
-  assert.equal(res.body.updated_by, users.admin);
+  assert.equal(res.body.updated_by, users.officer);
 });
 
 test('conservation status must be one of the four agreed statuses, in any case (RBAC D11)', async () => {
@@ -184,8 +184,8 @@ test('ecology over 5000 characters is 422 with the field named (CTIP-149)', asyn
 
 test('update rejects an empty body and unknown fields', async () => {
   const { body } = await create({ scientific_name: 'Nepenthes rajah' });
-  assert.equal((await request(app).patch(`/v1/species/${body.id}`).set(as('admin')).send({})).status, 422);
-  assert.equal((await request(app).patch(`/v1/species/${body.id}`).set(as('admin')).send({ is_deleted: true })).status, 422);
+  assert.equal((await request(app).patch(`/v1/species/${body.id}`).set(as('officer')).send({})).status, 422);
+  assert.equal((await request(app).patch(`/v1/species/${body.id}`).set(as('officer')).send({ is_deleted: true })).status, 422);
 });
 
 test('soft delete: 204, the row stays, and it disappears from read, list and update', async () => {
