@@ -17,6 +17,7 @@ export const routes = [
   ['post', '/auth/refresh', PUBLIC],
   ['post', '/auth/sign-out', PUBLIC], // token optional: ends that session if sent
   ['post', '/auth/password-reset', PUBLIC],
+  ['post', '/auth/email-change/confirm', PUBLIC], // RBAC D14: the link's own token is the proof
   ['post', '/me/password', ANY_STAFF],
   // Two-step sign-in with an authenticator app (VA-70). Reached with the
   // password-only session, so the code can be set up and checked.
@@ -46,6 +47,8 @@ export const routes = [
   ['patch', '/profiles/:id', ADMIN],
   ['delete', '/profiles/:id', ADMIN], // soft delete, removed for good after 30 days
   ['post', '/profiles/:id/restore', ADMIN],
+  // RBAC D14: an admin corrects an email; it changes once the new address confirms.
+  ['post', '/profiles/:id/email', ADMIN],
 
   // QR tags
   ['get', '/qr-tags', ANY_STAFF],

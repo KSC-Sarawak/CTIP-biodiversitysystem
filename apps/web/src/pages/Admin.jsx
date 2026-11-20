@@ -20,7 +20,9 @@ const daysLeft = (u) => Math.max(0, Math.ceil((removeDate(u) - Date.now()) / DAY
 // Two tables: accounts that can sign in, and ones that cannot (turned off, or
 // deleted and waiting out the 30 days in which they can still be restored).
 export function Users() {
-  const { db, me, addUser, updateUser, deleteUser, restoreUser, notify } = useStore();
+  const { db, me, addUser, updateUser, deleteUser, restoreUser, correctEmail, notify } = useStore();
+  // RBAC D14: { id, value } while an admin types a corrected email for one user.
+  const [fixing, setFixing] = useState(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -111,6 +113,17 @@ export function Users() {
       : { title: "Turn on account", body: `Turn ${u.full_name}'s account back on? They will be able to sign in again.`, confirmLabel: "Turn on account" });
     if (ok) updateUser(u.id, { is_active: !u.is_active });
   };
+  const sendCorrection = async (e, u) => {
+    e.preventDefault();
+    const problem = emailProblem(fixing.value);
+    if (problem) return notify(problem);
+    const ok = await ask({
+      title: "Correct email",
+      body: <p>Send a confirmation link to <b>{fixing.value.trim().toLowerCase()}</b>? {u.full_name || u.email}'s email changes only when they click it. Until then they keep signing in with <b>{u.email}</b>.</p>,
+      confirmLabel: "Send link",
+    });
+    if (ok && (await correctEmail(u.id, fixing.value))) setFixing(null);
+  };
   const remove = async (u) => {
     const until = new Date(Date.now() + GRACE_DAYS * DAY_MS).toLocaleDateString();
     const ok = await ask({
@@ -193,7 +206,20 @@ export function Users() {
             {activeUsers.map((u) => (
               <tr key={u.id}>
                 <td><b>{u.full_name}</b>{u.id === me.id && <small className="mute"> (you)</small>}</td>
-                <td>{u.email}</td>
+                <td>
+                  {fixing?.id === u.id ? (
+                    <form className="row wrap" onSubmit={(e) => sendCorrection(e, u)} noValidate>
+                      <input type="email" value={fixing.value} onChange={(e) => setFixing({ id: u.id, value: e.target.value })} aria-label={`Correct email for ${u.full_name || u.email}`} autoFocus />
+                      <button className="btn small-btn" type="submit">Send link</button>
+                      <button className="btn ghost small-btn" type="button" onClick={() => setFixing(null)}>Cancel</button>
+                    </form>
+                  ) : (
+                    <>
+                      {u.email}{" "}
+                      {u.id !== me.id && <button className="btn ghost small-btn" type="button" onClick={() => setFixing({ id: u.id, value: u.email || "" })}>Correct email</button>}
+                    </>
+                  )}
+                </td>
                 <td>
                   <select value={u.role} disabled={u.id === me.id} onChange={(e) => changeRole(u, e.target.value)} aria-label={`Role for ${u.full_name}`}>
                     {Object.entries(ROLE_LABEL).map(([r, text]) => <option key={r} value={r}>{text}</option>)}
