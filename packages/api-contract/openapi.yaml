@@ -1525,6 +1525,10 @@ paths:
       tags: [Reviews]
       operationId: listObservationReviews
       summary: List review decisions for an observation
+      description: >
+        Only the botanist who recorded the observation, officers and admins.
+        Another botanist can read an approved observation (RBAC D16) but gets
+        403 for its review decisions.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -1535,6 +1539,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Review' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
     post:
       tags: [Reviews]
@@ -1580,6 +1585,9 @@ paths:
       tags: [Comments]
       operationId: listObservationComments
       summary: List comments on an observation
+      description: >
+        Only the botanist who recorded the observation, officers and admins
+        (RBAC D16). Another botanist gets 403, even on an approved observation.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -1590,10 +1598,13 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Comment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
     post:
       tags: [Comments]
       operationId: addObservationComment
       summary: Add a comment to an observation
+      description: Only the botanist who recorded the observation, officers and admins (RBAC D16).
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -1611,6 +1622,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Comment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # -------------------------------------------------------------------- Sync
   /sync:
@@ -2446,12 +2459,10 @@ paths:
       operationId: getDistribution
       summary: Plant locations for the distribution map (staff)
       description: >
-        One point per plant, from its latest approved observation. For an endangered
-        plant (species status endangered, or the specimen's
-        endangered_override), roles other than Officer and Admin get the centre of a
-        0.01 degree grid square (about 1.1 km) instead of the exact spot. The
-        reduction happens in the API; the exact values are never sent (threat T13).
-        Botanists only see their own observations (RLS).
+        One point per plant, from its latest approved observation. Botanists,
+        officers and admins all get exact coordinates, endangered and hidden
+        plants included (RBAC D10). Botanists see every approved observation
+        (RBAC D16). Visitors cannot call this route.
       parameters:
         - name: species_id
           in: query
