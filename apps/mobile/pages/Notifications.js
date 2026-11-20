@@ -53,16 +53,14 @@ export default function Alerts({ nav }) {
 
     // 4. Observations & reviews
     if (n.related_table === 'observations') {
-      if ((role === 'officer' || role === 'admin') && n.type === 'observation_submitted') {
-        return nav.go('reviewItem', { id: n.related_id });
-      }
       if (role === 'botanist') {
         return nav.go('record', { id: n.related_id });
       }
       if (role === 'officer') {
         return nav.go('reviewItem', { id: n.related_id });
       }
-      return nav.go('discussion', { id: n.related_id });
+      // RBAC D2: admins do not review, so they have no review screen to open.
+      return nav.go('dashboard');
     }
 
     // 5. Review outcomes
