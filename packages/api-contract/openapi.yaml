@@ -242,6 +242,42 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /auth/email-change/confirm:
+    post:
+      tags: [Auth]
+      operationId: confirmEmailChange
+      summary: Finish an admin's email correction from the link (RBAC D14)
+      description: >
+        The website sends the access token the confirmation link brought. The
+        API checks it with Supabase, then moves the new address onto the
+        person's account. No staff role or two-step code: the link is the proof.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [access_token]
+              additionalProperties: false
+              properties:
+                access_token: { type: string }
+      responses:
+        '200':
+          description: The email is changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email: { type: string, format: email }
+        '410':
+          description: LINK_INVALID - expired, already used, or not an email-correction link
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   # ------------------------------------------------------------------ Public
   /public/species:
     get:
@@ -744,7 +780,7 @@ paths:
     patch:
       tags: [Profiles]
       operationId: updateProfile
-      summary: Change a user's role or active status (admin)
+      summary: Change a user's role or active status (admin). Names and emails are not changed here (RBAC D14).
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -808,6 +844,52 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  /profiles/{id}/email:
+    post:
+      tags: [Profiles]
+      operationId: correctProfileEmail
+      summary: Correct a user's email (admin, RBAC D14)
+      description: >
+        Saves the correction and emails a confirmation link (a Supabase
+        invitation) to the NEW address. Nothing changes until the link is
+        clicked (POST /auth/email-change/confirm); the link lasts 24 hours. A
+        second correction replaces the first. Needs SUPABASE_SECRET_KEY on the
+        server (else 503).
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '202':
+          description: Confirmation email sent; the email has not changed yet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+                  pending_email: { type: string, format: email }
+                  expires_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/EmailRateLimit' }
+        '503':
+          description: NOT_CONFIGURED - no SUPABASE_SECRET_KEY on the server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /qr-tags:
     get:
       tags: [QR Tags]
@@ -2650,9 +2732,10 @@ components:
         estimated: { type: boolean, description: 'true when nothing is on record, so wait_minutes is the longest it can be (60)' }
 
     ProfileUpdate:
+      description: RBAC D14 - an admin cannot change a name (each person edits their own with PATCH /me) or an email (POST /profiles/{id}/email).
       type: object
+      additionalProperties: false
       properties:
-        full_name: { type: string }
         role: { $ref: '#/components/schemas/Role' }
         is_active: { type: boolean }
 
