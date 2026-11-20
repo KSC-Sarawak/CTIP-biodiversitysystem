@@ -149,7 +149,10 @@ async function ownDraftOrError(db, req, res, version) {
   const obs = await observationOr404(db, req, res);
   if (!obs) return null;
   if (obs.recorded_by !== req.user.id) {
-    fail(res, 403, 'FORBIDDEN', 'Only the botanist who recorded this can change it. Officers use the review instead.');
+    // RBAC D16: another botanist can read an approved observation but never change it.
+    fail(res, 403, 'FORBIDDEN', req.user.role === 'botanist'
+      ? 'This observation was recorded by another botanist. You can read it but not change it.'
+      : 'Only the botanist who recorded this can change it. Officers use the review instead.');
     return null;
   }
   if (!EDITABLE.includes(obs.status)) {
