@@ -7,6 +7,7 @@ import { mfaStep } from './mfa.js';
 import { accountBlock } from './accountStatus.js';
 import { logAuthEvent } from './auditLog.js';
 import { linkTarget } from './resetRedirect.js';
+import { weakPasswordMessage } from './accountRules.js';
 
 // Sign-in, session refresh and passwords (CTIP-114). The web and mobile apps
 // never talk to Supabase directly: they send these requests to the API, and
@@ -170,7 +171,7 @@ export const sessionHandlers = {
     if (updated.ok) return res.status(204).end();
     const err = await updated.json().catch(() => ({}));
     if (err.error_code === 'same_password') return fail(res, 422, 'SAME_PASSWORD', 'Choose a password different from your current one');
-    if (err.error_code === 'weak_password') return fail(res, 422, 'WEAK_PASSWORD', err.msg || 'Choose a stronger password');
+    if (err.error_code === 'weak_password') return fail(res, 422, 'WEAK_PASSWORD', weakPasswordMessage(err.weak_password?.reasons));
     // An account with an authenticator app: Supabase wants the 6-digit code first
     // (a reset-link session is only aal1). The website then asks for it.
     if (err.error_code === 'insufficient_aal' || /aal2/i.test(err.msg ?? err.message ?? '')) {
