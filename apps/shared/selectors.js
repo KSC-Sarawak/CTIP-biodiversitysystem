@@ -68,7 +68,8 @@ export function plantView(db, p) {
     height_cm: obs?.height_cm ?? null,
     morphology: obs?.morphology || "",
     photos: orderedPhotos(p.photos),
-    isPublic: status === "approved" && !!species && species.is_published && !p.is_deleted,
+    withdrawn: !!p.is_withdrawn, // RBAC D17: an officer unpublished it
+    isPublic: status === "approved" && !!species && species.is_published && !p.is_deleted && !p.is_withdrawn,
   };
 }
 

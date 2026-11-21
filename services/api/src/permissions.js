@@ -86,6 +86,8 @@ export const routes = [
   ['post', '/specimens/:id/restore', OFFICER],
   // RBAC D13: only officers move a plant to a new tag (after the old one is retired or damaged).
   ['post', '/specimens/:id/retag', OFFICER],
+  // RBAC D17: only officers unpublish a tagged plant (reason required) or publish it again.
+  ['post', '/specimens/:id/publish', OFFICER],
 
   // Observations, photos, reviews, comments, sync
   ['get', '/observations', ANY_STAFF],
