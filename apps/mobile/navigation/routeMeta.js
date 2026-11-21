@@ -12,6 +12,7 @@ export const NEEDS = {
   phoneRecord: "records", // a record saved on this phone, not sent yet (CTIP-68)
   review: "review",
   reviewItem: "review",
+  plantReview: "review", // RBAC D18: review mode on an unpublished tagged plant (officers)
   monitor: "monitor",
   alert: "monitor",
   speciesAdmin: "viewSpecies", // admins open it read-only (RBAC D6)
@@ -39,7 +40,7 @@ export const ROUTE_NAMES = [
   "records", "record", "phoneRecord", "alerts", "discussion",
   "review", "reviewItem", "monitor", "alert",
   "staffMore", "speciesAdmin", "tags", "tagQr", "reports",
-  "users", "audit", "account", "book", "survey",
+  "users", "audit", "account", "book", "survey", "plantReview",
 ];
 
 export function canAccess(role, routeName) {

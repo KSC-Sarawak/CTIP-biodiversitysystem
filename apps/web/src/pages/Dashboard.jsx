@@ -69,6 +69,8 @@ function TaggedTable() {
   const all = can(role, "allPlants");
   const rows = visiblePlants(db, role).filter((p) => all || p.registered_by === me?.id).map((p) => ({
     ...p,
+    // RBAC D17: an unpublished plant never shows as "Published".
+    status: p.withdrawn && p.status === "approved" ? "unpublished" : p.status,
     by: nameOf(db, p.registered_by),
     seen: lastVisit(db, p.id, role),
     nphotos: p.photos.length,

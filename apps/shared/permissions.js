@@ -16,12 +16,13 @@ export const ROLE_LABEL = {
   admin: "Administrator",
 };
 
+// "publishPlants": unpublish a tagged plant or publish it again (RBAC D17, officers only).
 // "allPlants": the dashboard lists everyone's records. Botanists only get their own.
 // "pending" doubles as "is staff": unpublished plants, exact endangered locations, conservation status.
 const PERMS = {
   visitor: [],
   botanist: ["bell", "add", "editPhotos", "pending", "records", "discuss"],
-  officer: ["bell", "editPhotos", "pending", "allPlants", "review", "reports", "viewSpecies", "species", "monitor", "tags", "hideLocation", "deletePlants", "retag", "discuss"],
+  officer: ["bell", "editPhotos", "pending", "allPlants", "review", "reports", "viewSpecies", "species", "monitor", "tags", "hideLocation", "deletePlants", "retag", "publishPlants", "discuss"],
   // RBAC D2 and D6: admins run the system (users, sensors, alerts, audit) and only
   // view data, including unpublished species ("viewSpecies" opens the Species page
   // read-only; "species" is the right to change them). The one data change they make

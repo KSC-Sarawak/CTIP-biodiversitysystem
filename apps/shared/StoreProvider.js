@@ -52,6 +52,7 @@ import {
   deleteObservationPhotoApi,
   restoreSpecimenApi,
   retagSpecimenApi,
+  setSpecimenPublishedApi,
   updateObservationApi,
   createObservationApi,
   submitObservationApi,
@@ -360,6 +361,11 @@ function collectionMatches(a = [], b = []) {
       zone_id: s.zone_id ?? null,
       endangered_override: s.endangered_override,
       is_deleted: s.is_deleted,
+      // RBAC D17: unpublished by an officer, with the reason.
+      is_withdrawn: !!s.is_withdrawn,
+      withdrawn_reason: s.withdrawn_reason ?? null,
+      withdrawn_by: s.withdrawn_by ?? null,
+      withdrawn_at: s.withdrawn_at ?? null,
       photos: (obsBySpecimen.get(s.id) || []).flatMap((o) => photosByObs.get(o.id) || []),
     }));
     // RBAC D4: deleted plants, for the officers' "Deleted plants" list and its Restore button.
@@ -994,6 +1000,37 @@ function collectionMatches(a = [], b = []) {
     }
   };
 
+  // A botanist fixing a returned observation of their own: edit captions, remove
+  // photos and add new ones (RBAC: own observations, not while waiting for review).
+  // `before` is the observation's saved photos, `after` the list from the photo
+  // editor (new photos carry a `file`). Returns { ok, message }; never throws.
+  const setObservationPhotos = async (obsId, before, after) => {
+    // A new photo: a File on the website, or a picked image (`isNew`, with url/base64) on the phone.
+    const isNew = (p) => !!p.file || !!p.isNew;
+    try {
+      for (const p of after) {
+        if (isNew(p)) continue;
+        const old = before.find((o) => o.id === p.id);
+        const caption = (p.caption || "").trim();
+        if (!old || (old.caption || "").trim() === caption) continue;
+        const res = await callApi(updateObservationPhotoApi, obsId, p.id, caption || null);
+        if (!res.ok) return { ok: false, message: `Caption not saved: ${res.message}` };
+      }
+      for (const old of before) {
+        if (after.some((p) => p.id === old.id)) continue;
+        const res = await callApi(deleteObservationPhotoApi, obsId, old.id);
+        if (!res.ok && res.status !== 404) return { ok: false, message: `A photo was not removed: ${res.message}` };
+      }
+      for (const p of after.filter(isNew)) {
+        const res = await callApi(uploadObservationPhotoApi, obsId, { ...p, id: p.id || uid() });
+        if (!res.ok) return { ok: false, message: `A photo was not added: ${res.message}` };
+      }
+      return { ok: true };
+    } finally {
+      await loadFromApi(true);
+    }
+  };
+
   // The plant already registered on a tag, if any: { id, registered_by, observations }.
   const findSpecimenByQr = async (qr_id) => {
     const res = await callApi(findSpecimenByQrApi, qr_id);
@@ -1156,11 +1193,16 @@ function collectionMatches(a = [], b = []) {
     }
   };
 
+  // Returns true when saved.
   const setPlantSpecies = async (plantId, speciesId) => {
     const res = await callApi(updateSpecimenApi, plantId, { species_id: speciesId });
-    if (!res.ok) return notify(`Failed to update species: ${res.message}`);
+    if (!res.ok) {
+      notify(`Failed to update species: ${res.message}`);
+      return false;
+    }
     notify("Species matched");
     await loadFromApi(true);
+    return true;
   };
 
   // Hide this plant's exact spot from visitors and other botanists, whatever its
@@ -1172,6 +1214,26 @@ function collectionMatches(a = [], b = []) {
       return false;
     }
     notify(endangered_override ? "Exact location hidden from the public" : "Location no longer hidden");
+    await loadFromApi(true);
+    return true;
+  };
+
+  // RBAC D17: an officer unpublishes a tagged plant (reason required) or publishes it
+  // again: POST /v1/specimens/:id/publish. Its observations keep their decisions.
+  // Returns true when done.
+  const setPlantPublished = async (plantId, is_published, reason) => {
+    if (!can(role, "publishPlants")) return false;
+    const res = await callApi(setSpecimenPublishedApi, plantId, is_published, reason ? reason.trim() : undefined);
+    if (!res.ok) {
+      notify(
+        res.code === "WRONG_STATUS" ? "Someone already changed this plant. Showing the latest."
+        : res.code === "REVIEW_IN_PROGRESS" || res.code === "NOTHING_APPROVED" ? res.message
+        : `Could not ${is_published ? "publish" : "unpublish"} the plant: ${res.message}`
+      );
+      await loadFromApi(true);
+      return false;
+    }
+    notify(is_published ? "Plant published again" : "Plant unpublished. Visitors can no longer see it.");
     await loadFromApi(true);
     return true;
   };
@@ -1869,7 +1931,7 @@ function collectionMatches(a = [], b = []) {
     logout, login, signIn, changePassword, resetPassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
-    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, retagPlant,
+    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, setPlantPublished, setObservationPhotos, retagPlant,
     syncObservation, resubmit, reviewObservation, addComment,
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,

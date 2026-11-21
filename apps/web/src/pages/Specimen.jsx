@@ -20,15 +20,31 @@ import { fmtDate, fmtDateTime, label } from "../../../shared/utils.js";
 
 const height = (cm) => (cm == null ? "-" : cm >= 100 ? `${(cm / 100).toFixed(cm % 10 ? 2 : 1)} m` : `${cm} cm`);
 
-// One tagged plant (a specimen): the page a QR tag opens.
+// The newest "return" decision on an observation: why it was sent back.
+const lastReturn = (db, obsId) =>
+  db.reviews.filter((r) => r.observation_id === obsId && r.decision === "return").sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null;
+
+const scrollToReview = () => document.getElementById("review-card")?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+// One tagged plant (a specimen): the page a QR tag opens (#/tag/<qr>, and #/dashboard/<qr>).
 // Tabs: Overview and Photos for everyone; Visits, Sensor and Discussion for staff.
+//
+// Publishing (RBAC D17, D18), officers only:
+//   waiting for review  -> the review card: approve, return or reject.
+//   published           -> "Unpublish plant" (reason required). No review option.
+//   unpublished         -> "Review tag" opens review mode: species, photos and the
+//                          hide-location switch are a draft, saved together, or sent back
+//                          to the botanist with a reason. "Publish again" is a separate,
+//                          deliberate step; nothing publishes the plant by itself.
 export default function Specimen({ qr }) {
-  const { db, me, role, setPlantPhotos, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, retagPlant, reviewObservation, notify } = useStore();
+  const { db, me, role, setPlantPhotos, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, setPlantPublished, retagPlant, reviewObservation, notify } = useStore();
   const staff = can(role, "pending");
   const canReview = can(role, "review");
+  const canPublish = can(role, "publishPlants");
   const [tab, setTab] = useState("overview");
   const [editing, setEditing] = useState(false);
-  const [showReviewPanel, setShowReviewPanel] = useState(false);
+  const [reviewing, setReviewing] = useState(false); // review mode on an unpublished plant
+  const [unpublishing, setUnpublishing] = useState(false); // reason box open
   const [qrBig, setQrBig] = useState(false); // QR code enlarged for scanning
   const [retagging, setRetagging] = useState(false); // RBAC D13: "Move to a new tag" popup
   const [decided, setDecided] = useState(null); // the decision just made here, for the "done" panel
@@ -52,9 +68,21 @@ export default function Specimen({ qr }) {
   const visits = plantVisits(db, plant.id, role);
   const plantObs = db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => (b.observed_at || "").localeCompare(a.observed_at || ""));
   const pendingObs = plantObs.find((o) => o.status === "synced");
-  const canEditPhotos = can(role, "editPhotos") && (role !== "botanist" || !pendingObs);
-  const activeObsForReview = pendingObs || (showReviewPanel ? plantObs[0] : null);
+  // Botanists only get their own unfinished observations (RBAC D16), so another
+  // botanist never sees that a plant was sent back.
+  const returnedObs = plantObs.find((o) => o.status === "returned");
+  const approvedObs = plantObs.find((o) => o.status === "approved"); // the newest approved one
+  const withdrawn = plant.withdrawn;
+  const published = plant.status === "approved" && !withdrawn;
+  const sentBack = withdrawn && returnedObs ? lastReturn(db, returnedObs.id) : null;
+  const reviewOpen = reviewing && withdrawn && canReview && !pendingObs;
+  // Botanists fix photos on their own records; officers change them only while reviewing.
+  const canEditPhotos = role === "botanist" ? can(role, "editPhotos") && !pendingObs : canReview && !!pendingObs;
   const speciesList = db.species.filter((s) => !s.is_deleted);
+
+  // The one status shown in the header. Once unpublished, "Published" is never shown.
+  const stage = pendingObs ? "synced" : withdrawn ? (returnedObs ? "returned" : "unpublished") : plant.status;
+  const stageText = stage === "returned" && withdrawn ? (role === "botanist" ? "Sent back for review" : "Sent back to botanist") : undefined;
 
   const first = visits[visits.length - 1];
   const updated = lastUpdated(db, plant, role);
@@ -90,6 +118,32 @@ export default function Specimen({ qr }) {
     if (ok && (await setPlantDeleted(plant.id, true))) go("/dashboard/all");
   };
 
+  // RBAC D17: publishing again is its own step, with a typed word, so the officer
+  // knows the plant goes back in front of visitors.
+  const blockedPublish = pendingObs
+    ? "An observation is waiting for review. Decide it first."
+    : returnedObs
+    ? "The plant is with the botanist. Wait for them to resend it, then review it."
+    : !approvedObs
+    ? "No observation is approved yet."
+    : "";
+  const publishAgain = async () => {
+    if (blockedPublish) return notify(blockedPublish);
+    const ok = await ask({
+      title: "Publish again",
+      confirmLabel: "Publish again",
+      word: "PUBLISH",
+      body: (
+        <>
+          <p>Put <b>{plant.qr_id}</b> back in the plant library, on the public map and on its QR page? Visitors will be able to see it.</p>
+          {plant.lat != null && <p className="mute small">{plant.endangered ? "Its exact location stays hidden from the public." : "Its exact location will be shown on the public map."}</p>}
+          {plant.species && !plant.species.is_published && <p className="mute small">Its species is not published yet, so visitors will not see it until the species is.</p>}
+        </>
+      ),
+    });
+    if (ok) await setPlantPublished(plant.id, true);
+  };
+
   return (
     <>
       {confirmDialog}
@@ -105,7 +159,7 @@ export default function Specimen({ qr }) {
         <div className="grow">
           {staff && (
             <p className="row wrap">
-              <Chip value={plant.status} />
+              <Chip value={stage}>{stageText}</Chip>
               {plant.species && <Chip value={plant.conservation} />}
             </p>
           )}
@@ -121,13 +175,24 @@ export default function Specimen({ qr }) {
           </p>
         </div>
         <div className="row wrap">
-          {canReview && (
-            <button
-              type="button"
-              className={`btn ${pendingObs ? "" : "ghost"}`}
-              onClick={() => setShowReviewPanel(!showReviewPanel)}
-            >
-              <Icon name="clipboard" size={16} /> {pendingObs ? "Review record (Action needed)" : showReviewPanel ? "Hide review" : "Review tag"}
+          {canReview && pendingObs && (
+            <button type="button" className="btn" onClick={scrollToReview}>
+              <Icon name="clipboard" size={16} /> Review record (Action needed)
+            </button>
+          )}
+          {canReview && withdrawn && !pendingObs && !reviewOpen && (
+            <button type="button" className="btn" onClick={() => { setDecided(null); setReviewing(true); }}>
+              <Icon name="clipboard" size={16} /> Review tag
+            </button>
+          )}
+          {canPublish && withdrawn && (
+            <button type="button" className="btn ghost" onClick={publishAgain} aria-disabled={!!blockedPublish} title={blockedPublish || undefined}>
+              <Icon name="eye" size={16} /> Publish again
+            </button>
+          )}
+          {canPublish && published && !unpublishing && (
+            <button type="button" className="btn ghost" onClick={() => setUnpublishing(true)}>
+              <Icon name="eyeOff" size={16} /> Unpublish plant
             </button>
           )}
           {coords && <a className="btn ghost" href={"#/map/" + plant.qr_id}><Icon name="pin" size={16} /> Show on map</a>}
@@ -149,6 +214,36 @@ export default function Specimen({ qr }) {
         />
       )}
 
+      {/* RBAC D17: why the plant is off public view. Staff only; visitors just get "not published". */}
+      {staff && withdrawn && (
+        <div className="callout" role="status">
+          <p><Icon name="eyeOff" size={16} /> <b>Unpublished.</b> {plant.withdrawn_reason || "No reason was given."}</p>
+          <p className="mute small">
+            By {nameOf(db, plant.withdrawn_by)} on {fmtDateTime(plant.withdrawn_at)}. Visitors cannot see this plant.
+            {canPublish && " Use Review tag to change it or send it back to the botanist. It stays unpublished until you press Publish again."}
+          </p>
+        </div>
+      )}
+
+      {/* RBAC D18: sent back to the botanist while unpublished. */}
+      {sentBack && returnedObs.recorded_by === me?.id && role === "botanist" && (
+        <div className="callout" role="status">
+          <p><Icon name="undo" size={16} /> <b>Sent back for review.</b> {sentBack.comment || "Please check this record."}</p>
+          <p className="mute small">From {nameOf(db, sentBack.reviewer_id)} on {fmtDateTime(sentBack.created_at)}. Fix your observation of {fmtDate(returnedObs.observed_at)} and send it again. An officer reviews it before the plant can be published again.</p>
+          <p><a className="btn" href="#/records"><Icon name="send" size={18} /> Fix and resend</a></p>
+        </div>
+      )}
+      {sentBack && role !== "botanist" && (
+        <div className="callout" role="status">
+          <p><Icon name="undo" size={16} /> <b>Sent back to {nameOf(db, returnedObs.recorded_by)}.</b> {sentBack.comment}</p>
+          <p className="mute small">By {nameOf(db, sentBack.reviewer_id)} on {fmtDateTime(sentBack.created_at)}. Waiting for the botanist to fix and resend it; it then comes back to the review queue.</p>
+        </div>
+      )}
+
+      {canPublish && unpublishing && published && (
+        <UnpublishPanel plant={plant} ask={ask} notify={notify} setPlantPublished={setPlantPublished} onClose={() => setUnpublishing(false)} />
+      )}
+
       {/* Saved without its record (an earlier send failed half-way): only the botanist who tagged it can finish it. */}
       {visits.length === 0 && me?.id === plant.registered_by && can(role, "add") && (
         <div className="callout">
@@ -160,10 +255,17 @@ export default function Specimen({ qr }) {
       {/* After a decision: say what happened and offer the way back. */}
       {decided && (
         <section className="reviewdone" role="status">
-          <span className="reviewdone-ic"><Icon name={decided === "approve" ? "check" : decided === "return" ? "undo" : "x"} size={22} /></span>
+          <span className="reviewdone-ic"><Icon name={decided === "approve" ? "check" : decided === "reject" ? "x" : "undo"} size={22} /></span>
           <div className="grow">
-            <b>{decided === "approve" ? "Approved and published" : decided === "return" ? "Returned to the botanist" : "Record rejected"}</b>
-            <p className="mute small">{plant.qr_id} is done. Go back to where you were, or open the next record.</p>
+            <b>
+              {decided === "approve" ? (withdrawn ? "Approved. The plant stays unpublished." : "Approved and published")
+                : decided === "return" ? "Returned to the botanist"
+                : decided === "sentBack" ? "Sent back to the botanist"
+                : "Record rejected"}
+            </b>
+            <p className="mute small">
+              {decided === "approve" && withdrawn ? "Press Publish again when it is ready for visitors." : `${plant.qr_id} is done. Go back to where you were, or open the next record.`}
+            </p>
           </div>
           <div className="row wrap">
             <BackButton fallback="/review" label="Back to previous page" className="btn" />
@@ -172,10 +274,10 @@ export default function Specimen({ qr }) {
         </section>
       )}
 
-      {/* Officer review panel displayed directly on the tag's page */}
-      {canReview && (pendingObs || showReviewPanel) && activeObsForReview && (
+      {/* An observation waiting for review: approve, return or reject it here. */}
+      {canReview && pendingObs && (
         <OfficerReviewCard
-          obs={activeObsForReview}
+          obs={pendingObs}
           rawPlant={rawPlant}
           plant={plant}
           speciesList={speciesList}
@@ -183,8 +285,27 @@ export default function Specimen({ qr }) {
           setPlantSpecies={setPlantSpecies}
           setPlantLocationHidden={setPlantLocationHidden}
           notify={notify}
-          onClose={() => setShowReviewPanel(false)}
           onDecided={setDecided}
+        />
+      )}
+
+      {/* RBAC D18: review mode on an unpublished plant. */}
+      {reviewOpen && (
+        <ReviewModePanel
+          key={plant.id}
+          plant={plant}
+          rawPlant={rawPlant}
+          approvedObs={approvedObs}
+          returnedObs={returnedObs}
+          botanist={approvedObs ? nameOf(db, approvedObs.recorded_by) : ""}
+          speciesList={speciesList}
+          notify={notify}
+          setPlantSpecies={setPlantSpecies}
+          setPlantLocationHidden={setPlantLocationHidden}
+          setPlantPhotos={setPlantPhotos}
+          reviewObservation={reviewObservation}
+          onClose={() => setReviewing(false)}
+          onSentBack={() => { setReviewing(false); setDecided("sentBack"); }}
         />
       )}
 
@@ -217,19 +338,7 @@ export default function Specimen({ qr }) {
             </div>
           )}
 
-          {active === "visits" && (
-            <Visits
-              db={db}
-              visits={visits}
-              photos={plant.photos}
-              rawPlant={rawPlant}
-              canReview={canReview}
-              speciesList={speciesList}
-              reviewObservation={reviewObservation}
-              setPlantSpecies={setPlantSpecies}
-              notify={notify}
-            />
-          )}
+          {active === "visits" && <Visits db={db} visits={visits} photos={plant.photos} canReview={canReview} />}
 
           {active === "photos" && (
             plant.photos.length ? (
@@ -277,7 +386,9 @@ export default function Specimen({ qr }) {
                 {plant.location_reduced
                   ? <p className="mute small">{REDUCED_LOCATION_NOTE}</p>
                   : plant.gps_accuracy_m != null && <p className="mute small">GPS accuracy ±{plant.gps_accuracy_m} m</p>}
-                {can(role, "hideLocation") && (
+                {/* RBAC D15: officers and admins. While an officer has a review open (the review card
+                    for a waiting observation, or review mode), the switch is part of that review instead. */}
+                {can(role, "hideLocation") && !(canReview && (pendingObs || reviewOpen)) && (
                   <label className="check hidespot gap-top-s">
                     <input
                       type="checkbox"
@@ -350,13 +461,286 @@ export default function Specimen({ qr }) {
   );
 }
 
-// Inline review card on the tag's page for officers
-function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onClose, onDecided }) {
+// The botanist's guess, and a one-click "use it" when it matches a species in the catalogue.
+function SpeciesGuess({ proposed, speciesId, speciesList, onPick }) {
+  if (!proposed) return null;
+  const needle = proposed.trim().toLowerCase();
+  const match = !speciesId && speciesList.find(
+    (s) => s.scientific_name.toLowerCase() === needle ||
+           (s.common_name && s.common_name.toLowerCase() === needle) ||
+           needle.includes(s.scientific_name.toLowerCase()) ||
+           s.scientific_name.toLowerCase().includes(needle)
+  );
+  return (
+    <div className="row wrap gap-top-xs" style={{ alignItems: "center" }}>
+      <p className="mute small" style={{ margin: 0 }}>Botanist's guess: <Sci>{proposed}</Sci></p>
+      {match && (
+        <button type="button" className="btn ghost small-btn" onClick={() => onPick(match.id)}>
+          Use guess: {match.scientific_name}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function SpeciesSelect({ value, speciesList, onChange, hint }) {
+  return (
+    <label>
+      Confirm species {hint && <span className="hint">{hint}</span>}
+      <select value={value || ""} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Not confirmed</option>
+        {speciesList.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.scientific_name}{s.common_name ? ` (${s.common_name})` : ""}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+// RBAC D17: take a published plant off public view. Reason first, then a typed word,
+// like approving (both change what the public sees).
+function UnpublishPanel({ plant, ask, notify, setPlantPublished, onClose }) {
+  const [reason, setReason] = useState("");
+  const submit = async () => {
+    if (!reason.trim()) return notify("Add a reason so the botanist knows why");
+    const ok = await ask({
+      title: "Unpublish plant",
+      confirmLabel: "Unpublish",
+      danger: true,
+      word: "UNPUBLISH",
+      body: <p>Take <b>{plant.qr_id}</b> off public view? Visitors will no longer find it in the plant library, on the map or by scanning its tag. The botanist is told why.</p>,
+    });
+    if (ok && (await setPlantPublished(plant.id, false, reason))) onClose();
+  };
+  return (
+    <section className="glass pad gap-bottom-s">
+      <h2 style={{ marginTop: 0, fontSize: 18 }}><Icon name="eyeOff" size={18} /> Unpublish {plant.qr_id}</h2>
+      <p className="mute small">Hides the whole plant from visitors. Its observations keep their decisions. Once it is unpublished you can review it (change the species, photos or location setting, or send it back to the botanist), then publish it again.</p>
+      <div className="field gap-bottom-s">
+        <label>
+          Reason <span className="hint">(sent to the botanist)</span>
+          <textarea rows="2" maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="For example: wrong species on the tag" />
+        </label>
+      </div>
+      <div className="row wrap">
+        <button className="btn danger" type="button" onClick={submit}><Icon name="eyeOff" size={18} /> Unpublish</button>
+        <button className="btn ghost" type="button" onClick={onClose}>Cancel</button>
+      </div>
+    </section>
+  );
+}
+
+const PHOTO_CAPTION_MAX = 200; // the API's limit (PhotoCaption in services/api/src/field.js)
+
+// RBAC D18: review mode on an unpublished plant. The officer changes a draft
+// (species, photos, hide-location switch); nothing is saved until "Save changes"
+// or "Send back to botanist". The plant stays unpublished either way.
+function ReviewModePanel({ plant, rawPlant, approvedObs, returnedObs, botanist, speciesList, notify, setPlantSpecies, setPlantLocationHidden, setPlantPhotos, reviewObservation, onClose, onSentBack }) {
+  const [speciesId, setSpeciesId] = useState(rawPlant?.species_id || null);
+  const [hideChoice, setHideChoice] = useState(null); // null until the officer changes it
+  const [captions, setCaptions] = useState({}); // photo id -> edited caption
+  const [removed, setRemoved] = useState(() => new Set()); // photo ids marked for removal
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [ask, confirmDialog] = useConfirm();
+
+  const species = speciesList.find((s) => s.id === speciesId) || null;
+  const hideRule = hideLocationRule(species?.conservation_status, rawPlant?.endangered_override, hideChoice);
+  const speciesChanged = (speciesId || null) !== (rawPlant?.species_id || null);
+  const hideChanged = plant.lat != null && !hideRule.locked && hideRule.on !== !!rawPlant?.endangered_override;
+  const captionOf = (ph) => (ph.id in captions ? captions[ph.id] : ph.caption || "");
+  const captionsChanged = plant.photos.some((ph) => !removed.has(ph.id) && captionOf(ph).trim() !== (ph.caption || "").trim());
+  const photosChanged = removed.size > 0 || captionsChanged;
+  const kept = plant.photos.filter((ph) => !removed.has(ph.id));
+  const changes = [
+    speciesChanged && "the species",
+    removed.size > 0 && `remove ${removed.size} ${removed.size === 1 ? "photo" : "photos"}`,
+    captionsChanged && "photo captions",
+    hideChanged && (hideRule.on ? "hide the exact location" : "show the exact location"),
+  ].filter(Boolean);
+  const dirty = changes.length > 0;
+  // Only an approved observation can be sent back, and only one at a time.
+  const canSendBack = !!approvedObs && !returnedObs;
+
+  const toggleRemoved = (id) => {
+    const next = new Set(removed);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setRemoved(next);
+  };
+
+  // Save the draft, species first (it decides whether the location is always hidden).
+  const applyDraft = async () => {
+    if (speciesChanged && !(await setPlantSpecies(rawPlant.id, speciesId))) return false;
+    if (hideChanged && !(await setPlantLocationHidden(rawPlant.id, hideRule.on))) return false;
+    if (photosChanged) {
+      const res = await setPlantPhotos(plant.id, kept.map((ph) => ({ ...ph, caption: captionOf(ph) })));
+      if (!res.ok) {
+        notify(res.message);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const changeList = dirty && <p>Changes: {changes.join(", ")}.</p>;
+
+  const save = async () => {
+    if (!dirty) return notify("Nothing to save yet");
+    const ok = await ask({
+      title: "Save changes",
+      confirmLabel: "Save changes",
+      danger: removed.size > 0,
+      body: <>{changeList}{removed.size > 0 && <p className="mute small">Removed photos are deleted for good.</p>}<p className="mute small">{plant.qr_id} stays unpublished until you press Publish again.</p></>,
+    });
+    if (!ok) return;
+    setBusy(true);
+    const saved = await applyDraft();
+    setBusy(false);
+    if (saved) {
+      notify("Changes saved. The plant is still unpublished.");
+      onClose();
+    }
+  };
+
+  const sendBack = async () => {
+    if (!canSendBack) return;
+    if (!reason.trim()) return notify("Add a reason so the botanist knows what to fix");
+    const ok = await ask({
+      title: "Send back to botanist",
+      confirmLabel: "Send back",
+      body: (
+        <>
+          <p>Send <b>{plant.qr_id}</b> back to {botanist || "the botanist"}? Their observation of {fmtDate(approvedObs.observed_at)} goes back to them with your reason, and they see it as <b>sent back for review</b>.</p>
+          {changeList}
+          <p className="mute small">When they resend it, it comes back to the review queue. The plant stays unpublished until you press Publish again.</p>
+        </>
+      ),
+    });
+    if (!ok) return;
+    setBusy(true);
+    const saved = await applyDraft();
+    const res = saved ? await reviewObservation(approvedObs.id, "return", reason.trim()) : { ok: false };
+    setBusy(false);
+    if (res.ok) onSentBack();
+  };
+
+  const discard = async () => {
+    if (dirty && !(await ask({ title: "Discard changes", confirmLabel: "Discard", danger: true, body: "Throw away the changes you made in review mode? Nothing has been saved." }))) return;
+    onClose();
+  };
+
+  return (
+    <section id="review-card" className="glass pad gap-bottom-s reviewmode">
+      {confirmDialog}
+      <header className="rv-head">
+        <div className="row wrap" style={{ alignItems: "center", gap: 10 }}>
+          <Icon name="clipboard" size={20} />
+          <h2>Review mode · {plant.qr_id}</h2>
+          <Chip value="unpublished" />
+          <span className={"rv-state" + (dirty ? " on" : "")}>{dirty ? `Unsaved: ${changes.join(", ")}` : "No changes yet"}</span>
+        </div>
+        <p className="mute small">Changes here are a draft. They are saved only when you press Save changes or Send back to botanist. The plant stays unpublished either way.</p>
+      </header>
+
+      <section className="rv-sec" aria-labelledby="rv-species">
+        <h3 id="rv-species"><span className="rv-num">1</span> Species</h3>
+        <div className="rv-species">
+          <SpeciesSelect value={speciesId} speciesList={speciesList} onChange={setSpeciesId} />
+          <div className="row wrap" style={{ alignItems: "center", gap: 12 }}>
+            <NewSpeciesButton guess={rawPlant?.proposed_species} onCreated={(s) => setSpeciesId(s.id)} />
+          </div>
+          <SpeciesGuess proposed={rawPlant?.proposed_species} speciesId={speciesId} speciesList={speciesList} onPick={setSpeciesId} />
+        </div>
+      </section>
+
+      <section className="rv-sec" aria-labelledby="rv-photos">
+        <h3 id="rv-photos">
+          <span className="rv-num">2</span> Photos
+          <span className="mute small">{kept.length} of {plant.photos.length} kept</span>
+        </h3>
+        {/* RBAC D1: only botanists add observation photos. */}
+        <p className="mute small" style={{ margin: 0 }}>Edit a caption or remove a photo. To add a new photo, send the plant back and ask the botanist for it.</p>
+        {plant.photos.length ? (
+          <ul className="plain rv-photos">
+            {plant.photos.map((ph, i) => {
+              const gone = removed.has(ph.id);
+              return (
+                <li key={ph.id} className={"rv-photo" + (gone ? " removed" : "")}>
+                  <Img src={ph.url} alt={`Photo ${i + 1} of ${plant.qr_id}`} />
+                  {gone ? (
+                    <p className="mute small">Will be removed when you save.</p>
+                  ) : (
+                    <label className="rv-cap">
+                      <span className="sr">Caption for photo {i + 1}</span>
+                      <textarea rows="2" maxLength={PHOTO_CAPTION_MAX} value={captionOf(ph)} placeholder="Caption (optional)" onChange={(e) => setCaptions({ ...captions, [ph.id]: e.target.value })} />
+                    </label>
+                  )}
+                  <button type="button" className={"btn small-btn " + (gone ? "" : "ghost")} onClick={() => toggleRemoved(ph.id)}>
+                    <Icon name={gone ? "undo" : "trash"} size={14} /> {gone ? "Undo" : "Remove"}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="mute">No photos on this plant.</p>
+        )}
+      </section>
+
+      {plant.lat != null && (
+        <section className="rv-sec" aria-labelledby="rv-location">
+          <h3 id="rv-location"><span className="rv-num">3</span> Location</h3>
+          <label className="check hidespot">
+            <input type="checkbox" checked={hideRule.on} disabled={hideRule.locked} onChange={(e) => setHideChoice(e.target.checked)} />
+            <span>
+              <b>{HIDE_LOCATION_LABEL}</b>
+              <small className="mute block">{hideRule.hint}</small>
+            </span>
+          </label>
+        </section>
+      )}
+
+      <section className="rv-sec" aria-labelledby="rv-back">
+        <h3 id="rv-back"><span className="rv-num">{plant.lat != null ? 4 : 3}</span> Send back to the botanist <span className="mute small">(optional)</span></h3>
+        {canSendBack ? (
+          <label className="rv-reason">
+            <span className="mute small">Only needed to send it back. {botanist || "The botanist"} sees this reason.</span>
+            <textarea rows="3" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="What should the botanist fix?" />
+          </label>
+        ) : (
+          <p className="mute">{returnedObs ? "Already sent back. Waiting for the botanist to resend it." : "No approved observation to send back."}</p>
+        )}
+      </section>
+
+      <div className="decide row wrap">
+        <button className="btn" type="button" onClick={save} disabled={busy || !dirty}>
+          <Icon name="check" size={18} /> Save changes
+        </button>
+        {canSendBack && (
+          <button className="btn ghost" type="button" onClick={sendBack} disabled={busy}>
+            <Icon name="undo" size={18} /> Send back to botanist
+          </button>
+        )}
+        <button className="btn ghost" type="button" onClick={discard} disabled={busy}>
+          <Icon name="x" size={18} /> {dirty ? "Discard changes" : "Close"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// The review card for an observation waiting for review (status synced).
+function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onDecided }) {
   const [comment, setComment] = useState("");
   const [hideChoice, setHideChoice] = useState(null); // null until the officer changes it
+  const [busy, setBusy] = useState(false);
   const [ask, confirmDialog] = useConfirm();
-  const isPending = obs.status === "synced";
   const hideRule = hideLocationRule(plant.species?.conservation_status, rawPlant?.endangered_override, hideChoice);
+  // RBAC D17: approving an unpublished plant's observation does not publish it.
+  const staysUnpublished = plant.withdrawn;
 
   const handleDecide = async (decision) => {
     if (decision !== "approve" && !comment.trim()) {
@@ -365,25 +749,20 @@ function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservatio
     if (decision === "approve" && !rawPlant?.species_id) {
       return notify("Confirm the species before approving");
     }
-    if (!(await ask(decisionPrompt(decision, plant.qr_id, { hidden: hideRule.on, hasCoords: rawPlant?.lat != null, speciesPublished: plant.species?.is_published })))) return;
+    if (!(await ask(decisionPrompt(decision, plant.qr_id, { hidden: hideRule.on, hasCoords: rawPlant?.lat != null, speciesPublished: plant.species?.is_published, unpublished: staysUnpublished })))) return;
+    setBusy(true);
     if (decision === "approve" && !hideRule.locked && hideRule.on !== !!rawPlant.endangered_override) {
-      if (!(await setPlantLocationHidden(rawPlant.id, hideRule.on))) return;
+      if (!(await setPlantLocationHidden(rawPlant.id, hideRule.on))) return setBusy(false);
     }
-    reviewObservation(obs.id, decision, comment.trim());
-    notify(
-      decision === "approve"
-        ? "Record approved and published"
-        : decision === "return"
-        ? "Record returned to the botanist"
-        : "Record rejected"
-    );
+    const res = await reviewObservation(obs.id, decision, comment.trim());
+    setBusy(false);
+    if (!res?.ok) return;
     setComment("");
     onDecided?.(decision);
-    if (onClose) onClose();
   };
 
   return (
-    <section className="glass pad gap-bottom-s" style={{ border: "2px solid var(--acc)", borderRadius: "var(--r-card, 16px)", background: "var(--sunken)" }}>
+    <section id="review-card" className="glass pad gap-bottom-s" style={{ border: "2px solid var(--acc)", borderRadius: "var(--r-card, 16px)", background: "var(--sunken)" }}>
       {confirmDialog}
       <div className="row between wrap gap-bottom-s" style={{ alignItems: "center" }}>
         <div className="row wrap" style={{ alignItems: "center", gap: 8 }}>
@@ -391,60 +770,16 @@ function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservatio
           <h2 style={{ margin: 0, fontSize: 18 }}>Officer Review · {plant.qr_id}</h2>
           <span className="mute small">(Observation v{obs.version || 1})</span>
         </div>
-        <div className="row wrap" style={{ alignItems: "center", gap: 8 }}>
-          <Chip value={obs.status} />
-          {onClose && (
-            <button className="ic" onClick={onClose} aria-label="Close review panel">
-              <Icon name="x" size={16} />
-            </button>
-          )}
-        </div>
+        <Chip value={obs.status} />
       </div>
 
       <div className="field gap-bottom-s">
-        <label>
-          Confirm species {isPending && <span className="hint">(confirm before approving)</span>}
-          <select
-            value={rawPlant?.species_id || ""}
-            onChange={(e) => setPlantSpecies(rawPlant.id, e.target.value || null)}
-          >
-            <option value="">Not confirmed</option>
-            {speciesList.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.scientific_name}{s.common_name ? ` (${s.common_name})` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-        {isPending && <NewSpeciesButton guess={rawPlant?.proposed_species} onCreated={(s) => setPlantSpecies(rawPlant.id, s.id)} />}
-        {rawPlant?.proposed_species && (
-          <div className="row wrap gap-top-xs" style={{ alignItems: "center" }}>
-            <p className="mute small" style={{ margin: 0 }}>
-              Botanist's guess: <Sci>{rawPlant.proposed_species}</Sci>
-            </p>
-            {!rawPlant?.species_id && (() => {
-              const needle = rawPlant.proposed_species.trim().toLowerCase();
-              const match = speciesList.find(
-                (s) => s.scientific_name.toLowerCase() === needle ||
-                       (s.common_name && s.common_name.toLowerCase() === needle) ||
-                       needle.includes(s.scientific_name.toLowerCase()) ||
-                       s.scientific_name.toLowerCase().includes(needle)
-              );
-              return match ? (
-                <button
-                  type="button"
-                  className="btn ghost small-btn"
-                  onClick={() => setPlantSpecies(rawPlant.id, match.id)}
-                >
-                  Use guess: {match.scientific_name}
-                </button>
-              ) : null;
-            })()}
-          </div>
-        )}
+        <SpeciesSelect value={rawPlant?.species_id} speciesList={speciesList} onChange={(id) => setPlantSpecies(rawPlant.id, id)} hint="(confirm before approving)" />
+        <NewSpeciesButton guess={rawPlant?.proposed_species} onCreated={(s) => setPlantSpecies(rawPlant.id, s.id)} />
+        <SpeciesGuess proposed={rawPlant?.proposed_species} speciesId={rawPlant?.species_id} speciesList={speciesList} onPick={(id) => setPlantSpecies(rawPlant.id, id)} />
       </div>
 
-      {isPending && plant.lat != null && (
+      {plant.lat != null && (
         <label className="check hidespot gap-bottom-s">
           <input type="checkbox" checked={hideRule.on} disabled={hideRule.locked} onChange={(e) => setHideChoice(e.target.checked)} />
           <span>
@@ -466,14 +801,15 @@ function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservatio
         </label>
       </div>
 
+      {staysUnpublished && <p className="mute small gap-bottom-s">This plant is unpublished. Approving does not publish it; press Publish again afterwards when it is ready.</p>}
       <div className="decide row wrap">
-        <button className="btn" type="button" onClick={() => handleDecide("approve")}>
-          <Icon name="check" size={18} /> Approve &amp; publish
+        <button className="btn" type="button" onClick={() => handleDecide("approve")} disabled={busy}>
+          <Icon name="check" size={18} /> {staysUnpublished ? "Approve" : <>Approve &amp; publish</>}
         </button>
-        <button className="btn ghost" type="button" onClick={() => handleDecide("return")}>
+        <button className="btn ghost" type="button" onClick={() => handleDecide("return")} disabled={busy}>
           <Icon name="undo" size={18} /> Return for changes
         </button>
-        <button className="btn danger" type="button" onClick={() => handleDecide("reject")}>
+        <button className="btn danger" type="button" onClick={() => handleDecide("reject")} disabled={busy}>
           <Icon name="x" size={18} /> Reject
         </button>
       </div>
@@ -481,45 +817,19 @@ function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservatio
   );
 }
 
-// Height chart plus one card per visit (observation), newest first.
-function Visits({ db, visits, photos, rawPlant, canReview, speciesList, reviewObservation, setPlantSpecies, notify }) {
-  const [reviewingId, setReviewingId] = useState(null);
-  const [commentsById, setCommentsById] = useState({});
-  const [ask, confirmDialog] = useConfirm();
-
+// Height chart plus one card per visit (observation), newest first. Read-only:
+// decisions are made in the review card at the top of the page.
+function Visits({ db, visits, photos, canReview }) {
   if (!visits.length) return <div className="glass pad"><Empty>No visits recorded yet.</Empty></div>;
   const withHeight = [...visits].reverse().filter((v) => v.height_cm != null);
 
-  const handleVisitDecide = async (obsId, decision) => {
-    const comment = commentsById[obsId] || "";
-    if (decision !== "approve" && !comment.trim()) {
-      return notify("Add a note so the botanist knows why");
-    }
-    if (decision === "approve" && !rawPlant?.species_id) {
-      return notify("Confirm the species before approving");
-    }
-    if (!(await ask(decisionPrompt(decision, rawPlant?.qr_id || "this record", { hasCoords: false, speciesPublished: rawPlant?.species?.is_published ?? true })))) return;
-    reviewObservation(obsId, decision, comment.trim());
-    notify(
-      decision === "approve"
-        ? "Record approved and published"
-        : decision === "return"
-        ? "Record returned to the botanist"
-        : "Record rejected"
-    );
-    setCommentsById({ ...commentsById, [obsId]: "" });
-    setReviewingId(null);
-  };
-
   return (
     <>
-      {confirmDialog}
       {withHeight.length > 1 && <HeightChart visits={withHeight} />}
       <ol className="timeline">
         {visits.map((v) => {
           const review = db.reviews.filter((r) => r.observation_id === v.id).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
           const pics = photos.filter((p) => p.observation_id === v.id);
-          const isReviewOpen = reviewingId === v.id || v.status === "synced";
 
           return (
             <li key={v.id} className={"tl-" + v.status}>
@@ -531,13 +841,9 @@ function Visits({ db, visits, photos, rawPlant, canReview, speciesList, reviewOb
                   </div>
                   <div className="row wrap" style={{ alignItems: "center", gap: 8 }}>
                     <Chip value={v.status} />
-                    {canReview && v.status !== "synced" && (
-                      <button
-                        type="button"
-                        className="btn ghost small-btn"
-                        onClick={() => setReviewingId(reviewingId === v.id ? null : v.id)}
-                      >
-                        <Icon name="clipboard" size={14} /> {reviewingId === v.id ? "Cancel review" : "Review / Change"}
+                    {canReview && v.status === "synced" && (
+                      <button type="button" className="btn ghost small-btn" onClick={scrollToReview}>
+                        <Icon name="clipboard" size={14} /> Review
                       </button>
                     )}
                   </div>
@@ -545,107 +851,16 @@ function Visits({ db, visits, photos, rawPlant, canReview, speciesList, reviewOb
                 {v.morphology && <p>{v.morphology}</p>}
                 {v.notes && <p className="mute small">{v.notes}</p>}
                 {pics.length > 0 && <div className="row wrap">{pics.map((p) => <Img key={p.id} className="mini" src={p.url} alt="" />)}</div>}
-                
-                <p className="mute small">
-                  {review
-                    ? `${label(review.decision === "approve" ? "approved" : review.decision === "return" ? "returned" : "rejected")} by ${nameOf(db, review.reviewer_id)} on ${fmtDate(review.created_at)}${review.comment ? ` · “${review.comment}”` : ""}`
-                    : v.status === "queued" || v.status === "draft"
-                      ? "Saved on the phone. It goes to review once it syncs."
-                      : "Waiting for an officer to review."}
-                </p>
 
-                {/* Officer review actions right inside visit card */}
-                {canReview && isReviewOpen && (
-                  <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--line)" }}>
-                    <div className="field gap-bottom-s">
-                      <label>
-                        Confirm species
-                        <select
-                          value={rawPlant?.species_id || ""}
-                          onChange={(e) => setPlantSpecies(rawPlant.id, e.target.value || null)}
-                        >
-                          <option value="">Not confirmed</option>
-                          {speciesList.map((s) => (
-                            <option key={s.id} value={s.id}>
-                              {s.scientific_name}{s.common_name ? ` (${s.common_name})` : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      {rawPlant?.proposed_species && (
-                        <div className="row wrap gap-top-xs" style={{ alignItems: "center" }}>
-                          <p className="mute small" style={{ margin: 0 }}>
-                            Botanist's guess: <Sci>{rawPlant.proposed_species}</Sci>
-                          </p>
-                          {!rawPlant?.species_id && (() => {
-                            const needle = rawPlant.proposed_species.trim().toLowerCase();
-                            const match = speciesList.find(
-                              (s) => s.scientific_name.toLowerCase() === needle ||
-                                     (s.common_name && s.common_name.toLowerCase() === needle) ||
-                                     needle.includes(s.scientific_name.toLowerCase()) ||
-                                     s.scientific_name.toLowerCase().includes(needle)
-                            );
-                            return match ? (
-                              <button
-                                type="button"
-                                className="btn ghost small-btn"
-                                onClick={() => setPlantSpecies(rawPlant.id, match.id)}
-                              >
-                                Use guess: {match.scientific_name}
-                              </button>
-                            ) : null;
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                    <div className="field gap-bottom-s">
-                      <label>
-                        Note to the botanist <span className="hint">(needed to return or reject)</span>
-                        <input
-                          value={commentsById[v.id] || ""}
-                          onChange={(e) => setCommentsById({ ...commentsById, [v.id]: e.target.value })}
-                          placeholder="Note or reason..."
-                        />
-                      </label>
-                      {rawPlant?.proposed_species && (
-                        <div className="row wrap gap-top-xs" style={{ alignItems: "center" }}>
-                          <p className="mute small" style={{ margin: 0 }}>
-                            Botanist's guess: <Sci>{rawPlant.proposed_species}</Sci>
-                          </p>
-                          {!rawPlant?.species_id && (() => {
-                            const needle = rawPlant.proposed_species.trim().toLowerCase();
-                            const match = speciesList.find(
-                              (s) => s.scientific_name.toLowerCase() === needle ||
-                                     (s.common_name && s.common_name.toLowerCase() === needle) ||
-                                     needle.includes(s.scientific_name.toLowerCase()) ||
-                                     s.scientific_name.toLowerCase().includes(needle)
-                            );
-                            return match ? (
-                              <button
-                                type="button"
-                                className="btn ghost small-btn"
-                                onClick={() => setPlantSpecies(rawPlant.id, match.id)}
-                              >
-                                Use guess: {match.scientific_name}
-                              </button>
-                            ) : null;
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                    <div className="decide row wrap">
-                      <button className="btn" type="button" onClick={() => handleVisitDecide(v.id, "approve")}>
-                        <Icon name="check" size={16} /> Approve &amp; publish
-                      </button>
-                      <button className="btn ghost" type="button" onClick={() => handleVisitDecide(v.id, "return")}>
-                        <Icon name="undo" size={16} /> Return
-                      </button>
-                      <button className="btn danger" type="button" onClick={() => handleVisitDecide(v.id, "reject")}>
-                        <Icon name="x" size={16} /> Reject
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <p className="mute small">
+                  {v.status === "synced"
+                    ? "Waiting for an officer to review."
+                    : review
+                      ? `${label(review.decision === "approve" ? "approved" : review.decision === "return" ? "returned" : "rejected")} by ${nameOf(db, review.reviewer_id)} on ${fmtDate(review.created_at)}${review.comment ? ` · “${review.comment}”` : ""}`
+                      : v.status === "queued" || v.status === "draft"
+                        ? "Saved on the phone. It goes to review once it syncs."
+                        : "Waiting for an officer to review."}
+                </p>
               </article>
             </li>
           );

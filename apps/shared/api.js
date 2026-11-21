@@ -651,6 +651,9 @@ export const updateSpecimenApi = (id, changes, { token } = {}) => send("PATCH", 
 // RBAC D4: officers only. A deleted plant leaves every list; its tag and records stay.
 export const deleteSpecimenApi = (id, { token } = {}) => send("DELETE", `/specimens/${enc(id)}`, undefined, token);
 export const restoreSpecimenApi = (id, { token } = {}) => send("POST", `/specimens/${enc(id)}/restore`, undefined, token);
+// RBAC D17, officer only: unpublish a tagged plant (reason required) or publish it again.
+export const setSpecimenPublishedApi = (id, is_published, reason, { token } = {}) =>
+  send("POST", `/specimens/${enc(id)}/publish`, reason ? { is_published, reason } : { is_published }, token);
 // RBAC D13: officers only. `old_tag` is "retired" (lost) or "damaged".
 export const retagSpecimenApi = (id, qr_id, old_tag, { token } = {}) => send("POST", `/specimens/${enc(id)}/retag`, { qr_id, old_tag }, token);
 // RBAC: officers on any observation, botanists on their own.

@@ -15,10 +15,10 @@ import { useTheme, font } from '../components/Theme.js';
 import Icon from '../components/Icon.js';
 import LeafletMap from '../components/LeafletMap.js';
 import {
-  Txt, Sci, Mono, Chip, Section, TextLink, Row, Thumb, KV, Button, Empty, Header, IconButton, Screen, Notice, Check,
+  Txt, Sci, Mono, Chip, Section, TextLink, Row, Thumb, KV, Button, Empty, Header, IconButton, Screen, Notice, Check, Area, Field,
 } from '../components/Bits.js';
 import PhotoNote from '../components/PhotoNote.js';
-import { longDate, coords } from '../components/format.js';
+import { longDate, coords, dateTime } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
 import { usePullRefresh } from '../hooks/usePullRefresh.js';
 import { SpeciesFormModal } from './Species.js';
@@ -246,10 +246,48 @@ export function SpeciesProfile({ nav, params }) {
   );
 }
 
+// The newest "return" decision on an observation: why it was sent back.
+const lastReturn = (db, obsId) =>
+  db.reviews.filter((r) => r.observation_id === obsId && r.decision === 'return').sort((a, b) => b.created_at.localeCompare(a.created_at))[0] || null;
+
+// RBAC D17: a change that decides what the public sees needs the officer to type a word,
+// like the website's confirm popups.
+function TypedConfirm({ title, intro, notes = [], word, confirmLabel, icon, danger, reasonLabel, reasonHint, busy, onConfirm, onCancel }) {
+  const { c } = useTheme();
+  const [typed, setTyped] = useState('');
+  const [reason, setReason] = useState('');
+  const [needReason, setNeedReason] = useState(false);
+  const ready = typed.trim().toUpperCase() === word && !busy;
+  const submit = () => {
+    if (reasonLabel && !reason.trim()) return setNeedReason(true);
+    if (ready) onConfirm(reason.trim());
+  };
+  return (
+    <Section title={title} gap={12}>
+      <Txt v="body" style={{ fontSize: 15, lineHeight: 22 }}>{intro}</Txt>
+      {notes.filter(Boolean).map((n) => <Txt key={n} v="caption" color={c.ink2}>{n}</Txt>)}
+      {reasonLabel ? (
+        <View style={{ gap: 6 }}>
+          <Area label={reasonLabel} value={reason} onChangeText={(t) => { setReason(t); setNeedReason(false); }} placeholder={reasonHint} maxLength={1000} />
+          {needReason ? <Txt v="caption" color={c.danger}>Add a reason so the botanist knows why.</Txt> : null}
+        </View>
+      ) : null}
+      <Field label={`Type ${word} to confirm`} value={typed} onChangeText={setTyped} mono autoComplete="off" />
+      <View style={{ flexDirection: 'row', gap: 10 }}>
+        <Button label={busy ? 'Saving…' : confirmLabel} icon={icon} kind={danger ? 'danger' : 'primary'} flex={1.4} disabled={!ready} onPress={submit} />
+        <Button label="Cancel" kind="secondary" flex={1} disabled={busy} onPress={onCancel} />
+      </View>
+    </Section>
+  );
+}
+
 export function TaggedPlant({ nav, params }) {
   usePolling(5000);
-  const { db, role, setPlantLocationHidden } = useStore();
+  const { db, me, role, setPlantLocationHidden, setPlantPublished } = useStore();
   const { c } = useTheme();
+  const [unpublishing, setUnpublishing] = useState(false); // RBAC D17: reason box open
+  const [publishing, setPublishing] = useState(false); // RBAC D17: "Publish again" confirm open
+  const [busy, setBusy] = useState(false);
   const raw = db.plants.find((p) => p.qr_id === params?.qr && !p.is_deleted);
   const p = plantView(db, raw);
   const staff = can(role, 'pending');
@@ -268,6 +306,45 @@ export function TaggedPlant({ nav, params }) {
   const updated = lastUpdated(db, p, role);
   const hideRule = hideLocationRule(p.species?.conservation_status);
 
+  // Publishing (RBAC D17, D18), officers only:
+  //   waiting for review -> "Review this record" (approve, return or reject).
+  //   published          -> "Unpublish plant" (reason required). No review option.
+  //   unpublished        -> "Review tag" (review mode) and "Publish again", a separate step.
+  const canReview = can(role, 'review');
+  const canPublish = can(role, 'publishPlants');
+  const newestFirst = [...obs].reverse();
+  const pendingObs = newestFirst.find((o) => o.status === 'synced');
+  // Botanists only get their own unfinished observations (RBAC D16).
+  const returnedObs = newestFirst.find((o) => o.status === 'returned');
+  const approvedObs = newestFirst.find((o) => o.status === 'approved');
+  const withdrawn = p.withdrawn;
+  const published = p.status === 'approved' && !withdrawn;
+  const sentBack = withdrawn && returnedObs ? lastReturn(db, returnedObs.id) : null;
+  // The one status shown at the top. Once unpublished, "Published" is never shown.
+  const stage = pendingObs ? 'synced' : withdrawn ? (returnedObs ? 'returned' : 'unpublished') : p.status;
+  const stageText = stage === 'returned' && withdrawn ? (role === 'botanist' ? 'Sent back for review' : 'Sent back to botanist') : undefined;
+  const blockedPublish = pendingObs
+    ? 'An observation is waiting for review. Decide it first.'
+    : returnedObs
+    ? 'The plant is with the botanist. Wait for them to resend it, then review it.'
+    : !approvedObs
+    ? 'No observation is approved yet.'
+    : '';
+  // Hiding is safe and saves at once; showing the exact spot to the public is asked first.
+  const changeHidden = (hide) => {
+    if (hide) return setPlantLocationHidden(p.id, true);
+    Alert.alert('Show the exact location?', `Anyone will be able to find ${p.qr_id} on the public map.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Show location', style: 'destructive', onPress: () => setPlantLocationHidden(p.id, false) },
+    ]);
+  };
+  const changePublished = async (isPublished, reason) => {
+    setBusy(true);
+    const ok = await setPlantPublished(p.id, isPublished, reason); // shows its own message
+    setBusy(false);
+    if (ok) { setUnpublishing(false); setPublishing(false); }
+  };
+
   return (
     <Page hero={<Hero photos={p.photos} height={220} onBack={nav.back} />}>
       <View style={{ gap: 6 }}>
@@ -280,7 +357,7 @@ export function TaggedPlant({ nav, params }) {
         </View>
         <Text accessibilityRole="header" style={{ fontFamily: font('display', 700), fontSize: 28, lineHeight: 34, color: c.ink }}>{p.name}</Text>
         {p.scientific ? <Sci size={16}>{p.scientific}{p.species?.family ? ` · ${p.species.family}` : ''}</Sci> : null}
-        {staff ? <View style={{ flexDirection: 'row', gap: 8, paddingTop: 6 }}><Chip status={p.status} />{p.endangered ? <Chip status="endangered" /> : null}</View> : null}
+        {staff ? <View style={{ flexDirection: 'row', gap: 8, paddingTop: 6 }}><Chip status={stage} label={stageText} />{p.endangered ? <Chip status="endangered" /> : null}</View> : null}
       </View>
       {!staff ? (
         <Txt v="body" style={{ lineHeight: 25 }}>
@@ -288,6 +365,67 @@ export function TaggedPlant({ nav, params }) {
             ? `You found tagged plant ${p.qr_id}. It was recorded by park botanists.`
             : `Tag ${p.qr_id} is on a ${p.name} (${p.scientific}). This field observation is currently being verified by park staff.`}
         </Txt>
+      ) : null}
+      {staff && withdrawn ? (
+        <Notice
+          tone="warning"
+          icon="eyeOff"
+          title="Unpublished"
+          body={p.withdrawn_reason || 'No reason was given.'}
+          meta={`By ${nameOf(db, p.withdrawn_by)} on ${dateTime(p.withdrawn_at)}. Visitors cannot see this plant.${canPublish ? ' Use Review tag to change it or send it back to the botanist. It stays unpublished until you press Publish again.' : ''}`}
+        />
+      ) : null}
+      {sentBack && role === 'botanist' && returnedObs.recorded_by === me?.id ? (
+        <View style={{ gap: 10 }}>
+          <Notice
+            tone="warning"
+            icon="undo"
+            title="Sent back for review"
+            body={sentBack.comment || 'Please check this record.'}
+            meta={`From ${nameOf(db, sentBack.reviewer_id)} on ${dateTime(sentBack.created_at)}. Fix your observation of ${longDate(returnedObs.observed_at)} and send it again. An officer reviews it before the plant can be published again.`}
+          />
+          <Button label="Fix and resend" icon="send" onPress={() => nav.go('record', { id: returnedObs.id })} />
+        </View>
+      ) : null}
+      {sentBack && role !== 'botanist' ? (
+        <Notice
+          tone="warning"
+          icon="undo"
+          title={`Sent back to ${nameOf(db, returnedObs.recorded_by)}`}
+          body={sentBack.comment}
+          meta={`By ${nameOf(db, sentBack.reviewer_id)} on ${dateTime(sentBack.created_at)}. Waiting for the botanist to fix and resend it; it then comes back to the review queue.`}
+        />
+      ) : null}
+      {canPublish && published && unpublishing ? (
+        <TypedConfirm
+          title={`Unpublish ${p.qr_id}`}
+          intro="Hides the whole plant from visitors: the plant library, the map and its QR page. Its observations keep their decisions. Once it is unpublished you can review it, then publish it again."
+          reasonLabel="Reason (sent to the botanist)"
+          reasonHint="For example: wrong species on the tag"
+          word="UNPUBLISH"
+          confirmLabel="Unpublish"
+          icon="eyeOff"
+          danger
+          busy={busy}
+          onConfirm={(reason) => changePublished(false, reason)}
+          onCancel={() => setUnpublishing(false)}
+        />
+      ) : null}
+      {canPublish && withdrawn && publishing && !blockedPublish ? (
+        <TypedConfirm
+          title={`Publish ${p.qr_id} again`}
+          intro="Put it back in the plant library, on the public map and on its QR page? Visitors will be able to see it."
+          notes={[
+            p.lat != null ? (p.endangered ? 'Its exact location stays hidden from the public.' : 'Its exact location will be shown on the public map.') : null,
+            p.species && !p.species.is_published ? 'Its species is not published yet, so visitors will not see it until the species is.' : null,
+          ]}
+          word="PUBLISH"
+          confirmLabel="Publish again"
+          icon="eye"
+          busy={busy}
+          onConfirm={() => changePublished(true)}
+          onCancel={() => setPublishing(false)}
+        />
       ) : null}
       <Section title="This plant">
         <KV rows={[
@@ -303,13 +441,14 @@ export function TaggedPlant({ nav, params }) {
         ]} />
         {/* Only when an approximate spot is actually shown: a visitor gets no coordinates at all (RBAC D9). */}
         {p.location_reduced && where ? <Txt v="caption" color={c.ink2}>{REDUCED_LOCATION_NOTE}</Txt> : null}
-        {where && can(role, 'hideLocation') ? (
+        {/* RBAC D15: officers and admins. While an observation waits for review, an officer sets it in that review. */}
+        {where && can(role, 'hideLocation') && !(canReview && pendingObs) ? (
           <Check
             label={HIDE_LOCATION_LABEL}
             hint={hideRule.hint}
             value={p.endangered}
             disabled={hideRule.locked}
-            onChange={(on) => setPlantLocationHidden(p.id, on)}
+            onChange={changeHidden}
           />
         ) : null}
       </Section>
@@ -366,12 +505,20 @@ export function TaggedPlant({ nav, params }) {
             <Button label="Record a revisit" icon="plus" onPress={() => nav.go('revisit', { qr: p.qr_id })} />
           )
         ) : null}
-        {role === 'officer' && (obs.find((o) => o.status === 'synced') || lastObs) ? (
-          <Button
-            label={obs.find((o) => o.status === 'synced') ? 'Review this record' : 'See the decision'}
-            icon="clipboard"
-            onPress={() => nav.go('reviewItem', { id: (obs.find((o) => o.status === 'synced') || lastObs).id })}
-          />
+        {canReview && pendingObs ? (
+          <Button label="Review this record" icon="clipboard" onPress={() => nav.go('reviewItem', { id: pendingObs.id })} />
+        ) : null}
+        {canReview && withdrawn && !pendingObs ? (
+          <Button label="Review tag" icon="clipboard" onPress={() => nav.go('plantReview', { qr: p.qr_id })} />
+        ) : null}
+        {canPublish && withdrawn && !publishing ? (
+          <View style={{ gap: 4 }}>
+            <Button label="Publish again" icon="eye" kind="secondary" disabled={!!blockedPublish} onPress={() => setPublishing(true)} />
+            {blockedPublish ? <Txt v="caption" color={c.ink2}>{blockedPublish}</Txt> : null}
+          </View>
+        ) : null}
+        {canPublish && published && !unpublishing ? (
+          <Button label="Unpublish plant" icon="eyeOff" kind="secondary" onPress={() => setUnpublishing(true)} />
         ) : null}
         {p.species ? <Button label="About this species" kind="secondary" icon="leaf" onPress={() => nav.go('species', { id: p.species.id })} /> : null}
       </View>

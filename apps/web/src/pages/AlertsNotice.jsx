@@ -8,6 +8,7 @@ import { go } from "../useRoute.js";
 // The bell: notifications for the signed-in person (notifications table).
 export default function AlertsNotice() {
   const { db, me, role, markRead, markAllRead } = useStore();
+  const tagOf = (specimenId) => db.plants.find((p) => p.id === specimenId)?.qr_id;
   const mine = db.notifications
     .filter((n) => n.user_id === me?.id)
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -17,6 +18,7 @@ export default function AlertsNotice() {
     markRead(n.id);
     if (n.related_table === "alerts") go("/monitoring");
     else if (n.related_table === "discussions") go("/discussion/" + n.related_id);
+    else if (n.related_table === "specimens" && tagOf(n.related_id)) go("/tag/" + tagOf(n.related_id)); // unpublished / published again
     else if (n.type === "email_rate_limit") go("/users");
     else if (n.type === "comment_reply") go("/discussion/" + n.related_id);
     else if (role === "botanist") go("/records");

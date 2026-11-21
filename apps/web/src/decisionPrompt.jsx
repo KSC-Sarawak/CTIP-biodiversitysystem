@@ -1,7 +1,21 @@
 // apps/web/src/decisionPrompt.jsx
 // Text for the confirm popup shown before an officer approves, returns or rejects a record.
 // Approving puts the plant in front of the public, so it needs a typed word; the others a click.
-export function decisionPrompt(decision, qrId, { hidden = false, hasCoords = true, speciesPublished = true } = {}) {
+// `unpublished`: an officer unpublished the plant (RBAC D17). Approving then does not
+// publish it; the officer presses "Publish again" as a separate step.
+export function decisionPrompt(decision, qrId, { hidden = false, hasCoords = true, speciesPublished = true, unpublished = false } = {}) {
+  if (decision === "approve" && unpublished) {
+    return {
+      title: "Approve",
+      confirmLabel: "Approve",
+      body: (
+        <>
+          <p>Approve this observation of <b>{qrId}</b>?</p>
+          <p className="mute small">The plant stays unpublished. Visitors will not see it until you press Publish again.</p>
+        </>
+      ),
+    };
+  }
   if (decision === "approve") {
     return {
       title: "Approve & publish",
