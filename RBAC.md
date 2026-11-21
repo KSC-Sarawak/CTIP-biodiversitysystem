@@ -21,7 +21,7 @@ above said, and the log names what each one overrides.
 Each rule below names its source in brackets:
 
 - **[Scope]**, **[Proposal]**, **[IoT table]**, **[Threat model]**: the documents above.
-- **[D1]** to **[D16]**: decisions from the log.
+- **[D1]** to **[D18]**: decisions from the log.
 - **[Existing]**: current behaviour that no source disputes, kept as it is.
 
 ---
@@ -66,11 +66,13 @@ Species  (Nepenthes rafflesiana, Endangered)        ← catalogue, Officer
 | **Re-tagging** | Moving a tagged plant to a new QR tag because its tag is damaged, lost or unreadable. The plant and its observation history stay the same; only the tag changes. Only Officers do it, and only after the old tag is marked retired or damaged. [D13] |
 | **Proposed species name** | What the botanist thinks the species is, as free text. It becomes a link to a species only when an Officer confirms it. |
 | **Review** | An Officer's decision on one observation: **approve**, **return** (back to the botanist to fix, reason required) or **reject** (reason required). |
-| **Observation status** | `draft` (being written) → `queued` (saved on the phone, not sent yet) → `synced`, shown as **Waiting for review** → `approved`, `returned` or `rejected`. A returned observation goes back to `synced` when the botanist resends it. |
+| **Observation status** | `draft` (being written) → `queued` (saved on the phone, not sent yet) → `synced`, shown as **Waiting for review** → `approved`, `returned` or `rejected`. A returned observation goes back to `synced` when the botanist resends it. An **approved** observation of an **unpublished** tagged plant can be **sent back** (`approved` → `returned`) by an Officer [D18]. |
 | **Endangered plant** | A tagged plant whose species' conservation status is **Endangered**. See [Species conservation status](#species-conservation-status). |
 | **Hidden plant** | A tagged plant an Officer **or** Admin has set to **hide its location** (code: `endangered_override`), for example a **vulnerable** plant, which is not hidden automatically. Treated exactly like an endangered plant for location. [D15] |
 | **Location-protected plant** | Any tagged plant whose exact location visitors must not see: an **endangered plant** or a **hidden plant** [D11]. |
-| **Published** | A species visitors can see. A tagged plant appears to visitors only when its species is published **and** it has at least one approved observation. |
+| **Published** | A species visitors can see. A tagged plant appears to visitors only when its species is published, it has at least one approved observation **and** an Officer has not unpublished it. |
+| **Unpublished tagged plant** | A tagged plant an Officer has taken off public view, with a reason (code: `specimens.is_withdrawn`). Its observations keep their decisions. It stays unpublished until an Officer presses **Publish again**; approving an observation never publishes it by itself. [D17] |
+| **Sent back** | An Officer returning an unpublished plant's approved observation to its botanist, with a reason, while reviewing it. The botanist sees it as **"Sent back for review"**, fixes it and resends it, and it goes through review again. [D18] |
 | **Observation photo** | A photo of one tagged plant, taken during one observation. The botanist adds it; an Officer can edit its caption or remove it. |
 | **Species photo** | A reference photo in the species catalogue. Only Officers add, replace or remove species photos. When an Officer approves an observation of a species that has **no photos yet**, that observation's first photo automatically becomes the species' cover photo. Officers can replace it later with any other photo. |
 | **Sensor node** | An IoT device installed next to a tagged plant (usually an endangered one). It sends readings (temperature, humidity, soil moisture, motion, GPS) and webcam images. |
@@ -205,7 +207,8 @@ See [code change 6](#6-nine-conservation-statuses-and-an-unsafe-default-d11).
 - Edit or delete their **own** observations that have not been sent yet (`draft` or
   `queued`). [Existing]
 - Fix and **resend their own observation** after an Officer returned it, with an optional
-  reply. [Existing]
+  reply. [Existing] This includes an observation **sent back** from an unpublished plant,
+  which they see as "Sent back for review" with the Officer's reason. [D18]
 - Add, caption and remove observation photos on their **own** observations, but not
   while that tagged plant has an observation waiting for review. [Existing]
 - **QR tags** [D5]:
@@ -234,8 +237,8 @@ See [code change 6](#6-nine-conservation-statuses-and-an-unsafe-default-d11).
 - Add a revisit to a tagged plant that already has an observation **waiting for review**.
   [Existing]
 - Change an observation after sending it, except by resending a returned observation.
-- Link a tagged plant to a species, set the hide-location flag, re-tag a tagged plant, or
-  delete a tagged plant. [D3, D4, D13, D15]
+- Link a tagged plant to a species, set the hide-location flag, re-tag a tagged plant,
+  delete a tagged plant, or unpublish or publish a tagged plant. [D3, D4, D13, D15, D17]
 - Approve, return or reject observations.
 - Create, edit, publish or delete species, or see unpublished species. [Scope gives the
   catalogue to Officers, D3]
@@ -262,6 +265,13 @@ See [code change 6](#6-nine-conservation-statuses-and-an-unsafe-default-d11).
     retired or damaged [D13];
   - **delete and restore** tagged plants (soft delete, restorable). Officers are the only
     role that can do this. [D4]
+  - **unpublish** a published tagged plant (reason required, the botanists are told) and
+    **publish it again**. Publishing again is refused while an observation is waiting for
+    review or with the botanist. [D17]
+  - **review an unpublished tagged plant** ("Review tag", review mode): change its species,
+    photos and hide-location flag as a draft, then **save** the changes or **send it back**
+    to the botanist (its latest approved observation becomes returned, reason required).
+    A published plant has no review option: unpublish it first. [D18]
 - See **exact locations** of all tagged plants. [Threat model T13/T18]
 - **Species:**
   - add, edit, delete and restore species;
@@ -340,7 +350,8 @@ one exception: they can set a tagged plant's **hide-location flag**. [D2, D15]
 - **Be assigned** an alert. [D12]
 - **Review observations** (approve, return or reject). [D2]
 - **Change species:** add, edit, set status, publish, delete, or manage species photos. [D2]
-- Link a tagged plant to a species, or re-tag a tagged plant. [D2, D13]
+- Link a tagged plant to a species, re-tag a tagged plant, or unpublish, review or
+  publish a tagged plant. [D2, D13, D17, D18]
 - Edit or remove observation photos. [D2]
 - **Print, retire or delete QR tags.** [D5]
 - View or export **reports**. [D2]
@@ -373,6 +384,8 @@ one exception: they can set a tagged plant's **hide-location flag**. [D2, D15]
 | Set or clear the hide-location flag | ❌ | ❌ | ✅ | ✅ |
 | Re-tag a tagged plant (old tag retired or damaged first) | ❌ | ❌ | ✅ | ❌ |
 | Delete or restore a tagged plant | ❌ | ❌ | ✅ | ❌ |
+| Unpublish or publish again a tagged plant (reason to unpublish) | ❌ | ❌ | ✅ | ❌ |
+| Review an unpublished tagged plant, send it back to the botanist | ❌ | ❌ | ✅ | ❌ |
 | **Observations** | | | | |
 | Record a revisit (new observation) | ❌ | ✅ | ❌ | ❌ |
 | See approved observations | approved data on public pages | all | all | 👁 all |
@@ -428,6 +441,9 @@ decisions said on the same point.
 | D14 | Who can change a user's email and name? | **Email: an Admin corrects it**, confirmed by a link to the new address. **Name: only the person themselves.** | Today nobody can change an email, and admins can change names. |
 | D15 | Who can set the hide-location flag? | **Officers and Admins** | Exception to D2: admins respond to alerts and can protect a plant at risk. |
 | D16 | Can Botanists see each other's observations? | **Yes, approved ones**: measurements, notes, photos and who recorded them. Unfinished observations, review decisions and comments stay private to the botanist who recorded them (and staff). | Replaces "botanists see only their own observations" (threat model "view own submissions", RLS `obs: read own or staff`). That rule hid endangered locations from botanists, which D10 no longer requires. Revisits need the plant's earlier observations, and visitors could already see approved observation data on the public pages. |
+
+| D17 | Who can take a tagged plant off public view? (21 Nov 2026) | **Officers only**: unpublish with a reason, and **publish again** as a separate, deliberate step. Publishing again waits until no observation is waiting for review or with the botanist. | New. An earlier draft (branch `rick-18-Nov`) let admins do it too; that breaks D2. |
+| D18 | How does an Officer correct a plant that is already published? (21 Nov 2026) | **Unpublish it first, then review it.** In review mode the Officer changes the species, photos and hide-location flag as a draft and saves, or **sends it back** to the botanist with a reason (`approved` → `returned`). The botanist sees "Sent back for review", resends, and the observation is reviewed again. The plant stays unpublished until an Officer publishes it again. | Extends D7: "return" was only possible for an observation waiting for review. |
 
 ### Statements elsewhere that this file replaces
 - Proposal: "botanists **and conservation officers** will use a mobile app to record plants…
@@ -585,6 +601,12 @@ plus handler checks) and **database** (Supabase RLS policies and triggers).
   [Statements elsewhere that this file replaces](#statements-elsewhere-that-this-file-replaces).
 - `services/api/test/rbac.test.js` and `apps/web/tests/role-pages.spec.js`: make them
   check this file's summary table.
+
+### 13. Unpublishing and reviewing a tagged plant (D17, D18), added 21 Nov 2026
+- Done for the database (`20261121120000_rbac_d17_d18_unpublish_tagged_plant.sql`), the
+  API (`POST /specimens/:id/publish`, officer only) and the **web** tag page
+  (`apps/web/src/pages/Specimen.jsx`).
+- Still to do on **mobile**: see `docs/updates/rick-fix-officer-tag-plant-page.md`.
 
 ### Already matching (no change needed)
 Botanist rules for editing and sending their own observations, officer review rules, sensor node and alert routing rules,

@@ -169,23 +169,26 @@ test.describe("Daun Sense Agent-Based QA & UX Testing", () => {
     await firstPlantLink.click();
     await page.waitForSelector(".tagheader");
 
-    // Verify review controls exist on this tag page
-    const reviewBtn = page.locator('button:has-text("Review tag"), button:has-text("Review record")');
-    await expect(reviewBtn).toBeVisible();
-    await reviewBtn.click();
+    // Verify the officer controls on this tag page (RBAC D17, D18): a record waiting
+    // for review has the review card; a published plant has "Unpublish plant" and no
+    // review option; an unpublished plant has "Review tag".
+    const officerBtn = page.locator('button:has-text("Review record"), button:has-text("Review tag"), button:has-text("Unpublish plant")');
+    await expect(officerBtn.first()).toBeVisible();
 
-    // Assert the three review decisions are present
-    const approveBtn = page.locator('button:has-text("Approve & publish")');
-    const returnBtn = page.locator('button:has-text("Return for changes")');
-    const rejectBtn = page.locator('button:has-text("Reject")');
+    if (await page.locator('button:has-text("Review record")').isVisible()) {
+      // Assert the three review decisions are present
+      const approveBtn = page.locator('#review-card button:has-text("Approve")');
+      const returnBtn = page.locator('button:has-text("Return for changes")');
+      const rejectBtn = page.locator('#review-card button:has-text("Reject")');
 
-    await expect(approveBtn).toBeVisible();
-    await expect(returnBtn).toBeVisible();
-    await expect(rejectBtn).toBeVisible();
+      await expect(approveBtn).toBeVisible();
+      await expect(returnBtn).toBeVisible();
+      await expect(rejectBtn).toBeVisible();
 
-    // Verify species confirmation selector is available
-    const speciesSelect = page.locator('select:has-text("Not confirmed")');
-    await expect(speciesSelect).toBeVisible();
+      // Verify species confirmation selector is available
+      const speciesSelect = page.locator('select:has-text("Not confirmed")');
+      await expect(speciesSelect).toBeVisible();
+    }
 
     // Query Local Ollama Agent to critique review decision affordance
     const domSummary = await extractDomSummary(page);
