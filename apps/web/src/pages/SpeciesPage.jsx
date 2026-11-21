@@ -3,8 +3,8 @@ import Img from "../components/Img.jsx";
 import MiniMap from "../components/MiniMap.jsx";
 import PhotoGallery from "../components/PhotoGallery.jsx";
 import Icon from "../components/Icon.jsx";
-import PhotoEditor from "../components/PhotoEditor.jsx";
 import { Chip, Empty, Mono } from "../components/Bits.jsx";
+import { useConfirm } from "../useConfirm.jsx";
 import { useStore } from "../../../shared/store.js";
 import { can } from "../../../shared/permissions.js";
 import { lastVisit, mappable, speciesCatalogue, speciesObservationPhotos } from "../../../shared/selectors.js";
@@ -14,7 +14,7 @@ const MORE = 12;
 
 // One species: what it is, where it grows, and every tagged plant of it.
 export default function SpeciesPage({ id }) {
-  const { db, role, setSpeciesMedia, notify, getBackendSpeciesById, apiStatus } = useStore();
+  const { db, role, setSpeciesPublished, getBackendSpeciesById, apiStatus } = useStore();
 
   useEffect(() => {
     if (apiStatus === "connected" && id) {
@@ -23,7 +23,7 @@ export default function SpeciesPage({ id }) {
   }, [id, apiStatus, getBackendSpeciesById]);
   const staff = can(role, "pending");
   const [limit, setLimit] = useState(MORE);
-  const [editing, setEditing] = useState(false);
+  const [ask, confirmDialog] = useConfirm();
 
   const all = speciesCatalogue(db, role);
   const s = all.find((x) => x.id === id);
@@ -40,10 +40,12 @@ export default function SpeciesPage({ id }) {
   // The species' own captioned photos. Until it has some, up to 3 photos from each tagged plant.
   const obsPhotos = speciesObservationPhotos(db, s.id);
   const photos = s.media.length > 0 ? s.media : obsPhotos;
-  const savePhotos = async (list) => {
-    const r = await setSpeciesMedia(s.id, list);
-    notify(r?.ok ? "Photos saved" : (r?.message || "Failed to save photos"));
-    if (r?.ok) setEditing(false);
+  // Officers publish or unpublish the species here; photos and details are edited on the Species page.
+  const flipPublish = async () => {
+    const ok = await ask(s.is_published
+      ? { title: "Unpublish species", confirmLabel: "Unpublish", danger: true, body: <p>Hide <i className="sci">{s.scientific_name}</i> from the public catalogue? Visitors will no longer see it or its plants.</p> }
+      : { title: "Publish species", confirmLabel: "Publish", word: "PUBLISH", body: <p>Make <i className="sci">{s.scientific_name}</i> visible to everyone in the public catalogue? Approved plants of this species will appear to visitors.</p> });
+    if (ok) await setSpeciesPublished(s.id, !s.is_published);
   };
   const points = mappable(s.plants, role);
   const related = all
@@ -52,13 +54,14 @@ export default function SpeciesPage({ id }) {
 
   return (
     <>
+      {confirmDialog}
       <nav className="crumbs" aria-label="Breadcrumb">
         <a href="#/plants">Plants</a> <span aria-hidden="true">›</span> <span>{s.family}</span> <span aria-hidden="true">›</span> <span aria-current="page">{s.name}</span>
       </nav>
 
       <section className="specieshero">
         <div className="speciesphotos">
-          <PhotoGallery key={s.id} photos={photos} canEdit={can(role, "species")} onEdit={() => setEditing(true)} />
+          <PhotoGallery key={s.id} photos={photos} />
         </div>
         <div className="speciesinfo">
           <p className="eyebrow">{s.family} · {s.genus}</p>
@@ -79,7 +82,11 @@ export default function SpeciesPage({ id }) {
             {s.cultural_significance && <><dt>Cultural note</dt><dd>{s.cultural_significance}</dd></>}
             {s.updated_at && <><dt>Last updated</dt><dd>{fmtDate(s.updated_at)}</dd></>}
           </dl>
-          {role === "officer" && <a className="btn ghost gap-top-s" href="#/species"><Icon name="pencil" size={18} /> Edit species</a>}
+          {can(role, "species") && (
+            <button type="button" className="btn ghost gap-top-s" onClick={flipPublish}>
+              <Icon name={s.is_published ? "eyeOff" : "eye"} size={18} /> {s.is_published ? "Unpublish species" : "Publish species"}
+            </button>
+          )}
         </div>
       </section>
 
@@ -121,8 +128,6 @@ export default function SpeciesPage({ id }) {
           <p className="row center gap-top-s"><button className="btn ghost" onClick={() => setLimit(limit + MORE)}>Show {Math.min(MORE, s.plants.length - limit)} more</button></p>
         )}
       </section>
-
-      {editing && <PhotoEditor photos={s.raw_media || []} observationPhotos={obsPhotos} captions min={0} onClose={() => setEditing(false)} onSave={savePhotos} />}
 
       {related.length > 0 && (
         <section className="gap-section-s" aria-labelledby="related">

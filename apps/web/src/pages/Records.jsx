@@ -2,6 +2,8 @@
 import { useState } from "react";
 import Shell from "../components/Shell.jsx";
 import Icon from "../components/Icon.jsx";
+import Img from "../components/Img.jsx";
+import PhotoEditor from "../components/PhotoEditor.jsx";
 import { Chip, Empty, Mono } from "../components/Bits.jsx";
 import PageHead from "../components/PageHead.jsx";
 import { useStore } from "../../../shared/store.js";
@@ -111,8 +113,11 @@ export default function Records() {
 }
 
 function RecordRow({ obs }) {
-  const { db, syncObservation, resubmit } = useStore();
+  const { db, syncObservation, resubmit, setObservationPhotos, notify } = useStore();
   const [reply, setReply] = useState("");
+  // This record's photos as the botanist is changing them (null = unchanged). Saved by "Send again".
+  const [photoDraft, setPhotoDraft] = useState(null);
+  const [editingPhotos, setEditingPhotos] = useState(false);
   // Editable copy of the record while it is returned. Saved only by "Send again".
   const [fix, setFix] = useState({ morphology: obs.morphology || "", height_cm: obs.height_cm ?? "", notes: obs.notes || "" });
   const [busy, setBusy] = useState(false);
@@ -122,7 +127,19 @@ function RecordRow({ obs }) {
     await fn(); // the store shows success or the reason it failed
     setBusy(false);
   };
+  const savedPhotos = (db.plants.find((p) => p.id === obs.specimen_id)?.photos || []).filter((ph) => ph.observation_id === obs.id);
+  const shownPhotos = photoDraft ?? savedPhotos;
+  const photosChanged = photoDraft != null && (
+    photoDraft.length !== savedPhotos.length
+    || photoDraft.some((p) => p.file || (savedPhotos.find((o) => o.id === p.id)?.caption || "").trim() !== (p.caption || "").trim())
+  );
   const sendAgain = () => run(async () => {
+    // Photos first: if one fails, the record is not sent half-fixed.
+    if (photosChanged) {
+      const saved = await setObservationPhotos(obs.id, savedPhotos, photoDraft);
+      if (!saved.ok) return notify(saved.message);
+      setPhotoDraft(null);
+    }
     const r = await resubmit(obs.id, reply, fix);
     if (r.ok) setReply("");
   });
@@ -156,8 +173,36 @@ function RecordRow({ obs }) {
             <label>Height (cm)<input type="number" min="0" value={fix.height_cm} onChange={set("height_cm")} /></label>
             <label>Notes<input value={fix.notes} onChange={set("notes")} /></label>
           </div>
+          <div className="fixphotos">
+            <span className="row wrap" style={{ alignItems: "center", gap: 8 }}>
+              <b>Photos</b>
+              <span className="mute small">{shownPhotos.length} {shownPhotos.length === 1 ? "photo" : "photos"}{photosChanged ? " · changed, saved when you send again" : ""}</span>
+              <button type="button" className="btn ghost small-btn" onClick={() => setEditingPhotos(true)} disabled={busy}>
+                <Icon name="camera" size={14} /> Add or edit photos
+              </button>
+            </span>
+            {shownPhotos.length > 0 && (
+              <div className="row wrap">
+                {shownPhotos.map((ph) => <Img key={ph.id} className="mini" src={ph.url} alt={ph.caption || ""} />)}
+              </div>
+            )}
+          </div>
           <label>Your reply<input value={reply} onChange={(e) => setReply(e.target.value)} placeholder="What did you fix?" /></label>
           <p><button className="btn" disabled={busy} onClick={sendAgain}><Icon name="send" size={18} /> {busy ? "Sending…" : "Send again"}</button></p>
+          {editingPhotos && (
+            <PhotoEditor
+              photos={shownPhotos}
+              captions
+              requireCaptions={false}
+              min={0}
+              arrange={false}
+              onClose={() => setEditingPhotos(false)}
+              onSave={(list) => {
+                setEditingPhotos(false);
+                setPhotoDraft(list);
+              }}
+            />
+          )}
         </div>
       )}
 

@@ -21,6 +21,7 @@ import Book from '../pages/Book.js';
 import { StaffMore, Users, Audit } from '../pages/Admin.js';
 import Account from '../pages/Account.js';
 import Survey from '../pages/Survey.js';
+import PlantReview from '../pages/PlantReview.js';
 
 // Every screen, by route name. Each screen receives { nav, params }.
 export const SCREENS = {
@@ -31,6 +32,7 @@ export const SCREENS = {
   review: ReviewQueue, reviewItem: ReviewRecord, monitor: Monitor, alert: AlertDetail,
   staffMore: StaffMore, speciesAdmin: SpeciesAdmin, tags: Tags, tagQr: TagQr, reports: Reports,
   users: Users, audit: Audit, account: Account, book: Book, survey: Survey,
+  plantReview: PlantReview, // RBAC D18: review mode for an unpublished tagged plant
 };
 
 // Pure route metadata and permission checks

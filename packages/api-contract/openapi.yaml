@@ -1424,6 +1424,56 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /specimens/{id}/publish:
+    post:
+      tags: [Specimens]
+      operationId: setSpecimenPublished
+      summary: Unpublish a tagged plant, or publish it again (officer only, RBAC D17)
+      description: >
+        Unpublishing hides the whole plant from visitors (catalogue, map, QR
+        page, photos) whatever its observations' decisions, and keeps those
+        decisions as they are. A reason is required to unpublish; it is shown
+        to staff and sent to the botanists who tagged or recorded the plant,
+        who are also told when it is published again. While a plant is
+        unpublished, an officer can send its latest approved observation back
+        to the botanist (POST /observations/{id}/reviews with `return`, RBAC D18).
+        Publishing again is refused (409 REVIEW_IN_PROGRESS) while an
+        observation is waiting for review or with the botanist, and
+        (409 NOTHING_APPROVED) when no observation is approved. A plant never
+        publishes again by itself. Runs public.set_plant_published().
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [is_published]
+              additionalProperties: false
+              properties:
+                is_published: { type: boolean }
+                reason:
+                  type: string
+                  maxLength: 1000
+                  description: Required when is_published is false
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specimen' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: >
+            WRONG_STATUS when the plant is already in that state;
+            REVIEW_IN_PROGRESS or NOTHING_APPROVED when publishing again is refused
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   # ------------------------------------------------------------ Observations
   /observations:
     get:
@@ -1671,10 +1721,12 @@ paths:
     post:
       tags: [Reviews]
       operationId: reviewObservation
-      summary: Approve, return (request changes) or reject an observation (officer/admin)
+      summary: Approve, return (request changes) or reject an observation (officer only)
       description: >
         Only an observation waiting for review (status synced) can be reviewed, and
-        only at the version the reviewer looked at. The checks and the decision happen
+        only at the version the reviewer looked at. One exception (RBAC D18): an
+        approved observation of an unpublished plant can be sent back to the
+        botanist with `return` and a reason. The checks and the decision happen
         in one locked database step (public.review_observation), so a botanist's edit
         or a second reviewer cannot slip in between.
       parameters:
@@ -1695,7 +1747,8 @@ paths:
         '409':
           description: >
             VERSION_CONFLICT when observation_version is stale (botanist edited it since),
-            WRONG_STATUS when the observation is not waiting for review (draft, or already reviewed)
+            WRONG_STATUS when the observation is not waiting for review (draft, or already reviewed),
+            or is approved but its plant is still published (RBAC D18)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -2807,7 +2860,7 @@ components:
       type: string
       enum: [review_returned, review_approved, review_rejected, comment_reply, alert_assigned, alert_created,
              observation_submitted, observation_resubmitted, discussion_shared, discussion_post, discussion_mention,
-             email_rate_limit]
+             email_rate_limit, plant_unpublished, plant_republished]
 
     # ---------- profiles
     Profile:
@@ -3032,6 +3085,12 @@ components:
             True when lat/lng were snapped to the 0.01 degree grid because the
             plant is endangered and the caller may not see its exact spot
             (GET /workspace, GET /specimens/by-qr/{qrId}; threat T13).
+        is_withdrawn:
+          type: boolean
+          description: True when an officer unpublished the plant (POST /specimens/{id}/publish, RBAC D17)
+        withdrawn_reason: { type: [string, 'null'] }
+        withdrawn_by: { type: [string, 'null'], format: uuid }
+        withdrawn_at: { type: [string, 'null'], format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
