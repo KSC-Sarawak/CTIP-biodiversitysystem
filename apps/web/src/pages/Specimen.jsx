@@ -67,7 +67,9 @@ export default function Specimen({ qr }) {
   const rawPlant = db.plants.find((p) => p.id === plant.id);
   const visits = plantVisits(db, plant.id, role);
   const plantObs = db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => (b.observed_at || "").localeCompare(a.observed_at || ""));
-  const pendingObs = plantObs.find((o) => o.status === "synced");
+  // Several can wait at once (a revisit may join the queue, RBAC D19): officers decide the oldest first.
+  const waiting = plantObs.filter((o) => o.status === "synced");
+  const pendingObs = waiting[waiting.length - 1];
   // Botanists only get their own unfinished observations (RBAC D16), so another
   // botanist never sees that a plant was sent back.
   const returnedObs = plantObs.find((o) => o.status === "returned");
@@ -264,7 +266,9 @@ export default function Specimen({ qr }) {
                 : "Record rejected"}
             </b>
             <p className="mute small">
-              {decided === "approve" && withdrawn ? "Press Publish again when it is ready for visitors." : `${plant.qr_id} is done. Go back to where you were, or open the next record.`}
+              {decided === "approve" && withdrawn ? "Press Publish again when it is ready for visitors."
+                : pendingObs ? `Another observation of ${plant.qr_id} is waiting. It is below.`
+                : `${plant.qr_id} is done. Go back to where you were, or open the next record.`}
             </p>
           </div>
           <div className="row wrap">
@@ -277,7 +281,9 @@ export default function Specimen({ qr }) {
       {/* An observation waiting for review: approve, return or reject it here. */}
       {canReview && pendingObs && (
         <OfficerReviewCard
+          key={pendingObs.id}
           obs={pendingObs}
+          waitingCount={waiting.length}
           rawPlant={rawPlant}
           plant={plant}
           speciesList={speciesList}
@@ -324,7 +330,7 @@ export default function Specimen({ qr }) {
               <PhotoGallery key={plant.id} photos={plant.photos} canEdit={canEditPhotos} onEdit={() => setEditing(true)} />
               {role === "botanist" && pendingObs && (
                 <p className="mute small" style={{ marginTop: 8 }}>
-                  <Icon name="lock" size={14} /> Observation is pending an officer's review. Record and photo editing are locked until a decision is returned.
+                  <Icon name="lock" size={14} /> {waiting.length > 1 ? `${waiting.length} of your observations are` : "Your observation is"} waiting for an officer's review. Photo editing is locked until a decision is returned; you can still record a revisit on the phone.
                 </p>
               )}
               {plant.species?.description && <p className="gap-top-s">{plant.species.description}</p>}
@@ -733,7 +739,7 @@ function ReviewModePanel({ plant, rawPlant, approvedObs, returnedObs, botanist, 
 }
 
 // The review card for an observation waiting for review (status synced).
-function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onDecided }) {
+function OfficerReviewCard({ obs, waitingCount = 1, rawPlant, plant, speciesList, reviewObservation, setPlantSpecies, setPlantLocationHidden, notify, onDecided }) {
   const [comment, setComment] = useState("");
   const [hideChoice, setHideChoice] = useState(null); // null until the officer changes it
   const [busy, setBusy] = useState(false);
@@ -772,6 +778,11 @@ function OfficerReviewCard({ obs, rawPlant, plant, speciesList, reviewObservatio
         </div>
         <Chip value={obs.status} />
       </div>
+      {waitingCount > 1 && (
+        <p className="mute small gap-bottom-s">
+          {waitingCount} observations of this plant are waiting. This is the oldest, recorded {fmtDate(obs.observed_at)}; the next one shows here once you decide it.
+        </p>
+      )}
 
       <div className="field gap-bottom-s">
         <SpeciesSelect value={rawPlant?.species_id} speciesList={speciesList} onChange={(id) => setPlantSpecies(rawPlant.id, id)} hint="(confirm before approving)" />

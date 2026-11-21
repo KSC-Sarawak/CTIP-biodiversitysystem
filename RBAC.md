@@ -168,6 +168,10 @@ tagged plant).
 - **Revisits:** a Botanist adds a new observation each visit. If an Officer returns or rejects
   a **revisit**, the tagged plant **stays published**, because it already has an approved
   observation; only the revisit goes back to the Botanist. [Confirmed 21 Nov 2026]
+- **A revisit while another observation is waiting:** allowed. If an earlier observation of
+  the plant is still waiting for review, the revisit joins the queue behind it, and Officers
+  decide them **oldest first**. Once approved, every observation sits in the plant's history
+  in the order it was recorded, so the newest visit is shown as the latest. [D19]
 - **Taking it down:** only an Officer can **unpublish** a tagged plant, with a reason. While it
   is unpublished the Officer can review it, save changes, or send its latest approved
   observation back to the Botanist. It stays unpublished until an Officer presses
@@ -273,6 +277,8 @@ Exact locations of location-protected plants still follow [D9 and D10](#who-sees
 - Work **offline** and sync later; run a field survey. [Proposal]
 - Edit or delete their **own** observations that have not been sent yet (`draft` or
   `queued`). [Existing]
+- Add a **revisit** even while an earlier observation of that tagged plant is waiting for
+  review; it joins the review queue behind it. [D19]
 - Fix and **resend their own observation** after an Officer returned it, with an optional
   reply. [Existing] This includes an observation **sent back** from an unpublished plant,
   which they see as "Sent back for review" with the Officer's reason. [D18]
@@ -301,8 +307,6 @@ Exact locations of location-protected plants still follow [D9 and D10](#who-sees
   their own. Only approved observations are shared. [D16]
 - Comment on another botanist's observation. Comments on an observation are between its
   botanist and the Officers. [D16]
-- Add a revisit to a tagged plant that already has an observation **waiting for review**.
-  [Existing]
 - Change an observation after sending it, except by resending a returned observation.
 - Link a tagged plant to a species, set the hide-location flag, re-tag a tagged plant,
   delete a tagged plant, or unpublish or publish a tagged plant. [D3, D4, D13, D15, D17]
@@ -322,7 +326,8 @@ Exact locations of location-protected plants still follow [D9 and D10](#who-sees
 ### Can
 - **Review observations:** see **all** observations and **approve, return (with a reason)
   or reject** each one. Approving needs the tagged plant to be linked to a species.
-  [Scope]
+  [Scope] When a tagged plant has more than one observation waiting, the tag page opens the
+  **oldest** first. [D19]
 - **Correct an observation only through review:** return it with a reason so the botanist
   fixes it. [D7]
 - **Tagged plants:**
@@ -510,6 +515,7 @@ decisions said on the same point.
 | D16 | Can Botanists see each other's observations? | **Yes, approved ones**: measurements, notes, photos and who recorded them. Unfinished observations, review decisions and comments stay private to the botanist who recorded them (and staff). | Replaces "botanists see only their own observations" (threat model "view own submissions", RLS `obs: read own or staff`). That rule hid endangered locations from botanists, which D10 no longer requires. Revisits need the plant's earlier observations, and visitors could already see approved observation data on the public pages. |
 | D17 | Who can take a tagged plant off public view? (21 Nov 2026) | **Officers only**: unpublish with a reason, and **publish again** as a separate, deliberate step. Publishing again waits until no observation is waiting for review or with the botanist. | New. An earlier draft (branch `rick-18-Nov`) let admins do it too; that breaks D2. |
 | D18 | How does an Officer correct a plant that is already published? (21 Nov 2026) | **Unpublish it first, then review it.** In review mode the Officer changes the species, photos and hide-location flag as a draft and saves, or **sends it back** to the botanist with a reason (`approved` → `returned`). The botanist sees "Sent back for review", resends, and the observation is reviewed again. The plant stays unpublished until an Officer publishes it again. | Extends D7: "return" was only possible for an observation waiting for review. |
+| D19 | Can a Botanist add a revisit while an earlier observation of the same plant is waiting for review? (21 Nov 2026) | **Yes.** The revisit is sent as normal and waits behind the earlier one; Officers decide them oldest first. The phone tells the botanist their earlier visit is still waiting. Deleting and publishing again still wait until nothing is waiting. | Replaces the review lock (API `REVIEW_IN_PROGRESS` on new observations, and the locked revisit screen on the phone), which made a field trip wasted when the earlier visit had not been decided yet. |
 
 ### Statements elsewhere that this file replaces
 - Proposal: "botanists **and conservation officers** will use a mobile app to record plants…
@@ -674,6 +680,15 @@ plus handler checks) and **database** (Supabase RLS policies and triggers).
   (`apps/web/src/pages/Specimen.jsx`).
 - Done on **mobile** too (`apps/mobile/pages/PlantPage.js`, `PlantReview.js`, `Review.js`, `Records.js`,
   `Notifications.js`); see `docs/updates/rick-fix-officer-tag-plant-page.md`.
+
+### 14. Revisits while an observation is waiting (D19), added 21 Nov 2026
+- Done: the API no longer refuses a new observation while another of the plant is waiting
+  (`services/api/src/field.js`, `sync.js`); the phone's revisit screen shows a notice instead
+  of a lock (`apps/mobile/pages/AddPlant.js`); the tag page on web and mobile opens the
+  oldest waiting observation first (`apps/web/src/pages/Specimen.jsx`,
+  `apps/mobile/pages/PlantPage.js`).
+- Phones with a record already failed as "waiting for an officer" (`wait_review`) send it on
+  the next manual sync.
 
 ### Already matching (no change needed)
 Botanist rules for editing and sending their own observations, officer review rules, sensor node and alert routing rules,

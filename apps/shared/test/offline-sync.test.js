@@ -221,8 +221,9 @@ test("a revisit sent after its plant has left the outbox still uses the server's
   await engine.run(U);
   const sentFor = callsTo(server, "sync").flatMap((c) => c.args[0].observations).find((o) => o.id === revisit.id);
   assert.equal(sentFor.specimen_id, serverId);
-  // The plant's first record is now with an officer, so the API holds this one back.
-  assert.equal((await outbox.get(revisit.id)).error.action, "wait_review");
+  // The plant's first record is with an officer; the revisit joins the queue behind it (D19).
+  assert.equal(await outbox.get(revisit.id), null, "the revisit was sent too");
+  assert.equal(server.state.observations.filter((o) => o.specimen_id === serverId).length, 2);
 });
 
 test("a revisit waits while its plant has not synced", async () => {
@@ -637,11 +638,24 @@ test("429 stops the run", async () => {
   assert.equal((await outbox.get(b.id)).attempts, 0, "the run stopped before the second record");
 });
 
-test("REVIEW_IN_PROGRESS fails the record with wait_review", async () => {
+test("D19: a revisit is sent while an earlier record of the plant waits for an officer", async () => {
   const { outbox, server, engine } = setup();
   const rec = plantRecord({ kind: "revisit", specimen: null, step: "observation" });
   server.state.specimens.push({ id: rec.specimen_id, qr_id: rec.qr_id });
   server.state.observations.push({ id: randomUUID(), specimen_id: rec.specimen_id, status: "synced", recorded_by: U, version: 1 });
+  await outbox.add(rec, []);
+
+  const summary = await engine.run(U);
+  assert.equal(summary.sent, 1);
+  assert.equal(await outbox.get(rec.id), null);
+  assert.equal(server.state.observations.filter((o) => o.specimen_id === rec.specimen_id && o.status === "synced").length, 2);
+});
+
+test("REVIEW_IN_PROGRESS from an older API still fails the record with wait_review", async () => {
+  const { outbox, server, engine } = setup();
+  const rec = plantRecord({ kind: "revisit", specimen: null, step: "observation" });
+  server.state.specimens.push({ id: rec.specimen_id, qr_id: rec.qr_id });
+  server.api.sync = () => Promise.resolve({ ok: true, status: 200, data: { results: [{ id: rec.id, result: "error", error: { code: "REVIEW_IN_PROGRESS", message: "waiting" } }] } });
   await outbox.add(rec, []);
 
   await engine.run(U);
