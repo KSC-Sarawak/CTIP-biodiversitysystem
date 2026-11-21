@@ -330,6 +330,14 @@ export function TaggedPlant({ nav, params }) {
     : !approvedObs
     ? 'No observation is approved yet.'
     : '';
+  // Hiding is safe and saves at once; showing the exact spot to the public is asked first.
+  const changeHidden = (hide) => {
+    if (hide) return setPlantLocationHidden(p.id, true);
+    Alert.alert('Show the exact location?', `Anyone will be able to find ${p.qr_id} on the public map.`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Show location', style: 'destructive', onPress: () => setPlantLocationHidden(p.id, false) },
+    ]);
+  };
   const changePublished = async (isPublished, reason) => {
     setBusy(true);
     const ok = await setPlantPublished(p.id, isPublished, reason); // shows its own message
@@ -433,13 +441,14 @@ export function TaggedPlant({ nav, params }) {
         ]} />
         {/* Only when an approximate spot is actually shown: a visitor gets no coordinates at all (RBAC D9). */}
         {p.location_reduced && where ? <Txt v="caption" color={c.ink2}>{REDUCED_LOCATION_NOTE}</Txt> : null}
-        {where && can(role, 'hideLocation') && !canReview ? (
+        {/* RBAC D15: officers and admins. While an observation waits for review, an officer sets it in that review. */}
+        {where && can(role, 'hideLocation') && !(canReview && pendingObs) ? (
           <Check
             label={HIDE_LOCATION_LABEL}
             hint={hideRule.hint}
             value={p.endangered}
             disabled={hideRule.locked}
-            onChange={(on) => setPlantLocationHidden(p.id, on)}
+            onChange={changeHidden}
           />
         ) : null}
       </Section>

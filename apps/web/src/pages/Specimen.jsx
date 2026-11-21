@@ -386,9 +386,9 @@ export default function Specimen({ qr }) {
                 {plant.location_reduced
                   ? <p className="mute small">{REDUCED_LOCATION_NOTE}</p>
                   : plant.gps_accuracy_m != null && <p className="mute small">GPS accuracy ±{plant.gps_accuracy_m} m</p>}
-                {/* Officers change it only inside a review (the review card, or review mode on an
-                    unpublished plant). Admins have no review, so they keep it here (RBAC D15). */}
-                {can(role, "hideLocation") && !canReview && (
+                {/* RBAC D15: officers and admins. While an officer has a review open (the review card
+                    for a waiting observation, or review mode), the switch is part of that review instead. */}
+                {can(role, "hideLocation") && !(canReview && (pendingObs || reviewOpen)) && (
                   <label className="check hidespot gap-top-s">
                     <input
                       type="checkbox"
