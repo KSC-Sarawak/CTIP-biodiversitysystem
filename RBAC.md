@@ -120,6 +120,73 @@ See [code change 6](#6-nine-conservation-statuses-and-an-unsafe-default-d11).
 
 ---
 
+## Tagged plant lifecycle
+
+How one plant goes from the forest to the public site, step by step. Each step names the
+rule behind it. Rules marked **[Confirmed 21 Nov 2026]** are how the system already works,
+checked and kept on that date. D17 and D18 come from PR #104 (unpublishing and reviewing a
+tagged plant).
+
+### From first sighting to published
+
+1. **An Officer creates the species** in the catalogue (for example *Giant pitcher*) and
+   publishes it. Botanists can only pick **published** species, and visitors only see plants
+   of published species. [Scope, D3]
+2. **A Botanist finds an untagged plant and tags it** (for example `NIAH-0002`). This creates
+   the **tagged plant**. The GPS saved now is the plant's location; later visits do not move
+   it. [D1]
+3. **The Botanist records the first observation**: height, appearance, notes, GPS and photos,
+   and **proposes** a species name (picked from the catalogue or typed). The Botanist does
+   not set the species itself. [D1, D3, Confirmed 21 Nov 2026]
+4. **The Botanist sends it for review.** The observation is `synced` ("Waiting for review")
+   and the tagged plant is **not public** yet. [Existing]
+5. **An Officer reviews it.** They confirm or change the species and link the tagged plant to
+   it; an observation cannot be approved without a linked species. Then they decide: [D3, D7]
+   - **Approve:** the tagged plant is **published straight away**, with no separate publish
+     step, as long as its species is published. [Confirmed 21 Nov 2026]
+   - **Return** (reason required): the observation goes back to the Botanist and the tagged
+     plant **stays unpublished**, because it has no approved observation yet. [D7]
+   - **Reject** (reason required): the tagged plant and its tag **stay, unpublished**. A
+     Botanist can record a new observation of it, or an Officer can delete the plant.
+     [Confirmed 21 Nov 2026, D4]
+
+### When an observation is returned
+
+- The Botanist sees it as **Returned** in My records, with the Officer's reason.
+- Before sending it again they can change the **appearance**, **height** and **notes**, add,
+  caption or remove **photos** (website; the mobile app shows photos only), and write a
+  **reply** to the Officer.
+- They cannot change the species, GPS, date seen, QR tag or hide-location flag; if the
+  species is wrong they say so in the reply and the Officer changes it at review. [D3, D7]
+- **Send again** puts it back in the review queue as a new version (`returned` → `synced`),
+  and editing is locked until the next decision. [Existing]
+
+### After the plant is published
+
+- **Revisits:** a Botanist adds a new observation each visit. If an Officer returns or rejects
+  a **revisit**, the tagged plant **stays published**, because it already has an approved
+  observation; only the revisit goes back to the Botanist. [Confirmed 21 Nov 2026]
+- **Taking it down:** only an Officer can **unpublish** a tagged plant, with a reason. While it
+  is unpublished the Officer can review it, save changes, or send its latest approved
+  observation back to the Botanist. It stays unpublished until an Officer presses
+  **Publish again**; approving an observation does not publish it by itself. [D17, D18]
+- **Deleting:** only an Officer can delete or restore a tagged plant (soft delete), and not
+  while an observation of it is waiting for review. [D4]
+
+### Who sees the plant at each stage
+
+| Stage | Visitor | Botanist | Officer | Admin |
+|---|:-:|:-:|:-:|:-:|
+| Tagged, first observation waiting for review | ❌ | the plant; the observation only if they recorded it | ✅ | 👁 |
+| First observation returned or rejected | ❌ | the plant; the observation only if they recorded it | ✅ | 👁 |
+| First observation approved (species published) | ✅ published | ✅ | ✅ | 👁 |
+| Approved, but the species is not published yet | ❌ until the Officer publishes the species | ✅ | ✅ | 👁 |
+| Unpublished by an Officer | ❌ | ✅ ("Unpublished") | ✅ | 👁 |
+
+Exact locations of location-protected plants still follow [D9 and D10](#who-sees-exact-locations).
+
+---
+
 ## The four roles
 
 | Role | Who | Signs in? | Main app |
