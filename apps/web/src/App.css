@@ -108,7 +108,8 @@ button.textlink:hover { text-decoration: underline; }
 .login-browse { margin-top: var(--s-5, 24px); padding-top: var(--s-4, 16px); border-top: 1px solid var(--line); }
 .login-browse p { margin: 0 0 var(--s-2); }
 .login-browse .textlinks a { display: inline-flex; align-items: center; gap: var(--s-1); color: var(--acc); font-weight: 600; }
-.loginerr { display: flex; align-items: center; gap: var(--s-2); margin: var(--s-2) 0 0; padding: var(--s-2) var(--s-3); border: 1px solid var(--bad-line); border-radius: var(--r-control); background: var(--bad-soft); color: var(--bad); font-weight: 600; }
+.loginerr { display: flex; align-items: flex-start; gap: var(--s-2); margin: var(--s-2) 0 0; padding: var(--s-2) var(--s-3); border: 1px solid var(--bad-line); border-radius: var(--r-control); background: var(--bad-soft); color: var(--bad); font-weight: 600; overflow-wrap: anywhere; }
+.loginerr svg { flex: none; margin-top: 3px; } /* icon stays at the first line when the message wraps */
 .login-browse .textlinks a:hover { text-decoration: underline; }
 
 .row { display: flex; align-items: center; gap: var(--s-3); }
