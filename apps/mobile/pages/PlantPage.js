@@ -313,7 +313,9 @@ export function TaggedPlant({ nav, params }) {
   const canReview = can(role, 'review');
   const canPublish = can(role, 'publishPlants');
   const newestFirst = [...obs].reverse();
-  const pendingObs = newestFirst.find((o) => o.status === 'synced');
+  // Several can wait at once (a revisit may join the queue, RBAC D19): officers decide the oldest first.
+  const waiting = obs.filter((o) => o.status === 'synced');
+  const pendingObs = waiting[0];
   // Botanists only get their own unfinished observations (RBAC D16).
   const returnedObs = newestFirst.find((o) => o.status === 'returned');
   const approvedObs = newestFirst.find((o) => o.status === 'approved');
@@ -499,14 +501,23 @@ export function TaggedPlant({ nav, params }) {
       ) : null}
       <View style={{ gap: 8 }}>
         {role === 'botanist' ? (
-          obs.some((o) => o.status === 'synced') ? (
-            <Notice tone="info" icon="lock" title="Review in progress" body="An observation of this plant is waiting for an officer's decision. Record editing and revisits are locked until review is complete." />
-          ) : (
+          <View style={{ gap: 4 }}>
             <Button label="Record a revisit" icon="plus" onPress={() => nav.go('revisit', { qr: p.qr_id })} />
-          )
+            {/* Botanists only get their own waiting observations (RBAC D16). */}
+            {pendingObs ? (
+              <Txt v="caption" color={c.ink2}>
+                {waiting.length > 1 ? `${waiting.length} of your visits are` : `Your visit of ${longDate(pendingObs.observed_at)} is`} waiting for review. A new revisit joins the queue after {waiting.length > 1 ? 'them' : 'it'}.
+              </Txt>
+            ) : null}
+          </View>
         ) : null}
         {canReview && pendingObs ? (
-          <Button label="Review this record" icon="clipboard" onPress={() => nav.go('reviewItem', { id: pendingObs.id })} />
+          <View style={{ gap: 4 }}>
+            <Button label="Review this record" icon="clipboard" onPress={() => nav.go('reviewItem', { id: pendingObs.id })} />
+            {waiting.length > 1 ? (
+              <Txt v="caption" color={c.ink2}>{waiting.length} observations of this plant are waiting. This opens the oldest, from {longDate(pendingObs.observed_at)}; the next one follows once you decide it.</Txt>
+            ) : null}
+          </View>
         ) : null}
         {canReview && withdrawn && !pendingObs ? (
           <Button label="Review tag" icon="clipboard" onPress={() => nav.go('plantReview', { qr: p.qr_id })} />

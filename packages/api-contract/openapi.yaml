@@ -1819,8 +1819,8 @@ paths:
         whatever the phone holds, and sent for review later with `POST /observations/{id}/submit`.
         The client-made `id` makes a resend safe: sending an `id` the caller already saved answers
         `created` again and stores nothing twice. An `id` that belongs to someone else answers
-        `error` with `ID_TAKEN`. A botanist cannot add to a plant that has a record waiting for an
-        officer (`REVIEW_IN_PROGRESS`).
+        `error` with `ID_TAKEN`. A revisit is accepted even while an earlier record of the plant is
+        waiting for an officer; officers decide them oldest first (RBAC D19).
 
         Items with a `base_version` number are edits of the caller's own record. They apply only
         while the server still holds that version and the record is `draft` or `queued`, and they

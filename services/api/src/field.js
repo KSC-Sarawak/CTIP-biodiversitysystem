@@ -188,22 +188,6 @@ async function protectSpecimens(db, user, specimens) {
   };
 }
 
-export const REVIEW_IN_PROGRESS_MESSAGE =
-  'This plant has a record waiting for an officer. You can add to it once a decision is returned.';
-
-// A botanist cannot add to a plant while an officer is still deciding on it.
-// `exceptId` is the record being sent: a retry of the record that is waiting is
-// not blocked by itself. Returns { blocked } or { error }. Shared by
-// POST /observations and POST /sync, so the rule lives in one place.
-export async function reviewInProgress(db, user, specimenId, exceptId) {
-  if (user.role !== 'botanist') return { blocked: false };
-  let waiting = db.from('observations').select('id').eq('specimen_id', specimenId).eq('status', 'synced').eq('is_deleted', false);
-  if (exceptId) waiting = waiting.neq('id', exceptId);
-  const { data, error } = await waiting.limit(1);
-  if (error) return { error };
-  return { blocked: data.length > 0 };
-}
-
 // The observation named in the URL, or null after answering 500 or 404.
 async function observationOr404(db, req, res) {
   const { data, error } = await findObservation(db, req);
@@ -451,10 +435,8 @@ export const fieldHandlers = {
     const body = parseBody(ObservationCreate, req, res);
     if (!body) return;
     const db = supabaseAs(req.user);
-    // A retry of the record that is waiting carries on below and gets that record back.
-    const review = await reviewInProgress(db, req.user, body.specimen_id, body.id);
-    if (review.error) return dbError(res, review.error);
-    if (review.blocked) return fail(res, 409, 'REVIEW_IN_PROGRESS', REVIEW_IN_PROGRESS_MESSAGE);
+    // A revisit is allowed while an earlier observation of the plant is still
+    // waiting for review; officers decide them oldest first (RBAC.md D19).
     const now = new Date().toISOString();
     const { data, error } = await db
       .from('observations')

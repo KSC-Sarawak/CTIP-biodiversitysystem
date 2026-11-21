@@ -364,17 +364,13 @@ test('photo upload keeps its caption and traits, and refuses a trait not on the 
   assert.equal(db.observation_photos.length, 2);
 });
 
-test('a botanist cannot add a record to a plant while one is waiting for an officer', async () => {
+test('D19: a botanist can add a revisit while an earlier observation of the plant waits for an officer', async () => {
   const first = observation();
   const body = { specimen_id: first.specimen_id, status: 'synced' };
-  const blocked = await request(app).post('/v1/observations').set(as('botanist')).send(body);
-  assert.equal(blocked.status, 409);
-  assert.equal(blocked.body.error?.code ?? blocked.body.code, 'REVIEW_IN_PROGRESS');
-  assert.equal(db.observations.length, 1);
-
-  first.status = 'returned';
-  const allowed = await request(app).post('/v1/observations').set(as('botanist')).send(body);
-  assert.equal(allowed.status, 201, 'allowed again once the decision is back');
+  const res = await request(app).post('/v1/observations').set(as('botanist')).send(body);
+  assert.equal(res.status, 201);
+  assert.equal(db.observations.length, 2);
+  assert.deepEqual(db.observations.map((o) => o.status), ['synced', 'synced'], 'both wait for review');
 });
 
 test('photo upload rejects HEIC images to protect location privacy (CTIP-110)', async () => {
@@ -1093,13 +1089,11 @@ test('POST /sync answers another user\'s id with ID_TAKEN and keeps their row', 
   assert.equal(theirs.notes, 'theirs');
 });
 
-test('POST /sync leaves a plant waiting for an officer alone (botanist), and still saves the others', async () => {
+test('D19: POST /sync saves a revisit of a plant that already waits for an officer', async () => {
   const specimen_id = crypto.randomUUID();
   observation({ specimen_id, status: 'synced' });
   const res = await sync([syncItem({ specimen_id }), syncItem()]);
-  assert.equal(res.body.results[0].result, 'error');
-  assert.equal(res.body.results[0].error.code, 'REVIEW_IN_PROGRESS');
-  assert.equal(res.body.results[1].result, 'created');
+  assert.deepEqual(res.body.results.map((r) => r.result), ['created', 'created']);
 });
 
 test('POST /sync resend of a create the server already holds answers created, even once the plant waits for an officer', async () => {

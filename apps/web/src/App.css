@@ -908,6 +908,10 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 .tagheader { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px; }
 .tagthumb { width: 112px; height: 112px; border-radius: var(--r-card); object-fit: cover; background: var(--raised); }
 .tagheader .grow > * { margin: 0 0 6px !important; }
+/* The title block takes the row; the action buttons always sit on their own row under it,
+   so five officer buttons never squeeze the plant name into a narrow column. */
+.tagheader > .grow { flex: 1 1 360px; min-width: 0; }
+.tagheader > .row { flex: 1 1 100%; }
 .tagheader h1.tagid { font-size: 28px; line-height: 36px; }
 .tabs { display: flex; flex-wrap: wrap; gap: var(--s-1); margin: 20px 0 var(--s-4); border-bottom: 1px solid var(--line); }
 .tabs button { min-height: 44px; padding: var(--s-2) var(--s-4); border: 0; border-bottom: 3px solid transparent; background: none; color: var(--ink2); font: 600 var(--t-label-size) var(--f-text); cursor: pointer; }
