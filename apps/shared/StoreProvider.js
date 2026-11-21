@@ -1005,9 +1005,11 @@ function collectionMatches(a = [], b = []) {
   // `before` is the observation's saved photos, `after` the list from the photo
   // editor (new photos carry a `file`). Returns { ok, message }; never throws.
   const setObservationPhotos = async (obsId, before, after) => {
+    // A new photo: a File on the website, or a picked image (`isNew`, with url/base64) on the phone.
+    const isNew = (p) => !!p.file || !!p.isNew;
     try {
       for (const p of after) {
-        if (p.file) continue;
+        if (isNew(p)) continue;
         const old = before.find((o) => o.id === p.id);
         const caption = (p.caption || "").trim();
         if (!old || (old.caption || "").trim() === caption) continue;
@@ -1019,7 +1021,7 @@ function collectionMatches(a = [], b = []) {
         const res = await callApi(deleteObservationPhotoApi, obsId, old.id);
         if (!res.ok && res.status !== 404) return { ok: false, message: `A photo was not removed: ${res.message}` };
       }
-      for (const p of after.filter((x) => x.file)) {
+      for (const p of after.filter(isNew)) {
         const res = await callApi(uploadObservationPhotoApi, obsId, { ...p, id: p.id || uid() });
         if (!res.ok) return { ok: false, message: `A photo was not added: ${res.message}` };
       }

@@ -1,8 +1,8 @@
 # Branch `rick-fix-officer-tag-plant-page`: unpublish, review and send back a tagged plant
 
-*Written 21 Nov 2026. Based on `main` at `9575812`. The database, API, shared code and the
-**web** tag page are done. The **mobile app is not updated yet**: this note says what
-it needs.*
+*Written 21 Nov 2026. Based on `main` at `9575812`. The database, API, shared code, the
+**web** tag page and the **mobile app** are done. Section 2 lists the mobile work, now
+implemented (see "Mobile: done" below).*
 
 The rules are **RBAC D17 and D18** in [RBAC.md](../../RBAC.md). Read those first. In short:
 
@@ -32,6 +32,19 @@ The rules are **RBAC D17 and D18** in [RBAC.md](../../RBAC.md). Read those first
 The web version to copy from is `apps/web/src/pages/Specimen.jsx`. Look at `ReviewModePanel`, `UnpublishPanel` and the header buttons and callouts at the top of `Specimen()`.
 
 ---
+
+## Mobile: done (21 Nov 2026)
+
+| Spec | Where |
+|---|---|
+| 2.1 Plant page: status chip ("Unpublished", "Sent back for review" / "Sent back to botanist"), Unpublish (reason + type `UNPUBLISH`), Publish again (type `PUBLISH`, disabled with the reason while blocked), Review tag, the Unpublished and Sent back callouts, "See the decision" removed, hide-location switch for admins only | `apps/mobile/pages/PlantPage.js` (`TaggedPlant`, `TypedConfirm`) |
+| 2.2 Review mode: species, photo captions and removals, hide-location switch as a draft; Save changes; Send back to botanist (reason); Discard | new screen `apps/mobile/pages/PlantReview.js`, route `plantReview` (needs `review`) |
+| 2.3 Review screen: on an unpublished plant, "Approve" says the plant stays unpublished | `apps/mobile/pages/Review.js` |
+| 2.4 Returned record: take or pick new photos, edit captions, remove photos, saved just before "Resubmit for review" | `apps/mobile/pages/Records.js`; `setObservationPhotos()` in `apps/shared/StoreProvider.js` now also uploads phone photos (`isNew`) |
+| 2.5 Notifications: `plant_unpublished`, `plant_republished` icons; tapping opens the plant | `apps/mobile/pages/Notifications.js` |
+
+Checked: mobile tests (101 pass) and `npx expo export --platform android` (bundles). Not yet
+checked on a device or emulator: run the checklist in section 3 on the APK.
 
 ## 2. What the mobile app needs
 

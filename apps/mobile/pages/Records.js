@@ -8,10 +8,9 @@ import { View, Text, Alert } from 'react-native';
 import { useStore } from '../../shared/store.js';
 import { plantView, nameOf, unfinishedPlants, recordMatches, draftMatches } from '../../shared/selectors.js';
 import { useTheme, font } from '../components/Theme.js';
-import Icon from '../components/Icon.js';
 import PlantSpotMap from '../components/PlantSpotMap.js';
 import {
-  Screen, Bar, TitleBlock, Pills, SortBar, SearchField, Section, Row, Thumb, Mono, Txt, Sci, DotLabel, Notice, KV, Button, Area, Avatar, Empty, EmptyState, Field,
+  Screen, Bar, TitleBlock, Pills, SortBar, SearchField, Section, Row, Thumb, Mono, Txt, Sci, DotLabel, Notice, KV, Button, Area, Avatar, Empty, EmptyState, Field, TextLink,
 } from '../components/Bits.js';
 import { shortDate, dateTime, coords, accuracy } from '../components/format.js';
 import { usePolling } from '../hooks/usePolling.js';
@@ -20,6 +19,10 @@ import { listDraftsFor } from '../draftStore.js';
 import { withoutOutboxTwins, OFFLINE_NOTICE } from '../../shared/offline/syncStatus.js';
 import { OnThisPhone } from './PhoneRecords.js';
 import { editSnapshot, LIMITS, HEIGHT_PROBLEM, heightOk } from '../../shared/offline/records.js';
+import { PHOTO_CAPTION_MAX } from '../../shared/data.js';
+import { takePhoto, pickFromGallery } from './AddPlant.js';
+
+const MAX_PHOTOS = 6; // the same limit as a new record
 
 const GROUPS = [
   { key: 'fix', title: 'Needs you', statuses: ['returned', 'draft'] },
@@ -209,7 +212,7 @@ const lastReview = (db, obsId) => db.reviews.filter((r) => r.observation_id === 
 
 export function RecordDetail({ nav, params = {} }) {
   usePolling(5000);
-  const { db, me, resubmit, syncObservation, editUnsent } = useStore();
+  const { db, me, resubmit, syncObservation, editUnsent, setObservationPhotos } = useStore();
   const { c } = useTheme();
   const [message, setMessage] = useState('');
   const o = db.observations.find((x) => x.id === params.id);
@@ -237,14 +240,30 @@ export function RecordDetail({ nav, params = {} }) {
     if (o && !fix) setFix(editForm(o));
   }, [o, fix]);
   const [sending, setSending] = useState(false);
+  // The photos of a returned record as the botanist changes them (null = unchanged).
+  // A draft, saved just before "Resubmit for review", like the website (RBAC D18).
+  const [photoDraft, setPhotoDraft] = useState(null);
   const plant = o ? plantView(db, db.plants.find((p) => p.id === o.specimen_id)) : null;
   if (!o || !plant) {
     return <Screen header={<Bar title="Record" onBack={nav.back} />}><Empty>This record no longer exists.</Empty></Screen>;
   }
   const review = lastReview(db, o.id);
   const comments = db.comments.filter((x) => x.observation_id === o.id && x.body !== review?.comment).sort((a, b) => a.created_at.localeCompare(b.created_at));
-  const photos = plant.photos.filter((p) => p.observation_id === o.id);
+  const savedPhotos = plant.photos.filter((p) => p.observation_id === o.id);
+  const photos = photoDraft ?? savedPhotos;
   const returned = o.status === 'returned';
+  // Sent back from an unpublished plant (RBAC D18) reads differently from a normal return.
+  const sentBack = returned && plant.withdrawn;
+  const photosChanged = photoDraft != null && (
+    photoDraft.length !== savedPhotos.length
+    || photoDraft.some((p) => p.isNew || (savedPhotos.find((s) => s.id === p.id)?.caption || '').trim() !== (p.caption || '').trim())
+  );
+  const addPhotos = async (pick) => {
+    const items = (await pick()).map((p) => ({ ...p, isNew: true, caption: '' }));
+    if (items.length) setPhotoDraft([...photos, ...items].slice(0, MAX_PHOTOS));
+  };
+  const removePhoto = (id) => setPhotoDraft(photos.filter((p) => p.id !== id));
+  const setCaption = (id, caption) => setPhotoDraft(photos.map((p) => (p.id === id ? { ...p, caption } : p)));
   // What the form shows. `fix` is filled by the effect above right after the record
   // first loads; this covers that one render so the form never flashes empty.
   const fixForm = fix || editForm(o);
@@ -257,6 +276,16 @@ export function RecordDetail({ nav, params = {} }) {
       return;
     }
     setSending(true);
+    // Photos first: if one fails, the record is not sent half-fixed.
+    if (photosChanged) {
+      const saved = await setObservationPhotos(o.id, savedPhotos, photoDraft);
+      if (!saved.ok) {
+        setSending(false);
+        Alert.alert('Photos not saved', saved.message);
+        return;
+      }
+      setPhotoDraft(null);
+    }
     const r = await resubmit(o.id, message.trim(), fix); // shows its own success or error message
     setSending(false);
     if (r.ok) nav.back(); // on failure the edits stay on screen
@@ -291,7 +320,7 @@ export function RecordDetail({ nav, params = {} }) {
   return (
     <Screen
       refresh={!(returned || canEdit)}
-      header={<Bar title={plant.qr_id} sub={`${o.status === 'returned' ? 'Returned' : o.status === 'approved' ? 'Published' : 'Recorded'} ${shortDate(returned ? review?.created_at : o.observed_at)}`} onBack={nav.back} />}
+      header={<Bar title={plant.qr_id} sub={`${sentBack ? 'Sent back' : o.status === 'returned' ? 'Returned' : o.status === 'approved' ? 'Published' : 'Recorded'} ${shortDate(returned ? review?.created_at : o.observed_at)}`} onBack={nav.back} />}
       gap={20}
       top={20}
       footer={returned
@@ -308,7 +337,7 @@ export function RecordDetail({ nav, params = {} }) {
       </View>
 
       {returned && review ? (
-        <Notice tone="warning" icon="undo" title={`Returned by ${nameOf(db, review.reviewer_id)}`} body={review.comment || 'No note was added.'} meta={dateTime(review.created_at)} />
+        <Notice tone="warning" icon="undo" title={`${sentBack ? 'Sent back for review by' : 'Returned by'} ${nameOf(db, review.reviewer_id)}`} body={review.comment || 'No note was added.'} meta={sentBack ? `${dateTime(review.created_at)}. The plant is unpublished until an officer reviews your fix and publishes it again.` : dateTime(review.created_at)} />
       ) : null}
       {o.status === 'synced' ? <Notice tone="info" icon="lock" title="Waiting for an officer" body="Observation review is in progress. Edits are locked until an officer decides on this record." /> : null}
 
@@ -329,10 +358,31 @@ export function RecordDetail({ nav, params = {} }) {
         </View>
       ) : null}
 
-      <Section title="Photos" right={<Txt v="caption" color={c.ink3}>{photos.length} of 6</Txt>} gap={12}>
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-          {photos.map((p, i) => <Thumb key={p.id ? `${p.id}-${i}` : i} uri={p.url} size={76} />)}
-        </View>
+      <Section title="Photos" right={<Txt v="caption" color={photosChanged ? c.warning : c.ink3}>{photosChanged ? 'Changed · saved when you resubmit' : `${photos.length} of ${MAX_PHOTOS}`}</Txt>} gap={12}>
+        {returned ? (
+          <>
+            {photos.map((p, i) => (
+              <View key={p.id ? `${p.id}-${i}` : i} style={{ flexDirection: 'row', gap: 12, alignItems: 'flex-start' }}>
+                <Thumb uri={p.url} size={76} />
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Field label={`Caption ${i + 1}`} optional value={p.caption || ''} maxLength={PHOTO_CAPTION_MAX} onChangeText={(t) => setCaption(p.id, t)} />
+                  <Button label="Remove" icon="trash" kind="secondary" height={40} size={14} disabled={sending} onPress={() => removePhoto(p.id)} />
+                </View>
+              </View>
+            ))}
+            {photos.length < MAX_PHOTOS ? (
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Button label="Take photo" icon="camera" kind="secondary" flex={1} height={44} size={14} disabled={sending} onPress={() => addPhotos(takePhoto)} />
+                <Button label="From gallery" icon="image" kind="secondary" flex={1} height={44} size={14} disabled={sending} onPress={() => addPhotos(pickFromGallery)} />
+              </View>
+            ) : null}
+            {photosChanged ? <TextLink label="Undo photo changes" size={14} onPress={() => setPhotoDraft(null)} /> : null}
+          </>
+        ) : (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+            {photos.map((p, i) => <Thumb key={p.id ? `${p.id}-${i}` : i} uri={p.url} size={76} />)}
+          </View>
+        )}
         {photos.length === 0 ? <Txt v="small" color={c.ink2}>No photos.</Txt> : null}
       </Section>
 
@@ -368,7 +418,6 @@ export function RecordDetail({ nav, params = {} }) {
 
       {returned ? <Area label="Reply to the officer" optional value={message} onChangeText={setMessage} placeholder="What did you change?" rows={2} /> : null}
       {o.status === 'approved' ? <Button label="Open plant page" kind="secondary" onPress={() => nav.go('tag', { qr: plant.qr_id })} /> : null}
-      {returned ? <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}><Icon name="info" size={18} color={c.ink3} /><Txt v="caption" color={c.ink2} style={{ flex: 1, fontFamily: font('text', 600) }}>Photos can't be changed on a returned record. To add one, use "Record a revisit" on the plant's page.</Txt></View> : null}
     </Screen>
   );
 }

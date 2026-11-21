@@ -605,7 +605,8 @@ plus handler checks) and **database** (Supabase RLS policies and triggers).
 - Done for the database (`20261121120000_rbac_d17_d18_unpublish_tagged_plant.sql`), the
   API (`POST /specimens/:id/publish`, officer only) and the **web** tag page
   (`apps/web/src/pages/Specimen.jsx`).
-- Still to do on **mobile**: see `docs/updates/rick-fix-officer-tag-plant-page.md`.
+- Done on **mobile** too (`apps/mobile/pages/PlantPage.js`, `PlantReview.js`, `Review.js`, `Records.js`,
+  `Notifications.js`); see `docs/updates/rick-fix-officer-tag-plant-page.md`.
 
 ### Already matching (no change needed)
 Botanist rules for editing and sending their own observations, officer review rules, sensor node and alert routing rules,
