@@ -4,9 +4,10 @@ import { supabaseAs } from './supabase.js';
 import { parseBody, fail, dbError, validationError, UUID } from './validate.js';
 import { detectImageType, stripMetadata, EXTENSIONS, receiveFile } from './images.js';
 import { protectSpecimen } from './distribution.js';
-import { OBS_COLUMNS, findObservation } from './observationAccess.js';
+import { OBS_COLUMNS, findObservation, ownOrStaff, PRIVATE_TALK_MESSAGE } from './observationAccess.js';
 import { isFullLink, isWebLink } from './photoLinks.js';
 import { sendPushToUsers } from './pushNotifications.js';
+import { photoPath } from './photoLinks.js';
 
 // Field work: a botanist registers a plant on a QR tag (specimen), records
 // observations of it, adds photos and comments, and sends records for review.
@@ -39,6 +40,13 @@ const SpecimenCreate = z.strictObject({
   lng: coord(180),
   gps_accuracy_m: z.number().min(0).nullable().optional(),
 });
+// RBAC D13: move a plant to a new tag. The old tag is first marked retired
+// (lost) or damaged; it is never reused.
+const SpecimenRetag = z.strictObject({
+  qr_id: z.string().trim().min(1).max(64),
+  old_tag: z.enum(['retired', 'damaged']),
+});
+
 const SpecimenUpdate = z.strictObject({
   species_id: id.nullable().optional(),
   proposed_species_name: text(200),
@@ -67,6 +75,8 @@ const PhotoNotes = z.strictObject({
   traits: z.array(z.enum(['Whole plant', 'Tree trunk', 'Bark', 'Leaf', 'Flower', 'Fruit', 'Seed', 'Root'])).max(8),
 });
 
+const PhotoCaption = z.strictObject({ caption: text(200) });
+
 const SpecimenList = z.object({
   species_id: id.optional(),
   unresolved: z.enum(['true', 'false']).optional(), // true: no species linked yet
@@ -88,7 +98,56 @@ export const EDITABLE = ['draft', 'queued'];
 export const isDuplicate = (error, constraint) => error?.code === '23505' && error.message.includes(constraint);
 const obsNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Observation not found');
 const plantNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Plant not found');
+
+// RBAC D4: officers delete a tagged plant (soft delete) and restore it. A
+// deleted plant leaves every list, the map and the public pages; its tag stays
+// taken and its observations are kept, so a restore brings it back as it was.
+// The database trigger guard_specimen_update() lets only officers change
+// is_deleted (migration 20261120070000).
+async function setPlantDeleted(req, res, deleted) {
+  if (!UUID.test(req.params.id)) return plantNotFound(res);
+  const db = supabaseAs(req.user);
+  // An observation waiting for review would drop out of every review queue
+  // while still "waiting", so it must be decided first.
+  if (deleted) {
+    const waiting = await db.from('observations').select('id')
+      .eq('specimen_id', req.params.id).eq('status', 'synced').eq('is_deleted', false).limit(1);
+    if (waiting.error) return dbError(res, waiting.error);
+    if (waiting.data.length) {
+      return fail(res, 409, 'REVIEW_IN_PROGRESS', 'This plant has an observation waiting for review. Approve, return or reject it before deleting the plant.');
+    }
+  }
+  const { data, error } = await db
+    .from('specimens')
+    .update({ is_deleted: deleted })
+    .eq('id', req.params.id)
+    .eq('is_deleted', !deleted)
+    .select(SPECIMEN_COLUMNS)
+    .maybeSingle();
+  if (error) return dbError(res, error);
+  if (!data) return plantNotFound(res); // no such plant, or already deleted (or not deleted)
+  if (deleted) return res.status(204).end();
+  res.json(data);
+}
 const photoNotFound = (res) => fail(res, 404, 'NOT_FOUND', 'Photo not found');
+
+// The photo named in the path, when this user may change it: an officer any
+// photo, a botanist only photos on their own observations. Answers
+// { db, photo } or sends the error and answers null.
+async function photoToChange(req, res) {
+  const db = supabaseAs(req.user);
+  const obs = await observationOr404(db, req, res);
+  if (!obs) return null;
+  if (req.user.role !== 'officer' && obs.recorded_by !== req.user.id) {
+    fail(res, 403, 'FORBIDDEN', 'You can change photos only on your own observations.');
+    return null;
+  }
+  const { data: photo, error } = await db.from('observation_photos').select(PHOTO_COLUMNS)
+    .eq('id', req.params.photoId).eq('observation_id', obs.id).maybeSingle();
+  if (error) { dbError(res, error); return null; }
+  if (!photo) { photoNotFound(res); return null; }
+  return { db, photo };
+}
 const changedMeanwhile = (res) =>
   fail(res, 409, 'VERSION_CONFLICT', 'This record changed since you opened it. Refresh and try again.');
 
@@ -149,7 +208,10 @@ async function ownDraftOrError(db, req, res, version) {
   const obs = await observationOr404(db, req, res);
   if (!obs) return null;
   if (obs.recorded_by !== req.user.id) {
-    fail(res, 403, 'FORBIDDEN', 'Only the botanist who recorded this can change it. Officers use the review instead.');
+    // RBAC D16: another botanist can read an approved observation but never change it.
+    fail(res, 403, 'FORBIDDEN', req.user.role === 'botanist'
+      ? 'This observation was recorded by another botanist. You can read it but not change it.'
+      : 'Only the botanist who recorded this can change it. Officers use the review instead.');
     return null;
   }
   if (!EDITABLE.includes(obs.status)) {
@@ -275,6 +337,11 @@ export const fieldHandlers = {
     if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Plant not found');
     const body = parseBody(SpecimenUpdate, req, res);
     if (!body) return;
+    // RBAC D2 and D15: an admin may only hide or show a plant's location.
+    // The database trigger guard_specimen_update() says the same.
+    if (req.user.role === 'admin' && Object.keys(body).some((k) => k !== 'endangered_override')) {
+      return fail(res, 403, 'FORBIDDEN', 'An admin can only hide or show a plant\'s location.');
+    }
     const { data, error } = await supabaseAs(req.user)
       .from('specimens')
       .update(body)
@@ -286,6 +353,41 @@ export const fieldHandlers = {
     if (!data) return fail(res, 404, 'NOT_FOUND', 'Plant not found');
     res.json(data);
   },
+
+  'delete /specimens/:id': (req, res) => setPlantDeleted(req, res, true),
+
+  // RBAC D13: only officers re-tag a plant, and only after its old tag is
+  // marked retired or damaged. This marks the old tag first (as the officer
+  // chose), then moves the plant; the plant and its records stay the same.
+  // The database (guard_specimen_update(), migration 20261120080000) refuses
+  // a tag change while the old tag is still in use, and the tag trigger
+  // refuses a new tag that is taken, retired or kept for a botanist.
+  'post /specimens/:id/retag': async (req, res) => {
+    if (!UUID.test(req.params.id)) return plantNotFound(res);
+    const body = parseBody(SpecimenRetag, req, res);
+    if (!body) return;
+    const db = supabaseAs(req.user);
+    const plant = await db.from('specimens').select('id, qr_id').eq('id', req.params.id).eq('is_deleted', false).maybeSingle();
+    if (plant.error) return dbError(res, plant.error);
+    if (!plant.data) return plantNotFound(res);
+    const newTag = body.qr_id.toUpperCase();
+    if (newTag === plant.data.qr_id) return fail(res, 422, 'SAME_TAG', 'Pick a different tag from the one the plant has now.');
+    if (plant.data.qr_id) {
+      const old = await db.from('qr_tags').update({ status: body.old_tag }).eq('qr_id', plant.data.qr_id).select('qr_id').maybeSingle();
+      if (old.error) return dbError(res, old.error);
+    }
+    const { data, error } = await db.from('specimens').update({ qr_id: newTag }).eq('id', plant.data.id)
+      .select(SPECIMEN_COLUMNS).maybeSingle();
+    if (!error && data) return res.json(data);
+    if (!error) return plantNotFound(res);
+    if (error.code === '23505') return fail(res, 409, 'TAG_IN_USE', `Tag ${newTag} is already on another plant. Pick an unused tag.`);
+    if (error.code === '23503') return fail(res, 422, 'TAG_NOT_FOUND', `Tag ${newTag} is not in the tag list. Make it on the QR tags page first.`);
+    if (error.code === 'CTTG0') return fail(res, 409, 'TAG_RETIRED', `Tag ${newTag} has been retired or is damaged. Pick an unused tag.`);
+    if (error.code === 'CTTG1') return fail(res, 409, 'TAG_RESERVED', `Tag ${newTag} is kept for a botanist. Pick another unused tag.`);
+    if (error.code === 'CTTG2') return fail(res, 409, 'OLD_TAG_IN_USE', `Tag ${plant.data.qr_id} must be marked retired or damaged first.`);
+    return dbError(res, error);
+  },
+  'post /specimens/:id/restore': (req, res) => setPlantDeleted(req, res, false),
 
   // A new observation of a plant: the first one after registering, or a revisit.
   'post /observations': async (req, res) => {
@@ -330,6 +432,8 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    // RBAC D16: another botanist's approved observation is readable, never sendable.
+    if (obs.recorded_by !== req.user.id) return fail(res, 403, 'FORBIDDEN', 'Only the botanist who recorded this can send it.');
 
     const { comment, ...edits } = body;
     let changes;
@@ -434,6 +538,8 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    // RBAC D1/D16: photos go only on the botanist's own observation.
+    if (obs.recorded_by !== req.user.id) return fail(res, 403, 'FORBIDDEN', 'You can add photos only to your own observations.');
 
     const already = await db.from('observation_photos').select(PHOTO_COLUMNS).eq('id', photoId).maybeSingle();
     if (already.error) return dbError(res, already.error);
@@ -478,6 +584,7 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    if (!ownOrStaff(obs, req.user)) return fail(res, 403, 'FORBIDDEN', 'You can change photos only on your own observations.');
     const { data: photo, error } = await db.from('observation_photos').select(PHOTO_COLUMNS)
       .eq('id', req.params.photoId).eq('observation_id', obs.id).maybeSingle();
     if (error) return dbError(res, error);
@@ -496,11 +603,43 @@ export const fieldHandlers = {
     res.json((await withSignedUrls(db, [updated.data]))[0]);
   },
 
+  // RBAC: an officer may edit the caption of, or remove, a photo on any
+  // observation; a botanist only on their own. Visitors never reach these.
+  'patch /observations/:id/photos/:photoId': async (req, res) => {
+    if (!UUID.test(req.params.id) || !UUID.test(req.params.photoId)) return photoNotFound(res);
+    const body = parseBody(PhotoCaption, req, res);
+    if (!body) return;
+    const found = await photoToChange(req, res);
+    if (!found) return;
+    const { db, photo } = found;
+    const { data, error } = await db.from('observation_photos').update({ caption: body.caption ?? null })
+      .eq('id', photo.id).select(PHOTO_COLUMNS).maybeSingle();
+    if (error) return dbError(res, error);
+    if (!data) return fail(res, 403, 'FORBIDDEN', 'You cannot change this photo');
+    res.json((await withSignedUrls(db, [data]))[0]);
+  },
+
+  // Removes the record, then the file. The file goes second so a refused
+  // delete never leaves a record that points at nothing.
+  'delete /observations/:id/photos/:photoId': async (req, res) => {
+    if (!UUID.test(req.params.id) || !UUID.test(req.params.photoId)) return photoNotFound(res);
+    const found = await photoToChange(req, res);
+    if (!found) return;
+    const { db, photo } = found;
+    const { data, error } = await db.from('observation_photos').delete().eq('id', photo.id).select('id').maybeSingle();
+    if (error) return dbError(res, error);
+    if (!data) return fail(res, 403, 'FORBIDDEN', 'You cannot remove this photo');
+    const key = photoPath(photo.s3_key);
+    if (key) await db.storage.from(PHOTO_BUCKET).remove([key]);
+    res.status(204).end();
+  },
+
   'get /observations/:id/comments': async (req, res) => {
     if (!UUID.test(req.params.id)) return obsNotFound(res);
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    if (!ownOrStaff(obs, req.user)) return fail(res, 403, 'FORBIDDEN', PRIVATE_TALK_MESSAGE);
     const { data, error } = await db.from('observation_comments').select(COMMENT_COLUMNS)
       .eq('observation_id', req.params.id).order('created_at');
     if (error) return dbError(res, error);
@@ -514,6 +653,7 @@ export const fieldHandlers = {
     const db = supabaseAs(req.user);
     const obs = await observationOr404(db, req, res);
     if (!obs) return;
+    if (!ownOrStaff(obs, req.user)) return fail(res, 403, 'FORBIDDEN', PRIVATE_TALK_MESSAGE);
     const { data, error } = await db
       .from('observation_comments')
       .insert({ observation_id: obs.id, author_id: req.user.id, body: body.body })
@@ -538,14 +678,21 @@ export const fieldHandlers = {
 };
 
 // Field photos are private: each row gets a link that works for a day.
-// Rows saved by older app builds may hold a full link instead of a Storage path.
+// Rows saved by older app builds may hold a full link instead of a Storage
+// path; a link into our own photo bucket is signed by its path too (it never
+// opens as it is, the bucket being private). Any other web link is kept.
+// Visitors' rows are signed with the visitor client: the storage policy
+// "obs photos: visitors read published" lets it sign only published photos.
 export async function withSignedUrls(db, rows) {
-  const paths = rows.map((r) => r.s3_key).filter((k) => k && !isFullLink(k));
+  const paths = [...new Set(rows.map((r) => photoPath(r.s3_key)).filter(Boolean))];
   const signed = new Map();
   if (paths.length) {
     const { data, error } = await db.storage.from(PHOTO_BUCKET).createSignedUrls(paths, SIGNED_FOR);
     if (error) console.warn('observation photo links not signed:', error.message);
     for (const item of data ?? []) if (item?.signedUrl) signed.set(item.path, item.signedUrl);
   }
-  return rows.map((r) => ({ ...r, url: signed.get(r.s3_key) ?? (isWebLink(r.s3_key) ? r.s3_key : null) }));
+  return rows.map((r) => {
+    const path = photoPath(r.s3_key);
+    return { ...r, url: path ? signed.get(path) ?? null : isWebLink(r.s3_key) ? r.s3_key : null };
+  });
 }

@@ -201,7 +201,48 @@ function TaggedTable() {
               </span>
             </div>
           )}
+
+          {can(role, "deletePlants") && <DeletedPlants />}
       </section>
     </Shell>
+  );
+}
+
+// RBAC D4: officers see the deleted plants and can bring one back as it was.
+function DeletedPlants() {
+  const { db, setPlantDeleted } = useStore();
+  const [busy, setBusy] = useState(null);
+  const deleted = [...(db.deletedPlants || [])].sort((a, b) => String(a.qr_id).localeCompare(String(b.qr_id), undefined, { numeric: true }));
+  const speciesName = (p) => db.species.find((s) => s.id === p.species_id)?.common_name || p.proposed_species || "Unknown species";
+  const restore = async (p) => {
+    setBusy(p.id);
+    await setPlantDeleted(p.id, false);
+    setBusy(null);
+  };
+  return (
+    <section className="glass pad deletedplants" aria-labelledby="deleted-plants">
+      <h2 id="deleted-plants">Deleted plants <span className="mute">· {deleted.length}</span></h2>
+      <p className="mute small">Hidden from every list, the map and the public pages. Restore one to bring it back as it was, with its tag and records.</p>
+      {!deleted.length ? (
+        <Empty icon="leaf">No deleted plants.</Empty>
+      ) : (
+        <div className="tablewrap">
+          <table>
+            <thead><tr><th scope="col">Tag</th><th scope="col">Species</th><th scope="col">Recorded by</th><th scope="col">Last changed</th><th scope="col"><span className="sr">Actions</span></th></tr></thead>
+            <tbody>
+              {deleted.map((p) => (
+                <tr key={p.id}>
+                  <td className="tagid">{p.qr_id}</td>
+                  <td>{speciesName(p)}</td>
+                  <td>{nameOf(db, p.registered_by)}</td>
+                  <td className="nowrap mute">{p.updated_at ? fmtDate(p.updated_at) : "-"}</td>
+                  <td className="actions"><button className="btn ghost" disabled={busy === p.id} onClick={() => restore(p)}><Icon name="undo" size={16} /> Restore</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }

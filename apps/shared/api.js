@@ -400,6 +400,17 @@ export async function mfaResetApi() {
   return res;
 }
 
+// RBAC D14: the access token from an email-correction link, used once.
+let emailChangeToken = null;
+
+/** POST /v1/auth/email-change/confirm with the link's token. Answers { ok, data: { email } }. */
+export async function confirmEmailChangeApi() {
+  const token = emailChangeToken;
+  emailChangeToken = null;
+  if (!token) return { ok: false, status: 0, message: "Open the link in the email again." };
+  return apiFetch("/auth/email-change/confirm", { method: "POST", token: null, body: { access_token: token } });
+}
+
 /** POST /v1/auth/sign-out with the current token, then forgets the session. Never fails. */
 export async function signOutApi() {
   const token = getAuthToken();
@@ -472,6 +483,12 @@ export function takeSessionFromUrl() {
     user: { id: claims.sub, email: claims.email },
   };
   const type = params.get("type") || "signin";
+  // RBAC D14: an email-correction link carries a placeholder's session. It is
+  // never signed in; it only proves the new address (confirmEmailChangeApi()).
+  if (type === "invite" && claims.user_metadata?.email_change_request) {
+    emailChangeToken = access_token;
+    return "emailchange";
+  }
   if (type === "magiclink") mfaResetSession = session; // lost-phone link: see mfaResetApi()
   else if (type === "recovery") passwordResetSession = session; // reset link: see resetPasswordApi()
   else setSession(session);
@@ -624,11 +641,23 @@ export const updateProfileApi = (id, changes, { token } = {}) => send("PATCH", `
 // Soft delete: the account is off at once and can be restored for 30 days.
 export const deleteProfileApi = (id, { token } = {}) => send("DELETE", `/profiles/${enc(id)}`, undefined, token);
 export const restoreProfileApi = (id, { token } = {}) => send("POST", `/profiles/${enc(id)}/restore`, undefined, token);
+// RBAC D14: emails a confirmation link to the new address; nothing changes until it is clicked.
+export const correctEmailApi = (id, email, { token } = {}) => send("POST", `/profiles/${enc(id)}/email`, { email }, token);
 
 // Plants and observations
 export const findSpecimenByQrApi = (qrId, { token } = {}) => apiFetch(`/specimens/by-qr/${enc(qrId)}`, { token });
 export const createSpecimenApi = (specimen, { token } = {}) => send("POST", "/specimens", specimen, token);
 export const updateSpecimenApi = (id, changes, { token } = {}) => send("PATCH", `/specimens/${enc(id)}`, changes, token);
+// RBAC D4: officers only. A deleted plant leaves every list; its tag and records stay.
+export const deleteSpecimenApi = (id, { token } = {}) => send("DELETE", `/specimens/${enc(id)}`, undefined, token);
+export const restoreSpecimenApi = (id, { token } = {}) => send("POST", `/specimens/${enc(id)}/restore`, undefined, token);
+// RBAC D13: officers only. `old_tag` is "retired" (lost) or "damaged".
+export const retagSpecimenApi = (id, qr_id, old_tag, { token } = {}) => send("POST", `/specimens/${enc(id)}/retag`, { qr_id, old_tag }, token);
+// RBAC: officers on any observation, botanists on their own.
+export const updateObservationPhotoApi = (obsId, photoId, caption, { token } = {}) =>
+  send("PATCH", `/observations/${enc(obsId)}/photos/${enc(photoId)}`, { caption }, token);
+export const deleteObservationPhotoApi = (obsId, photoId, { token } = {}) =>
+  send("DELETE", `/observations/${enc(obsId)}/photos/${enc(photoId)}`, undefined, token);
 export const createObservationApi = (obs, { token } = {}) => send("POST", "/observations", obs, token);
 export const fetchObservationApi = (id, { token } = {}) => apiFetch(`/observations/${enc(id)}`, { token });
 // Edit a draft or queued record: { height_cm?, morphology?, notes?, version }. `changes` must hold

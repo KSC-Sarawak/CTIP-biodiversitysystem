@@ -12,10 +12,12 @@ import { useStore } from "../../../shared/store.js";
 import { fuzzyMatch } from "../../../shared/fuzzy.js";
 import { BLANK_SPECIES, isThreatened } from "../../../shared/data.js";
 import { speciesMedia, speciesObservationPhotos } from "../../../shared/selectors.js";
+import { can } from "../../../shared/permissions.js";
 
-// Officer and admin page for the species encyclopedia: add, edit, photos, publish, delete, restore.
+// Species encyclopedia, published and unpublished. Officers add, edit, change photos,
+// publish, delete and restore. Admins see the same list read-only (RBAC D2, D6).
 export default function Species() {
-  const { db, loadStaffSpecies, togglePublish, deleteSpecies, restoreSpecies, setSpeciesMedia, notify } = useStore();
+  const { db, role, loadStaffSpecies, togglePublish, deleteSpecies, restoreSpecies, setSpeciesMedia, notify } = useStore();
   const [q, setQ] = useState("");
   const [loadError, setLoadError] = useState(null); // the API could not give us the list
 
@@ -28,6 +30,7 @@ export default function Species() {
   const [removing, setRemoving] = useState(null);
   const [photosOf, setPhotosOf] = useState(null); // species whose photos are open in the editor
   const [ask, confirmDialog] = useConfirm();
+  const canManage = can(role, "species");
 
   const flipPublish = async (s) => {
     const ok = await ask(s.is_published
@@ -92,7 +95,7 @@ export default function Species() {
         title="Species"
         lead={drafts ? `${drafts} ${drafts === 1 ? "species is" : "species are"} not published yet, so visitors cannot see ${drafts === 1 ? "it" : "them"}.` : `All ${liveSpecies.length} species are published.`}
         tone={drafts ? "warn" : "ok"}
-        actions={<button className="btn" onClick={() => setForm(BLANK_SPECIES)}><Icon name="plus" size={18} /> Add species</button>}
+        actions={canManage ? <button className="btn" onClick={() => setForm(BLANK_SPECIES)}><Icon name="plus" size={18} /> Add species</button> : <span className="mute small">View only</span>}
         stats={[
           { label: "Species", value: liveSpecies.length },
           { label: "Published", value: liveSpecies.length - drafts },
@@ -133,12 +136,16 @@ export default function Species() {
                   <td><Chip value={s.conservation_status} /></td>
                   <td className="num">{plantsOf(s.id)}</td>
                   <td>
-                    <button className={"switch" + (s.is_published ? " on" : "")} role="switch" aria-checked={s.is_published} onClick={() => flipPublish(s)} aria-label={`Publish ${s.scientific_name}`}><i /></button>
+                    {canManage
+                      ? <button className={"switch" + (s.is_published ? " on" : "")} role="switch" aria-checked={s.is_published} onClick={() => flipPublish(s)} aria-label={`Publish ${s.scientific_name}`}><i /></button>
+                      : <span className={s.is_published ? "" : "mute"}>{s.is_published ? "Public" : "Not published"}</span>}
                   </td>
                   <td className="actions">
+                    {canManage && <>
                     <button className="ic" onClick={() => setForm(s)} aria-label={`Edit ${s.scientific_name}`}><Icon name="pencil" size={18} /></button>
                     <button className="ic" onClick={() => setPhotosOf(s)} aria-label={`Photos of ${s.scientific_name}`} title={`${speciesMedia(db, s.id).length} photos`}><Icon name="camera" size={18} /></button>
                     <button className="ic" onClick={() => setRemoving(s)} aria-label={`Delete ${s.scientific_name}`}><Icon name="trash" size={18} /></button>
+                    </>}
                   </td>
                 </tr>
               ))}
@@ -161,7 +168,7 @@ export default function Species() {
                   <tr key={s.id}>
                     <td><b>{s.common_name || s.scientific_name}</b><small className="sci block">{s.scientific_name}</small></td>
                     <td>{s.family}</td>
-                    <td className="actions"><button className="btn ghost" onClick={() => restore(s)}>Restore</button></td>
+                    <td className="actions">{canManage && <button className="btn ghost" onClick={() => restore(s)}>Restore</button>}</td>
                   </tr>
                 ))}
               </tbody>

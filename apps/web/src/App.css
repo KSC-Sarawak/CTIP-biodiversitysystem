@@ -451,7 +451,7 @@ label.inline { display: flex !important; align-items: center; gap: var(--s-2); m
 .chip-near-threatened, .chip-vulnerable, .chip-medium, .chip-acknowledged, .chip-returned, .chip-return, .chip-update { --c: var(--warn); --c-soft: var(--warn-soft); --c-line: var(--warn-line); }
 .chip-rejected, .chip-reject, .chip-endangered, .chip-critically-endangered, .chip-extinct-in-the-wild, .chip-extinct, .chip-high, .chip-open, .chip-faulty, .chip-delete, .chip-retired { --c: var(--bad); --c-soft: var(--bad-soft); --c-line: var(--bad-line); }
 .chip-botanist, .chip-admin { --c: var(--acc); --c-soft: var(--acc-soft); --c-line: var(--acc-line); }
-/* draft, queued, unused, offline, low, unknown, data deficient and not evaluated use the default neutral tone */
+/* draft, queued, unused, offline, low and unknown use the default neutral tone */
 
 /* Filter pills: one per choice, the picked one filled with the accent. */
 .pill {
@@ -2394,3 +2394,7 @@ kbd { padding: 0 6px; border: 1px solid var(--line); border-bottom-width: 2px; b
 @keyframes acctRise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes acctFill { from { stroke-dasharray: 0 100; } }
 @keyframes acctGlow { 0%, 100% { box-shadow: var(--shadow); } 50% { box-shadow: 0 0 0 6px var(--acc-soft), var(--shadow); } }
+.deletedplants { margin-top: 24px; }
+.retagform { display: grid; gap: 14px; }
+.retagform fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+.retagform label > input:not([type="radio"]) { display: block; width: 100%; margin-top: 6px; }

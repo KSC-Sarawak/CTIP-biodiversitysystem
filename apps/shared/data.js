@@ -4,23 +4,23 @@
 // Public plants ensure visitors can view published specimens and the map
 // without needing to sign in and out first (CTIP-33 / visitor catalogue).
 
-// IUCN Red List categories, the only values the API accepts (CTIP-46).
-export const CONSERVATION = [
-  "least concern", "near threatened", "vulnerable", "endangered", "critically endangered",
-  "extinct in the wild", "extinct", "data deficient", "not evaluated",
-];
-// A new species, before anything is typed into the form.
+// The four agreed conservation statuses (RBAC.md D11), the only values the API
+// accepts. An officer must pick one for every species.
+export const CONSERVATION = ["least concern", "near threatened", "vulnerable", "endangered"];
+// A new species, before anything is typed into the form. No status is picked
+// for the officer: they must choose one before saving (RBAC D11).
 export const BLANK_SPECIES = {
   scientific_name: "", common_name: "", family: "", genus: "", description: "",
-  conservation_status: "least concern", cultural_significance: "", ecology: "",
+  conservation_status: "", cultural_significance: "", ecology: "",
 };
 
-// Statuses whose exact locations are hidden from visitors. Matches the API (distribution.js).
-export const THREATENED = ["endangered", "critically endangered"];
+// The only status whose exact locations are hidden from visitors automatically.
+// Matches the API (distribution.js). Any other plant can be hidden by hand.
+export const THREATENED = ["endangered"];
 
 /**
  * Returns true if the given conservation status represents a threatened species
- * whose location is always locked to hidden (endangered, critically endangered).
+ * whose location is always locked to hidden (endangered).
  * Normalizes input by trimming and lowercasing for case-insensitive protection matching.
  */
 export const isThreatened = (status) =>
@@ -37,14 +37,14 @@ export const withStatusKey = (species) =>
 // One rule and one wording for hiding a plant's exact location, on the website and
 // in the app. The GPS reading is always kept for officers; only the public view
 // changes, and the plant's details and photos stay visible.
-// Endangered: always on. Vulnerable: on by default. Anything else: the officer's choice.
+// Endangered: always on. Anything else (vulnerable too): off until an officer or admin ticks it (RBAC D11).
 // `choice` is what the officer ticked on this screen (null until they change it).
 export const HIDE_LOCATION_LABEL = "Hide the exact location from the public";
 export function hideLocationRule(status, override, choice = null) {
   const norm = String(status || "").trim().toLowerCase();
   const locked = isThreatened(norm);
-  const byDefault = norm === "vulnerable";
-  const first = locked ? "Always on for endangered species. " : byDefault ? "On by default for vulnerable species. " : "";
+  const byDefault = false;
+  const first = locked ? "Always on for endangered species. " : "";
   return {
     locked,
     on: locked || (choice ?? (!!override || byDefault)),
@@ -54,7 +54,7 @@ export function hideLocationRule(status, override, choice = null) {
 
 // The same two sentences everywhere a plant's location is not shown exactly.
 export const REDUCED_LOCATION_NOTE = "Approximate area, about 1.1 km across. The exact spot is protected.";
-export const HIDDEN_LOCATION_NOTE = "Location hidden to protect this plant.";
+export const HIDDEN_LOCATION_NOTE = "This plant's exact location is hidden to protect it.";
 
 // What a field photo can be tagged as showing. The API accepts only these.
 export const PHOTO_TRAITS = ["Whole plant", "Tree trunk", "Bark", "Leaf", "Flower", "Fruit", "Seed", "Root"];
@@ -157,6 +157,7 @@ export const seed = {
   species_media: [],
   zones: [],
   plants: initialPublicPlants,
+  deletedPlants: [], // RBAC D4: officers only (see StoreProvider loadFromApi)
   observations: initialPublicObservations,
   reviews: [],
   comments: [],

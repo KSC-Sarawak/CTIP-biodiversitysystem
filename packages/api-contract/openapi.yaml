@@ -242,6 +242,42 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /auth/email-change/confirm:
+    post:
+      tags: [Auth]
+      operationId: confirmEmailChange
+      summary: Finish an admin's email correction from the link (RBAC D14)
+      description: >
+        The website sends the access token the confirmation link brought. The
+        API checks it with Supabase, then moves the new address onto the
+        person's account. No staff role or two-step code: the link is the proof.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [access_token]
+              additionalProperties: false
+              properties:
+                access_token: { type: string }
+      responses:
+        '200':
+          description: The email is changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email: { type: string, format: email }
+        '410':
+          description: LINK_INVALID - expired, already used, or not an email-correction link
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   # ------------------------------------------------------------------ Public
   /public/species:
     get:
@@ -744,7 +780,7 @@ paths:
     patch:
       tags: [Profiles]
       operationId: updateProfile
-      summary: Change a user's role or active status (admin)
+      summary: Change a user's role or active status (admin). Names and emails are not changed here (RBAC D14).
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -808,6 +844,53 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+
+  /profiles/{id}/email:
+    post:
+      tags: [Profiles]
+      operationId: correctProfileEmail
+      summary: Correct a user's email (admin, RBAC D14)
+      description: >
+        Saves the correction and emails a confirmation link (a Supabase
+        invitation) to the NEW address. Nothing changes until the link is
+        clicked (POST /auth/email-change/confirm); the link lasts 24 hours. A
+        second correction replaces the first. An admin cannot correct their own
+        email (403): another admin must. Needs SUPABASE_SECRET_KEY on the
+        server (else 503).
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '202':
+          description: Confirmation email sent; the email has not changed yet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+                  pending_email: { type: string, format: email }
+                  expires_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/EmailRateLimit' }
+        '503':
+          description: NOT_CONFIGURED - no SUPABASE_SECRET_KEY on the server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /qr-tags:
     get:
       tags: [QR Tags]
@@ -1275,6 +1358,71 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Specimen' }
         '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Specimens]
+      operationId: deleteSpecimen
+      summary: Soft-delete a tagged plant (officer only, RBAC D4)
+      description: >
+        Sets is_deleted. The plant leaves every list, the map and the public pages.
+        Its QR tag stays taken and its observations are kept, so it can be restored.
+        404 when there is no such plant or it is already deleted. 409
+        REVIEW_IN_PROGRESS while an observation of the plant is waiting for review.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /specimens/{id}/retag:
+    post:
+      tags: [Specimens]
+      operationId: retagSpecimen
+      summary: Move a tagged plant to a new QR tag (officer only, RBAC D13)
+      description: >
+        For a tag that is lost, damaged or unreadable. The old tag is marked
+        `old_tag` (retired or damaged) first and is never reused; then the plant
+        moves to the new, unused tag. The plant and its observations stay the same.
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [qr_id, old_tag]
+              properties:
+                qr_id: { type: string, maxLength: 64, description: The new, unused tag }
+                old_tag: { type: string, enum: [retired, damaged] }
+      responses:
+        '200':
+          description: The plant on its new tag
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specimen' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /specimens/{id}/restore:
+    post:
+      tags: [Specimens]
+      operationId: restoreSpecimen
+      summary: Undo a tagged plant's soft delete (officer only, RBAC D4)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+      responses:
+        '200':
+          description: The plant, no longer deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specimen' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------ Observations
   /observations:
@@ -1455,11 +1603,59 @@ paths:
               schema: { $ref: '#/components/schemas/ObservationPhoto' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /observations/{id}/photos/{photoId}:
+    patch:
+      tags: [Photos]
+      operationId: updateObservationPhoto
+      summary: Change a photo's caption (Officer any photo, Botanist own observations)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: photoId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                caption: { type: string, maxLength: 200, nullable: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ObservationPhoto' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Photos]
+      operationId: deleteObservationPhoto
+      summary: Remove a photo and its file (Officer any photo, Botanist own observations)
+      parameters:
+        - $ref: '#/components/parameters/Id'
+        - name: photoId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removed }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /observations/{id}/reviews:
     get:
       tags: [Reviews]
       operationId: listObservationReviews
       summary: List review decisions for an observation
+      description: >
+        Only the botanist who recorded the observation, officers and admins.
+        Another botanist can read an approved observation (RBAC D16) but gets
+        403 for its review decisions.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -1470,6 +1666,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Review' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
     post:
       tags: [Reviews]
@@ -1515,6 +1712,9 @@ paths:
       tags: [Comments]
       operationId: listObservationComments
       summary: List comments on an observation
+      description: >
+        Only the botanist who recorded the observation, officers and admins
+        (RBAC D16). Another botanist gets 403, even on an approved observation.
       parameters:
         - $ref: '#/components/parameters/Id'
       responses:
@@ -1525,10 +1725,13 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Comment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
     post:
       tags: [Comments]
       operationId: addObservationComment
       summary: Add a comment to an observation
+      description: Only the botanist who recorded the observation, officers and admins (RBAC D16).
       parameters:
         - $ref: '#/components/parameters/Id'
       requestBody:
@@ -1546,6 +1749,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Comment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # -------------------------------------------------------------------- Sync
   /sync:
@@ -2381,12 +2586,10 @@ paths:
       operationId: getDistribution
       summary: Plant locations for the distribution map (staff)
       description: >
-        One point per plant, from its latest approved observation. For an endangered
-        plant (species status endangered / critically endangered, or the specimen's
-        endangered_override), roles other than Officer and Admin get the centre of a
-        0.01 degree grid square (about 1.1 km) instead of the exact spot. The
-        reduction happens in the API; the exact values are never sent (threat T13).
-        Botanists only see their own observations (RLS).
+        One point per plant, from its latest approved observation. Botanists,
+        officers and admins all get exact coordinates, endangered and hidden
+        plants included (RBAC D10). Botanists see every approved observation
+        (RBAC D16). Visitors cannot call this route.
       parameters:
         - name: species_id
           in: query
@@ -2640,9 +2843,10 @@ components:
         estimated: { type: boolean, description: 'true when nothing is on record, so wait_minutes is the longest it can be (60)' }
 
     ProfileUpdate:
+      description: RBAC D14 - an admin cannot change a name (each person edits their own with PATCH /me) or an email (POST /profiles/{id}/email).
       type: object
+      additionalProperties: false
       properties:
-        full_name: { type: string }
         role: { $ref: '#/components/schemas/Role' }
         is_active: { type: boolean }
 
@@ -2662,10 +2866,13 @@ components:
 
     # ---------- species
     ConservationStatusValue:
-      description: IUCN Red List category. Any case is accepted; it is stored lower case.
+      description: >
+        One of the four agreed statuses (RBAC.md D11). Any case is accepted; it is
+        stored lower case. Create and update refuse null (422): every species must
+        have a status. Only older species whose removed status was cleared can be
+        read back as null, until an officer picks one.
       type: [string, 'null']
-      enum: ['least concern', 'near threatened', 'vulnerable', 'endangered', 'critically endangered',
-        'extinct in the wild', 'extinct', 'data deficient', 'not evaluated', null]
+      enum: ['least concern', 'near threatened', 'vulnerable', 'endangered', null]
 
     SpeciesInput:
       type: object
@@ -2681,10 +2888,11 @@ components:
         ecology: { type: [string, 'null'], minLength: 1, maxLength: 5000, description: Habitat and ecology (CTIP-149) }
 
     SpeciesCreate:
-      description: Unknown fields (is_published, created_by, ...) are rejected with 422
+      description: Unknown fields (is_published, created_by, ...) are rejected with 422. conservation_status is required (RBAC D11).
       allOf:
         - $ref: '#/components/schemas/SpeciesInput'
         - type: object
+          required: [conservation_status]
           properties:
             id:
               type: string

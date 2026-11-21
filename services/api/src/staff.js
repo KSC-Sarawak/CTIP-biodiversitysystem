@@ -115,8 +115,8 @@ const Me = z.strictObject({
     .nullable().optional(),
 }).refine((b) => Object.keys(b).length > 0, 'Send at least one field to change');
 
+// RBAC D14: no full_name. Each person edits their own name (PATCH /me).
 const ProfileUpdate = z.strictObject({
-  full_name: z.string().trim().min(1).max(200).optional(),
   role: z.enum(ROLES).optional(),
   is_active: z.boolean().optional(),
 }).refine((b) => Object.keys(b).length > 0, 'Send at least one field to change');
@@ -384,19 +384,26 @@ export const staffHandlers = {
             });
           }
         }
-        out.specimens = Array.from(specimenMap.values());
+        // RBAC D9: a protected plant reaches visitors with no coordinates,
+        // even if public_plants() ever sent them.
+        const statusOf = new Map(out.species.map((s) => [s.id, s.conservation_status ?? null]));
+        out.specimens = Array.from(specimenMap.values()).map((s) =>
+          protectSpecimen(s, { role: null, userId: null, status: statusOf.get(s.species_id) }));
         out.observations = obsList;
       }
+      // Tagged-plant photos: the bucket is private, so a /object/public/ link
+      // never opened and visitors saw blank boxes. They get signed links now,
+      // for plants whose location is hidden too (only the location is
+      // protected; plant details and photos stay visible).
       if (pubPhotos?.length) {
-        out.observation_photos = pubPhotos.map((p) => ({
+        const signed = await withSignedUrls(db, pubPhotos);
+        out.observation_photos = signed.map((p) => ({
           id: p.id,
           observation_id: p.observation_id,
           s3_key: p.s3_key,
           s3_bucket: p.s3_bucket,
           created_at: p.created_at,
-          url: p.s3_key && !p.s3_key.startsWith('http')
-            ? `${process.env.SUPABASE_URL}/storage/v1/object/public/${p.s3_bucket || 'observation-photos'}/${p.s3_key}`
-            : p.s3_key,
+          url: p.url,
         }));
       }
       res.json(out);

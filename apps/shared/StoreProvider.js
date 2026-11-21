@@ -40,11 +40,18 @@ import {
   updateMeApi,
   createProfileApi,
   updateProfileApi,
+  correctEmailApi,
+  confirmEmailChangeApi,
   deleteProfileApi,
   restoreProfileApi,
   findSpecimenByQrApi,
   createSpecimenApi,
   updateSpecimenApi,
+  deleteSpecimenApi,
+  updateObservationPhotoApi,
+  deleteObservationPhotoApi,
+  restoreSpecimenApi,
+  retagSpecimenApi,
   updateObservationApi,
   createObservationApi,
   submitObservationApi,
@@ -355,6 +362,15 @@ function collectionMatches(a = [], b = []) {
       is_deleted: s.is_deleted,
       photos: (obsBySpecimen.get(s.id) || []).flatMap((o) => photosByObs.get(o.id) || []),
     }));
+    // RBAC D4: deleted plants, for the officers' "Deleted plants" list and its Restore button.
+    const deletedPlants = w.specimens.filter((s) => s.is_deleted).map((s) => ({
+      id: s.id,
+      qr_id: s.qr_id,
+      species_id: s.species_id,
+      proposed_species: s.proposed_species_name || "",
+      registered_by: s.registered_by,
+      updated_at: s.updated_at ?? null,
+    }));
 
     // The database allows one plant per tag, deleted plants included.
     const assignedTagIds = new Set(w.specimens.map((s) => s.qr_id).filter(Boolean));
@@ -449,6 +465,7 @@ function collectionMatches(a = [], b = []) {
       const spEqual = collectionMatches(prevDb.species, w.species);
       const mediaEqual = collectionMatches(prevDb.species_media, species_media);
       const plEqual = collectionMatches(prevDb.plants, finalPlants);
+      const delEqual = collectionMatches(prevDb.deletedPlants, deletedPlants);
       const obsEqual = collectionMatches(prevDb.observations, finalObs);
       const tagsEqual = collectionMatches(prevDb.tags, tags);
       const revEqual = collectionMatches(prevDb.reviews, reviews);
@@ -478,7 +495,7 @@ function collectionMatches(a = [], b = []) {
       const postsEqual = collectionMatches(prevDb.discussionPosts, discussionPosts);
       const dirEqual = collectionMatches(prevDb.directory, directory);
 
-      const hasChanges = !spEqual || !mediaEqual || !plEqual || !obsEqual || !tagsEqual ||
+      const hasChanges = !spEqual || !mediaEqual || !plEqual || !delEqual || !obsEqual || !tagsEqual ||
         !revEqual || !comEqual || !altEqual || !notesEqual || !nodesEqual || !nicksEqual || !rangesEqual || !telemetryEqual ||
         !notifsEqual || !auditEqual || !profEqual || !zonesEqual ||
         !discEqual || !audEqual || !postsEqual || !dirEqual;
@@ -493,6 +510,7 @@ function collectionMatches(a = [], b = []) {
         species: spEqual ? prevDb.species : w.species,
         species_media: mediaEqual ? prevDb.species_media : species_media,
         plants: plEqual ? prevDb.plants : finalPlants,
+        deletedPlants: delEqual ? prevDb.deletedPlants : deletedPlants,
         observations: obsEqual ? prevDb.observations : finalObs,
         tags: tagsEqual ? prevDb.tags : tags,
         reviews: revEqual ? prevDb.reviews : reviews,
@@ -576,6 +594,7 @@ function collectionMatches(a = [], b = []) {
       // Out of the address and the history, then on to setting a new password.
       const next = fromLink === "recovery" ? "#/login?reset=1"
         : fromLink === "magiclink" ? "#/login?mfareset=1" // lost-phone link
+        : fromLink === "emailchange" ? "#/login?emailchange=1" // RBAC D14: admin's email correction
         : fromLink === "expired" ? "#/login?expired=1" : "#/dashboard";
       window.history.replaceState(null, "", window.location.pathname + window.location.search + next);
       window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -950,11 +969,29 @@ function collectionMatches(a = [], b = []) {
   };
 
   /* ---------- plants and photos ---------- */
-  const setPlantPhotos = (plantId, photos) => {
-    setDb((d) => ({
-      ...d,
-      plants: d.plants.map((p) => (p.id === plantId ? { ...p, photos } : p)),
-    }));
+  // A tagged plant's photos, saved through the API (an officer on any plant, a
+  // botanist on their own observations). Only what changed is sent: changed
+  // captions, then removed photos. Answers { ok, message }.
+  const setPlantPhotos = async (plantId, photos) => {
+    const before = db.plants.find((p) => p.id === plantId)?.photos || [];
+    const saved = before.filter((p) => p.observation_id);
+    try {
+      for (const p of photos) {
+        const old = saved.find((o) => o.id === p.id);
+        const caption = (p.caption || "").trim();
+        if (!old || (old.caption || "").trim() === caption) continue;
+        const res = await callApi(updateObservationPhotoApi, p.observation_id, p.id, caption || null);
+        if (!res.ok) return { ok: false, message: `Caption not saved: ${res.message}` };
+      }
+      for (const old of saved) {
+        if (photos.some((p) => p.id === old.id)) continue;
+        const res = await callApi(deleteObservationPhotoApi, old.observation_id, old.id);
+        if (!res.ok && res.status !== 404) return { ok: false, message: `A photo was not removed: ${res.message}` };
+      }
+      return { ok: true };
+    } finally {
+      await loadFromApi(true); // show what was really saved, also after a failure part way
+    }
   };
 
   // The plant already registered on a tag, if any: { id, registered_by, observations }.
@@ -1137,6 +1174,32 @@ function collectionMatches(a = [], b = []) {
     notify(endangered_override ? "Exact location hidden from the public" : "Location no longer hidden");
     await loadFromApi(true);
     return true;
+  };
+
+  // RBAC D4: an officer deletes a tagged plant (soft delete) or restores it.
+  // DELETE /v1/specimens/:id and POST /v1/specimens/:id/restore. Returns true when done.
+  const setPlantDeleted = async (plantId, deleted) => {
+    const res = await callApi(deleted ? deleteSpecimenApi : restoreSpecimenApi, plantId);
+    if (!res.ok) {
+      notify(`Could not ${deleted ? "delete" : "restore"} the plant: ${res.message}`);
+      return false;
+    }
+    notify(deleted ? "Plant deleted. Restore it from Tagged plants > Deleted plants." : "Plant restored");
+    await loadFromApi(true);
+    return true;
+  };
+
+  // RBAC D13: an officer moves a plant to a new tag after marking the old one
+  // retired or damaged. Returns the new tag id, or null when refused.
+  const retagPlant = async (plantId, qrId, oldTag) => {
+    const res = await callApi(retagSpecimenApi, plantId, qrId, oldTag);
+    if (!res.ok) {
+      notify(`Could not move the plant: ${res.message}`);
+      return null;
+    }
+    notify(`Plant moved to tag ${res.data.qr_id}. The old tag is marked ${oldTag}.`);
+    await loadFromApi(true);
+    return res.data.qr_id;
   };
 
   /* ---------- observations and review ---------- */
@@ -1518,7 +1581,7 @@ function collectionMatches(a = [], b = []) {
   // are updated, then removed photos are deleted. A failure part way leaves the
   // photos already saved in place (no "delete all, insert again").
   const setSpeciesMedia = async (speciesId, list) => {
-    if (!can(role, "species")) return { ok: false, message: "Only officers and admins can change species photos" };
+    if (!can(role, "species")) return { ok: false, message: "Only officers can change species photos" };
     const bad = list.map((p) => p.file && photoProblem(p.file)).find(Boolean);
     if (bad) return { ok: false, message: bad };
     const k = list.findIndex((p) => !p.caption?.trim());
@@ -1600,6 +1663,19 @@ function collectionMatches(a = [], b = []) {
     if (!res.ok) return notify(`Failed to update user: ${res.message}`);
     notify("User updated");
     await loadFromApi(true);
+  };
+
+  // RBAC D14: the email changes only once the person clicks the link sent to the new address.
+  const correctEmail = async (id, email) => {
+    const res = await callApi(correctEmailApi, id, email.trim().toLowerCase());
+    if (!res.ok) { notify(`Could not send the confirmation: ${res.message}`); return false; }
+    notify(`Confirmation link sent to ${res.data.pending_email}. The email changes when they click it (within 24 hours).`);
+    return true;
+  };
+  // The link from that email: finish the change. Answers { ok, email } or { ok: false, message }.
+  const confirmEmailChange = async () => {
+    const res = await confirmEmailChangeApi();
+    return res.ok ? { ok: true, email: res.data.email } : { ok: false, message: res.message };
   };
 
   // Deleted accounts are off at once and can be restored for 30 days.
@@ -1793,12 +1869,12 @@ function collectionMatches(a = [], b = []) {
     logout, login, signIn, changePassword, resetPassword, updateProfile, changeMyPassword,
     mfaEnroll, mfaVerify, mfaCancel, finishFirstSignIn, mfaRecovery, mfaReset,
     endedReason, clearEndedReason,
-    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden,
+    setPlantPhotos, addPlant, addRevisit, setPlantSpecies, setPlantLocationHidden, setPlantDeleted, retagPlant,
     syncObservation, resubmit, reviewObservation, addComment,
     startDiscussion, replyToDiscussion, updateDiscussion, deleteDiscussion, refreshDiscussion,
     editDiscussionPost, deleteDiscussionPost, restoreDiscussionPost,
     saveSpecies, loadStaffSpecies, loadReviewQueue, togglePublish, setSpeciesPublished, deleteSpecies, restoreSpecies, setSpeciesMedia,
-    addUser, updateUser, deleteUser, restoreUser,
+    addUser, updateUser, deleteUser, restoreUser, correctEmail, confirmEmailChange,
     ackAlert, resolveAlert, assignAlert, addAlertNote, setNodeNickname, createNode, updateNode, loadAlertRoutes, setAlertRoute, loadNodeTelemetry, loadNodeImages,
     markRead, markAllRead, generateTags, retireTag, deleteTag,
     apiStatus, apiError, authToken, isSyncing, backendSpeciesCount,

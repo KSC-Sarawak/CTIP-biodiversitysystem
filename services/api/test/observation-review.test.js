@@ -60,6 +60,12 @@ beforeEach((t) => {
     const table = url.pathname === '/rest/v1/observations' ? observations : reviews;
     const filters = [...url.searchParams].filter(([, v]) => v.startsWith('eq.'));
     let rows = table.filter((r) => filters.every(([k, v]) => `${r[k]}` === v.slice(3)));
+    // or=(recorded_by.eq.X,status.eq.approved): the botanist's read (RBAC D16).
+    const or = url.searchParams.get('or');
+    if (or) {
+      const conds = or.replace(/^\(|\)$/g, '').split(',').map((c) => c.split('.'));
+      rows = rows.filter((r) => conds.some(([col, , ...want]) => `${r[col]}` === want.join('.')));
+    }
     const [col, dir] = (url.searchParams.get('order') ?? 'id.asc').split('.');
     rows = rows.sort((a, b) => (dir === 'desc' ? -1 : 1) * `${a[col]}`.localeCompare(`${b[col]}`));
     const total = rows.length;
@@ -78,14 +84,24 @@ test('officer lists the pending review queue, oldest first', async () => {
   assert.equal(res.body.meta.total, 2);
 });
 
-test('a botanist only sees their own observations and their status', async () => {
+test('a botanist sees their own observations at every status, and other botanists\' approved ones (RBAC D16)', async () => {
   const res = await request(app).get('/v1/observations').set(as('botanist'));
   assert.equal(res.status, 200);
-  assert.ok(res.body.data.every((o) => o.recorded_by === users.botanist));
-  assert.deepEqual(res.body.data.map((o) => o.status).sort(), ['draft', 'synced']);
-  const others = observations[1].id;
-  assert.equal((await request(app).get(`/v1/observations/${others}`).set(as('botanist'))).status, 404);
-  assert.equal((await request(app).get(`/v1/observations/${others}/reviews`).set(as('botanist'))).status, 404);
+  const mine = res.body.data.filter((o) => o.recorded_by === users.botanist).map((o) => o.status).sort();
+  const theirs = res.body.data.filter((o) => o.recorded_by !== users.botanist).map((o) => o.status);
+  assert.deepEqual(mine, ['draft', 'synced']);
+  assert.deepEqual(theirs, ['approved']);
+  // Another botanist's observation waiting for review stays private.
+  const waiting = observations[1].id;
+  assert.equal((await request(app).get(`/v1/observations/${waiting}`).set(as('botanist'))).status, 404);
+  assert.equal((await request(app).get(`/v1/observations/${waiting}/reviews`).set(as('botanist'))).status, 404);
+  // Their approved one opens, but its review decisions do not.
+  const approved = observations[3].id;
+  assert.equal((await request(app).get(`/v1/observations/${approved}`).set(as('botanist'))).status, 200);
+  const reviewsRes = await request(app).get(`/v1/observations/${approved}/reviews`).set(as('botanist'));
+  assert.equal(reviewsRes.status, 403);
+  assert.equal(reviewsRes.body.code, 'FORBIDDEN');
+  assert.equal((await request(app).get(`/v1/observations/${approved}/reviews`).set(as('other'))).status, 200);
 });
 
 test('officer approves: 201, status becomes approved, reviewer and time recorded', async () => {
@@ -101,12 +117,12 @@ test('officer approves: 201, status becomes approved, reviewer and time recorded
 test('reject and request changes need a reason', async () => {
   const target = observations[1];
   for (const decision of ['reject', 'return']) {
-    const res = await review('admin', target.id, { decision, observation_version: 3 });
+    const res = await review('officer', target.id, { decision, observation_version: 3 });
     assert.equal(res.status, 422);
     assert.equal(res.body.details.fields[0].path, 'comment');
   }
   assert.deepEqual(rpcCalls, []);
-  const ok = await review('admin', target.id, { decision: 'return', observation_version: 3, comment: 'Photo is blurry, please retake' });
+  const ok = await review('officer', target.id, { decision: 'return', observation_version: 3, comment: 'Photo is blurry, please retake' });
   assert.equal(ok.status, 201);
   assert.equal(target.status, 'returned');
 });
@@ -129,7 +145,7 @@ test('stale version gets 409 VERSION_CONFLICT; already reviewed or draft gets 40
   assert.equal(draft.status, 409);
   assert.equal(draft.body.code, 'WRONG_STATUS');
   await review('officer', observations[0].id, { decision: 'approve', observation_version: 1 });
-  const twice = await review('admin', observations[0].id, { decision: 'reject', observation_version: 1, comment: 'no' });
+  const twice = await review('officer', observations[0].id, { decision: 'reject', observation_version: 1, comment: 'no' });
   assert.equal(twice.body.code, 'WRONG_STATUS');
   assert.equal(reviews.length, 1);
 });
