@@ -854,14 +854,12 @@ export function Revisit({ nav, params = {} }) {
       </Screen>
     );
   }
-  const pendingObs = !!plant && db.observations.some((o) => o.specimen_id === plant.id && o.status === 'synced');
-  if (pendingObs) {
-    return (
-      <Screen refresh={false} header={<Header left={<IconButton name="x" label="Close" onPress={nav.back} />} />}>
-        <Empty icon="lock">This plant has an observation waiting for officer review. Edits and revisits are locked until a decision is returned.</Empty>
-      </Screen>
-    );
-  }
+  // An earlier visit still waiting for review does not block this one: it joins the
+  // queue behind it and officers decide them oldest first (RBAC D19). Botanists only
+  // get their own waiting observations (D16), so this only ever names their own.
+  const waiting = plant
+    ? db.observations.filter((o) => o.specimen_id === plant.id && o.status === 'synced').sort((a, b) => a.observed_at.localeCompare(b.observed_at))
+    : [];
   const last = plant
     ? db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => b.observed_at.localeCompare(a.observed_at))[0]
     : null;
@@ -934,6 +932,14 @@ export function Revisit({ nav, params = {} }) {
         </View>
         {target.on_phone ? <DotLabel status="queued" /> : null}
       </View>
+      {waiting.length ? (
+        <Notice
+          tone="info"
+          icon="clipboard"
+          title={waiting.length > 1 ? `${waiting.length} of your visits are waiting for review` : 'Your last visit is waiting for review'}
+          body={`You recorded ${waiting.length > 1 ? 'the oldest' : 'it'} on ${shortDate(waiting[0].observed_at)}. This revisit is reviewed after it. All visits go into the plant's history in date order.`}
+        />
+      ) : null}
       {last ? (
         <View style={{ gap: 4, padding: 14, paddingHorizontal: 16, borderRadius: 14, backgroundColor: c.bg }}>
           <Txt v="overline">Last visit · {shortDate(last.observed_at)}</Txt>

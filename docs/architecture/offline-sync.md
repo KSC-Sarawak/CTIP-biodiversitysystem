@@ -139,7 +139,7 @@ The action on a failed record:
 | Action | When |
 |---|---|
 | `pick_tag` | `TAG_IN_USE`, `TAG_NOT_FOUND` or `TAG_RESERVED` |
-| `wait_review` | `REVIEW_IN_PROGRESS` |
+| `wait_review` | `REVIEW_IN_PROGRESS` (only from an API older than RBAC D19, 21 Nov 2026: a revisit is now accepted while an earlier record waits for review) |
 | `remove_photo` | 413 or 415 on a photo |
 | `fix_record` | `VALIDATION_ERROR` (any status) or `ID_TAKEN`: the API refused the record's content |
 | `record_gone` | `NOT_FOUND` on an edit: the record was deleted on another device |
