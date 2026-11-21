@@ -813,10 +813,21 @@ export function Revisit({ nav, params = {} }) {
   const target = revisitTarget(db, params.qr, { cached: cachedTags, outboxItems });
   const plant = target?.plant || null; // the loaded workspace's plant, if there is one
   const [photos, setPhotos] = useState([]);
-  const [height, setHeight] = useState('');
-  const [changes, setChanges] = useState('');
+  const [height, setHeight] = useState(''); // empty = not measured this time (never copied from the last visit)
+  // Appearance starts as the plant's latest description, for the botanist to update.
+  // `null` until it is filled once from the loaded plant; the poll never refills it.
+  const [appearance, setAppearance] = useState(null);
+  const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false); // a fast double tap must not save two revisits
+  const plantObs = plant ? db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => b.observed_at.localeCompare(a.observed_at)) : [];
+  const lastApproved = plantObs.find((o) => o.status === 'approved') || null;
+  const baseAppearance = (lastApproved || plantObs[0])?.morphology || '';
+  useEffect(() => {
+    if (appearance == null && plant) setAppearance(baseAppearance);
+  }, [appearance, plant, baseAppearance]);
+  const looks = appearance ?? baseAppearance;
+  const looksChanged = looks.trim() !== baseAppearance.trim();
   const { gps, gpsLoading, gpsError, typed, typeSpot, fetchGps, refresh, toggleHand } = useSpot();
 
   useEffect(() => {
@@ -825,7 +836,7 @@ export function Revisit({ nav, params = {} }) {
 
   // Leaving the form, by the X or Android's back button: ask first when something was entered.
   const leave = () => {
-    if (!photos.length && !changes.trim() && !height) return nav.back();
+    if (!photos.length && !notes.trim() && !height && !looksChanged) return nav.back();
     Alert.alert('Discard this revisit?', 'What you entered will be lost.', [
       { text: 'Keep editing', style: 'cancel' },
       { text: 'Discard', style: 'destructive', onPress: () => nav.back() },
@@ -854,7 +865,8 @@ export function Revisit({ nav, params = {} }) {
   const last = plant
     ? db.observations.filter((o) => o.specimen_id === plant.id).sort((a, b) => b.observed_at.localeCompare(a.observed_at))[0]
     : null;
-  const ok = photos.length > 0 || changes.trim() || height;
+  // Something new to send: photos, a measured height, a new description or a note.
+  const ok = photos.length > 0 || !!height || looksChanged || !!notes.trim();
   const problems = { height: !heightOk(height) }; // the API's limit (LIMITS), as on the new plant form
 
   const addPhotoItems = (items) => {
@@ -878,9 +890,11 @@ export function Revisit({ nav, params = {} }) {
         qr_id: target.qr_id,
         specimen_id: target.specimen_id, // null for a plant saved only on this phone
         specimen_ref: target.specimen_ref, // that plant's record on this phone
-        height_cm: height || last?.height_cm,
-        morphology: changes.trim() || last?.morphology,
-        notes: '',
+        // Only what was measured or written on this visit: an empty height stays empty,
+        // so an approved revisit never shows the last visit's height as a new reading.
+        height_cm: height || null,
+        morphology: looks.trim() || null,
+        notes: notes.trim(),
         photos,
         // No fix and no spot set by hand: no location, never the plant's stored one.
         ...revisitLocation(gps, { hasFix: hasFix(gps) }),
@@ -935,9 +949,13 @@ export function Revisit({ nav, params = {} }) {
           onEdit={(i, patch) => setPhotos((l) => l.map((p, j) => (j === i ? { ...p, ...patch } : p)))}
         />
       </Section>
-      <Section title="What has changed" gap={16}>
-        <Field label="Height (cm)" value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} placeholder={last?.height_cm ? String(last.height_cm) : ''} keyboardType="decimal-pad" width={140} hint="Leave empty if it has not changed" error={problems.height ? HEIGHT_PROBLEM : undefined} />
-        <Area label="Changes" value={changes} onChangeText={setChanges} placeholder="New pitchers, flowering, damage…" maxLength={LIMITS.text} />
+      <Section title="This visit" gap={16}>
+        <Field label="Height (cm)" optional value={height} onChangeText={(t) => setHeight(t.replace(/[^\d.]/g, ''))} keyboardType="decimal-pad" width={140}
+          hint={last?.height_cm ? `Last measured: ${last.height_cm} cm. Leave empty if you did not measure it this time.` : 'Leave empty if you did not measure it this time.'}
+          error={problems.height ? HEIGHT_PROBLEM : undefined} />
+        <Area label="Appearance" value={looks} onChangeText={setAppearance} placeholder="Leaves, pitchers, flowers…" maxLength={LIMITS.text} />
+        <Txt v="caption" color={c.ink2} style={{ marginTop: -8 }}>Starts as the plant's latest description. Update what has changed.</Txt>
+        <Area label="Notes" optional value={notes} onChangeText={setNotes} placeholder="Condition, damage, flowering, anything else" rows={2} maxLength={LIMITS.text} />
       </Section>
       <GpsRow gps={gps} loading={gpsLoading} error={gpsError} title={typed ? 'Set by hand' : 'Same place as before'} onRefresh={refresh} />
       <TextLink label={typed ? 'Close map' : 'Set it by hand'} onPress={toggleHand} />

@@ -65,8 +65,10 @@ export function plantView(db, p) {
     name: species ? species.common_name || species.scientific_name : `${p.proposed_species || "Unnamed plant"} (unconfirmed)`,
     scientific: species?.scientific_name || "",
     conservation: species?.conservation_status || "unknown",
-    height_cm: obs?.height_cm ?? null,
-    morphology: obs?.morphology || "",
+    // The newest approved height and description that were actually recorded: a revisit
+    // may skip the height ("not measured this time"), which must not blank the plant's.
+    height_cm: visits.find((o) => o.status === "approved" && o.height_cm != null)?.height_cm ?? null,
+    morphology: visits.find((o) => o.status === "approved" && o.morphology)?.morphology || "",
     photos: orderedPhotos(p.photos),
     withdrawn: !!p.is_withdrawn, // RBAC D17: an officer unpublished it
     isPublic: status === "approved" && !!species && species.is_published && !p.is_deleted && !p.is_withdrawn,

@@ -37,11 +37,13 @@ The web version to copy from is `apps/web/src/pages/Specimen.jsx`. Look at `Revi
 
 | Spec | Where |
 |---|---|
-| 2.1 Plant page: status chip ("Unpublished", "Sent back for review" / "Sent back to botanist"), Unpublish (reason + type `UNPUBLISH`), Publish again (type `PUBLISH`, disabled with the reason while blocked), Review tag, the Unpublished and Sent back callouts, "See the decision" removed, hide-location switch for admins only | `apps/mobile/pages/PlantPage.js` (`TaggedPlant`, `TypedConfirm`) |
+| 2.1 Plant page: status chip ("Unpublished", "Sent back for review" / "Sent back to botanist"), Unpublish (reason + type `UNPUBLISH`), Publish again (type `PUBLISH`, disabled with the reason while blocked), Review tag, the Unpublished and Sent back callouts, "See the decision" removed, hide-location switch for officers and admins (inside the review while an observation waits) | `apps/mobile/pages/PlantPage.js` (`TaggedPlant`, `TypedConfirm`) |
 | 2.2 Review mode: species, photo captions and removals, hide-location switch as a draft; Save changes; Send back to botanist (reason); Discard | new screen `apps/mobile/pages/PlantReview.js`, route `plantReview` (needs `review`) |
 | 2.3 Review screen: on an unpublished plant, "Approve" says the plant stays unpublished | `apps/mobile/pages/Review.js` |
 | 2.4 Returned record: take or pick new photos, edit captions, remove photos, saved just before "Resubmit for review" | `apps/mobile/pages/Records.js`; `setObservationPhotos()` in `apps/shared/StoreProvider.js` now also uploads phone photos (`isNew`) |
 | 2.5 Notifications: `plant_unpublished`, `plant_republished` icons; tapping opens the plant | `apps/mobile/pages/Notifications.js` |
+
+Revisit form (`apps/mobile/pages/AddPlant.js`, `Revisit`), 21 Nov 2026: separate **Appearance** (starts as the plant's latest description) and **Notes** fields, and an empty height means "not measured this time" instead of copying the last height. The plant shows its newest approved height and description that were actually recorded (`plantView()` in `apps/shared/selectors.js`).
 
 Checked: mobile tests (101 pass) and `npx expo export --platform android` (bundles). Not yet
 checked on a device or emulator: run the checklist in section 3 on the APK.
@@ -74,7 +76,7 @@ const stage = pending ? 'synced' : p.withdrawn ? (returned ? 'returned' : 'unpub
 - The reason is the latest `return` review on that observation, from `db.reviews`.
 - Other botanists never receive that observation (RBAC D16), so they only see "Unpublished".
 
-**Hide-location switch.** On the plant page itself, only admins see the switch (D15), because they have no review. Officers only get it inside a review: the review screen for a record waiting for review, or review mode on an unpublished plant, where it is part of the draft. Officers do not get it on a published plant.
+**Hide-location switch.** Officers and admins see it on the plant page (RBAC D15). While an observation of the plant is waiting for review, or an officer has review mode open, the switch is part of that review instead, so there are never two switches for one plant. Hiding saves at once; showing the exact location asks first.
 
 ### 2.2 Review mode (new): officer, unpublished plant only
 
