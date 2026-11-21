@@ -2,6 +2,7 @@
 // Small shared pieces of the Daun design language: status chips, scientific names,
 // tag IDs, filter pills, popups, empty states, the sensor sparkline, avatars and password boxes.
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import Icon from "./Icon.jsx";
 import { initials, label } from "../../../shared/utils.js";
 import { STATUS_TEXT } from "../../../shared/tokens.js";
@@ -69,7 +70,11 @@ export function Modal({ title, onClose, children, wide }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  return (
+  // Rendered at the top of the site, not where it is used: a parent that makes its own
+  // stacking layer (isolation, transform, overflow) would otherwise put the popup behind
+  // other content (the account page header did). Inside .site so it keeps the theme colours.
+  const host = typeof document !== "undefined" ? document.querySelector(".site") || document.body : null;
+  const popup = (
     <div className="modal" onClick={onClose}>
       <div className={"pop" + (wide === "xl" ? " xl" : wide ? " wide" : "")} role="dialog" aria-label={title} onClick={(e) => e.stopPropagation()}>
         <div className="pophead">
@@ -80,6 +85,7 @@ export function Modal({ title, onClose, children, wide }) {
       </div>
     </div>
   );
+  return host ? createPortal(popup, host) : popup;
 }
 
 // "Are you sure?" popup. Pass `word` for critical actions (passwords, going public, ...):
