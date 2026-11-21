@@ -190,6 +190,9 @@ async function updateAlert(req, res, changes) {
   if (!UUID.test(req.params.id)) return fail(res, 404, 'NOT_FOUND', 'Alert not found');
   const { data, error } = await supabaseAs(req.user).from('alerts').update(changes)
     .eq('id', req.params.id).select('*').maybeSingle();
+  // RBAC D12: guard_alert_assignee() refused the assignee (for example the
+  // officer was turned off after the API's own check).
+  if (error?.code === '23514') return fail(res, 422, 'VALIDATION_ERROR', 'Only an active officer can be assigned an alert');
   if (error) return dbError(res, error);
   if (!data) return fail(res, 404, 'NOT_FOUND', 'Alert not found');
 
