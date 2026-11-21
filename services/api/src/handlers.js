@@ -11,6 +11,7 @@ import { staffHandlers } from './staff.js';
 import { discussionHandlers } from './discussions.js';
 import { sessionHandlers } from './session.js';
 import { mfaHandlers } from './mfa.js';
+import { emailChangeHandlers } from './emailChange.js';
 import { sensorHandlers } from './sensors.js';
 import { protectSpecimen } from './distribution.js';
 import { tooMany } from './rateLimit.js';
@@ -110,8 +111,8 @@ export const handlers = {
 
   // Visitor QR page (CTIP-33): the plant on a scanned tag. Visitors cannot read
   // the specimens table, so public_plant_by_tag() (migration 20261030000000)
-  // returns the plant only once it is approved on a published species, with an
-  // endangered location already reduced. protectSpecimen() runs again here so
+  // returns the plant only once it is approved on a published species, with a
+  // protected plant's location already removed (RBAC D9). protectSpecimen() runs again here so
   // the API rule holds even if the function changes. Unknown, unused and
   // unpublished tags all get the same 404, so the answer says nothing about
   // plants that are not public yet.
@@ -169,5 +170,6 @@ export const handlers = {
   ...discussionHandlers,
   ...sessionHandlers,
   ...mfaHandlers,
+  ...emailChangeHandlers,
   ...sensorHandlers,
 };

@@ -15,7 +15,7 @@ export default function SpeciesForm({ guess, onClose, onSaved }) {
   const { db, saveSpecies, setSpeciesPublished, notify } = useStore();
   const { c } = useTheme();
   const insets = useSafeAreaInsets();
-  const [form, setForm] = useState({ ...BLANK_SPECIES, scientific_name: guess?.trim() || '', conservation_status: 'not evaluated' });
+  const [form, setForm] = useState({ ...BLANK_SPECIES, scientific_name: guess?.trim() || '', conservation_status: '' });
   const [publish, setPublish] = useState(true);
   const [saving, setSaving] = useState(false);
   const set = (k) => (v) => setForm({ ...form, [k]: v });
@@ -23,6 +23,7 @@ export default function SpeciesForm({ guess, onClose, onSaved }) {
   const save = async () => {
     const name = form.scientific_name.trim();
     if (!name) return notify('Enter the scientific name');
+    if (!CONSERVATION.includes(form.conservation_status)) return notify('Choose a conservation status');
     if (db.species.some((s) => !s.is_deleted && s.scientific_name.toLowerCase() === name.toLowerCase())) {
       return notify('This species is already in the list');
     }

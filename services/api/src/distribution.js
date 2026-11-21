@@ -7,13 +7,14 @@ import { fail, dbError, UUID } from './validate.js';
 // allowed it, so coordinates are reduced here, in the API, before the JSON
 // is built. The apps only ever receive the reduced numbers.
 
-// Only these roles see exact locations of endangered plants (threat model:
-// Officers "view maps", T18 limits exact exports to Officer/Admin).
-export const EXACT_LOCATION_ROLES = ['officer', 'admin'];
+// Every signed-in role sees exact locations of protected plants (RBAC D10:
+// botanists are corporation staff doing conservation work in the forest).
+// Only visitors (no role) are kept from them (D9).
+export const EXACT_LOCATION_ROLES = ['botanist', 'officer', 'admin'];
 
 // Same rule as apps/shared/selectors.js: the officer's per-plant flag, or the
 // species' status. Compared without case so "Endangered" also counts.
-const ENDANGERED_STATUSES = ['endangered', 'critically endangered'];
+const ENDANGERED_STATUSES = ['endangered']; // RBAC D11: the only status hidden automatically
 export const isEndangered = (specimen) =>
   specimen.endangered_override ||
   ENDANGERED_STATUSES.includes(specimen.species?.conservation_status?.trim().toLowerCase());
@@ -33,12 +34,16 @@ const snap = (v) => Number(((Math.floor(v / GRID_DEGREES) + 0.5) * GRID_DEGREES)
 // species' conservation status, which a specimen row does not carry; pass
 // undefined when the caller cannot see the species (RLS shows botanists only
 // published ones), and the plant is treated as endangered, so it fails closed.
+//
+// Visitors (no role) get no coordinates at all for a protected plant, only the
+// location_reduced flag, so the apps show "location hidden" (RBAC D9).
 export function protectSpecimen(specimen, { role, userId, status }) {
   const statusUnknown = specimen.species_id != null && status === undefined;
   const reduce = (statusUnknown || isEndangered({ ...specimen, species: { conservation_status: status } }))
     && !EXACT_LOCATION_ROLES.includes(role)
-    && specimen.registered_by !== userId;
+    && (!role || specimen.registered_by !== userId);
   if (!reduce) return { ...specimen, location_reduced: false };
+  if (!role) return { ...specimen, lat: null, lng: null, gps_accuracy_m: null, location_reduced: true };
   return {
     ...specimen,
     lat: specimen.lat == null ? null : snap(specimen.lat),

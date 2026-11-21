@@ -9,6 +9,11 @@ const OFFICER_ADMIN = ['officer', 'admin'];
 // RBAC D1 (RBAC.md): only botanists register tagged plants and
 // create observations and their photos. Officers review; admins run the system.
 const BOTANIST = ['botanist'];
+// RBAC D2 and D5: data work (review, species, reports, printing and retiring
+// tags) is for officers. Admins run the system and only view data (D6).
+const OFFICER = ['officer'];
+// D5: botanists make one field tag or kept tags; officers print batches. Admins do neither.
+const BOTANIST_OFFICER = ['botanist', 'officer'];
 const ADMIN = ['admin'];
 
 export const routes = [
@@ -17,6 +22,7 @@ export const routes = [
   ['post', '/auth/refresh', PUBLIC],
   ['post', '/auth/sign-out', PUBLIC], // token optional: ends that session if sent
   ['post', '/auth/password-reset', PUBLIC],
+  ['post', '/auth/email-change/confirm', PUBLIC], // RBAC D14: the link's own token is the proof
   ['post', '/me/password', ANY_STAFF],
   // Two-step sign-in with an authenticator app (VA-70). Reached with the
   // password-only session, so the code can be set up and checked.
@@ -46,26 +52,28 @@ export const routes = [
   ['patch', '/profiles/:id', ADMIN],
   ['delete', '/profiles/:id', ADMIN], // soft delete, removed for good after 30 days
   ['post', '/profiles/:id/restore', ADMIN],
+  // RBAC D14: an admin corrects an email; it changes once the new address confirms.
+  ['post', '/profiles/:id/email', ADMIN],
 
   // QR tags
   ['get', '/qr-tags', ANY_STAFF],
-  ['post', '/qr-tags/batch', ANY_STAFF], // botanists: one tag at a time (CTIP-27)
+  ['post', '/qr-tags/batch', BOTANIST_OFFICER], // botanists: one tag at a time (CTIP-27)
   ['get', '/qr-tags/:qrId', ANY_STAFF],
-  ['delete', '/qr-tags/:qrId', ANY_STAFF], // botanists: only their own kept tags (CTIP-116)
-  ['post', '/qr-tags/:qrId/retire', OFFICER_ADMIN],
+  ['delete', '/qr-tags/:qrId', BOTANIST_OFFICER], // botanists: only their own kept tags (CTIP-116)
+  ['post', '/qr-tags/:qrId/retire', OFFICER],
 
   // Species
   ['get', '/species', OFFICER_ADMIN],
-  ['post', '/species', OFFICER_ADMIN],
+  ['post', '/species', OFFICER],
   ['get', '/species/:id', OFFICER_ADMIN],
-  ['patch', '/species/:id', OFFICER_ADMIN],
-  ['delete', '/species/:id', OFFICER_ADMIN],
-  ['post', '/species/:id/publish', OFFICER_ADMIN],
-  ['post', '/species/:id/restore', OFFICER_ADMIN],
+  ['patch', '/species/:id', OFFICER],
+  ['delete', '/species/:id', OFFICER],
+  ['post', '/species/:id/publish', OFFICER],
+  ['post', '/species/:id/restore', OFFICER],
   ['get', '/species/:id/media', OFFICER_ADMIN],
-  ['post', '/species/:id/media', OFFICER_ADMIN],
-  ['patch', '/species/:id/media/:mediaId', OFFICER_ADMIN],
-  ['delete', '/species/:id/media/:mediaId', OFFICER_ADMIN],
+  ['post', '/species/:id/media', OFFICER],
+  ['patch', '/species/:id/media/:mediaId', OFFICER],
+  ['delete', '/species/:id/media/:mediaId', OFFICER],
 
   // Specimens (row-level "own record" checks stay in Supabase RLS)
   ['get', '/specimens', ANY_STAFF],
@@ -73,6 +81,11 @@ export const routes = [
   ['get', '/specimens/by-qr/:qrId', ANY_STAFF],
   ['get', '/specimens/:id', ANY_STAFF],
   ['patch', '/specimens/:id', ANY_STAFF],
+  // RBAC D4: only officers delete and restore tagged plants (soft delete).
+  ['delete', '/specimens/:id', OFFICER],
+  ['post', '/specimens/:id/restore', OFFICER],
+  // RBAC D13: only officers move a plant to a new tag (after the old one is retired or damaged).
+  ['post', '/specimens/:id/retag', OFFICER],
 
   // Observations, photos, reviews, comments, sync
   ['get', '/observations', ANY_STAFF],
@@ -84,8 +97,10 @@ export const routes = [
   ['get', '/observations/:id/photos', ANY_STAFF],
   ['post', '/observations/:id/photos', BOTANIST],
   ['post', '/observations/:id/photos/:photoId/confirm', BOTANIST],
+  ['patch', '/observations/:id/photos/:photoId', BOTANIST_OFFICER], // caption: officer any, botanist own
+  ['delete', '/observations/:id/photos/:photoId', BOTANIST_OFFICER], // remove: officer any, botanist own
   ['get', '/observations/:id/reviews', ANY_STAFF],
-  ['post', '/observations/:id/reviews', OFFICER_ADMIN],
+  ['post', '/observations/:id/reviews', OFFICER],
   ['get', '/observations/:id/comments', ANY_STAFF],
   ['post', '/observations/:id/comments', ANY_STAFF],
   ['post', '/sync', BOTANIST],
@@ -135,6 +150,6 @@ export const routes = [
   ['delete', '/me/push-token', ANY_STAFF],
 
   // Reports
-  ['get', '/reports/observations', OFFICER_ADMIN],
-  ['get', '/reports/species', OFFICER_ADMIN],
+  ['get', '/reports/observations', OFFICER],
+  ['get', '/reports/species', OFFICER],
 ];
