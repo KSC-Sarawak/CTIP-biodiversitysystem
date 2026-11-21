@@ -68,12 +68,13 @@ export function nameProblem(value) {
 }
 
 // Supabase's reasons for refusing a password (weak_password), in plain words.
+const PASSWORD_MIX = "Use at least one small letter (a-z), one capital letter (A-Z), one number (0-9) and one symbol such as # or @.";
 const WEAK_REASONS = {
-  length: "it is too short for the project's password rules",
-  characters: "it needs a mix of character types (for example lower and upper case letters, numbers and symbols)",
-  pwned: "it has appeared in a known data leak, so it is easy to guess",
+  length: "This password is too short.",
+  characters: PASSWORD_MIX,
+  pwned: "This password has appeared in a known data leak, so it is easy to guess. Choose a different one.",
 };
 export const weakPasswordMessage = (reasons = []) => {
-  const words = reasons.map((r) => WEAK_REASONS[r]).filter(Boolean);
-  return `Supabase refused this password${words.length ? `: ${words.join("; ")}` : ""}. Choose a stronger one.`;
+  const words = [...new Set(reasons)].map((r) => WEAK_REASONS[r]).filter(Boolean);
+  return words.length ? words.join(" ") : `This password is too weak. ${PASSWORD_MIX}`;
 };

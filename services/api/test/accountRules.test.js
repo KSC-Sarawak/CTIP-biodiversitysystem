@@ -36,6 +36,12 @@ test('passwords and names', () => {
   assert.equal(passwordProblem('longenough1'), null);
   assert.match(nameProblem('   '), /Enter the person's name/);
   assert.match(weakPasswordMessage(['pwned']), /data leak/);
+  // Shown on the reset and change-password pages: short, with spaces so it wraps.
+  assert.equal(
+    weakPasswordMessage(['characters']),
+    'Use at least one small letter (a-z), one capital letter (A-Z), one number (0-9) and one symbol such as # or @.',
+  );
+  assert.match(weakPasswordMessage([]), /^This password is too weak\. Use at least one small letter/);
 });
 
 test('the API and the apps use the same rules (keep the two files the same)', () => {
