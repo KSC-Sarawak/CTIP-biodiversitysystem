@@ -33,8 +33,8 @@ import { useBackHandler } from '../navigation/focus.js';
 
 const MAX_PHOTOS = 6;
 
-// Take a photo with the camera.
-async function takePhoto() {
+// Take a photo with the camera. Also used to fix a returned record (Records.js).
+export async function takePhoto() {
   try {
     const cam = await ImagePicker.requestCameraPermissionsAsync();
     const result = cam.granted
@@ -57,7 +57,7 @@ async function takePhoto() {
 }
 
 // Pick photo(s) from device image gallery.
-async function pickFromGallery() {
+export async function pickFromGallery() {
   try {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],

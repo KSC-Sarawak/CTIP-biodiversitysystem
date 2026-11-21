@@ -129,6 +129,8 @@ export function ReviewRecord({ nav, params = {} }) {
   const match = species.find((s) => s.scientific_name.toLowerCase() === spText.trim().toLowerCase());
   const suggestions = !match && spText.trim().length > 1 ? species.filter((s) => `${s.common_name} ${s.scientific_name}`.toLowerCase().includes(spText.trim().toLowerCase())).slice(0, 3) : [];
   const open = o.status === 'synced';
+  // RBAC D17/D18: approving an observation of an unpublished plant does not publish it.
+  const withdrawn = !!plant.withdrawn;
   const hideRule = hideLocationRule((match || plant.species)?.conservation_status, plant.endangered_override, hideChoice);
 
   // Waits for the API: the species must be saved before approving (the API checks it),
@@ -153,7 +155,7 @@ export function ReviewRecord({ nav, params = {} }) {
     const r = await reviewObservation(o.id, decision, note.trim()); // shows its own message when it fails
     setBusy(false);
     if (!r?.ok) return;
-    notify({ approve: `${plant.qr_id} approved and published`, return: `${plant.qr_id} returned to ${nameOf(db, o.recorded_by)}`, reject: `${plant.qr_id} rejected` }[decision]);
+    notify({ approve: withdrawn ? `${plant.qr_id} approved. The plant stays unpublished.` : `${plant.qr_id} approved and published`, return: `${plant.qr_id} returned to ${nameOf(db, o.recorded_by)}`, reject: `${plant.qr_id} rejected` }[decision]);
     nav.back();
   };
 
@@ -175,6 +177,7 @@ export function ReviewRecord({ nav, params = {} }) {
       <Photos photos={plant.photos.filter((p) => p.observation_id === o.id).length ? plant.photos.filter((p) => p.observation_id === o.id) : plant.photos} />
       {plant.scientific ? <Sci size={16}>{plant.scientific}{plant.species?.family ? ` · ${plant.species.family}` : ''}</Sci> : null}
       {!open ? <DotLabel status={o.status} /> : null}
+      {open && withdrawn ? <Notice tone="warning" icon="eyeOff" title="This plant is unpublished" body="Approving does not publish it. The plant stays unpublished. Publish it again from the plant page when it is ready." /> : null}
       {(o.lat ?? plant?.lat) == null ? <Notice tone="warning" icon="pin" title="Location not captured" body="The botanist's phone had no GPS fix, so this plant will not appear on the map. Ask where it is, or return the record for a location." /> : null}
       <KV rows={[
         ['Recorded by', `${nameOf(db, o.recorded_by)} · ${dateTime(o.observed_at)}`],
