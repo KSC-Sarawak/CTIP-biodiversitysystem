@@ -3,7 +3,7 @@ import { supabaseAs } from './supabase.js';
 import { parseBody, UUID } from './validate.js';
 import { findObservation } from './observationAccess.js';
 import {
-  ObservationCreate, EDITABLE, isDuplicate, reviewInProgress, REVIEW_IN_PROGRESS_MESSAGE,
+  ObservationCreate, EDITABLE, isDuplicate,
 } from './field.js';
 
 // POST /sync (CTIP-16): the phone sends what it recorded offline, up to 20
@@ -48,19 +48,8 @@ const SyncRequest = z.strictObject({
 const failed = (id, code, message) => ({ id, result: 'error', error: { code, message } });
 
 async function createItem(db, user, item, deviceId) {
-  const review = await reviewInProgress(db, user, item.specimen_id, item.id);
-  if (review.error) return failed(item.id, 'DB_ERROR', review.error.message);
-  if (review.blocked) {
-    // A resend of a create that already landed (its answer was lost) is not a
-    // new record on the plant: answer it like any resend, so the phone goes on.
-    const existing = await findObservation(db, { params: { id: item.id }, user });
-    if (existing.error) return failed(item.id, 'DB_ERROR', existing.error.message);
-    if (existing.data?.recorded_by === user.id) {
-      return { id: item.id, result: 'created', server_version: existing.data.version };
-    }
-    return failed(item.id, 'REVIEW_IN_PROGRESS', REVIEW_IN_PROGRESS_MESSAGE);
-  }
-
+  // No check for an earlier observation waiting for review: a revisit may join
+  // the queue behind it (RBAC.md D19).
   const { base_version, ...fields } = item;
   const { data, error } = await db
     .from('observations')

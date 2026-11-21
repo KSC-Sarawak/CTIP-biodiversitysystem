@@ -92,8 +92,7 @@ export function createFakeServer({ userId = "user-1", tags = null, retiredTags =
     }
 
     if (item.base_version === null) {
-      const waiting = state.observations.some((o) => o.specimen_id === item.specimen_id && o.status === "synced" && !o.is_deleted && o.id !== item.id);
-      if (waiting) return failed("REVIEW_IN_PROGRESS", "This plant has a record waiting for an officer. You can add to it once a decision is returned.");
+      // Like the API (RBAC.md D19): a revisit may join an earlier record still waiting for an officer.
       const existing = state.observations.find((o) => o.id === item.id);
       if (existing) {
         if (existing.recorded_by === state.userId && !existing.is_deleted) return { id: item.id, result: "created", server_version: existing.version };
