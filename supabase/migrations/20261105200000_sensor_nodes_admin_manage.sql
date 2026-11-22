@@ -1,7 +1,7 @@
 -- =====================================================================
 -- Only admins manage sensor nodes (CTIP-48: "Admin can register, edit and
--- deactivate a sensor node"; CLAUDE.md: IoT node registration is the
--- System Administrator's).
+-- deactivate a sensor node"; the team's role table gives IoT node
+-- registration to the System Administrator).
 --
 -- Before: the "nodes: staff" policy let officers AND admins insert,
 -- update and delete nodes. Now:

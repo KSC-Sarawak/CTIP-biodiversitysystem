@@ -1,23 +1,23 @@
 """
-node_gateway.py - MQTT bridge + laptop webcam in ONE script
+Nodegateway.py - MQTT bridge + laptop webcam in ONE script
 Jira: CTIP-61 (MQTT bridge) and CTIP-62 (laptop webcam capture)
 
 ESP32 --MQTT--> broker --MQTT--> THIS SCRIPT
                                    |-- nodes/+/telemetry -> backend (Supabase or API)
                                    |-- nodes/+/trigger   -> webcam photo -> POST image
 
-Telemetry (same as bridge.py), set MODE below:
+Telemetry, set MODE below:
+  "api"      -> POST {API_URL}/telemetry with X-Sensor-Key  (the default, the contract way)
   "supabase" -> insert into the Supabase telemetry table and update
-                sensor_nodes.last_seen                      (temporary, works today)
-  "api"      -> POST {API_URL}/telemetry with X-Sensor-Key  (the contract way)
+                sensor_nodes.last_seen                      (fallback when the API is down)
 
-Camera (same as capture.py):
+Camera:
   One photo per trigger, at most one per node every COOLDOWN_S seconds.
   JPEG (2 MB max). Set IMAGE_MODE below:
+  "api"      -> POST {API_URL}/sensor-nodes/{node_id}/images (the default, the contract way)
   "supabase" -> upload to the private Storage bucket sensor-images as
                 <node_id>/<image_id>.jpg and add a row to sensor_images
-                                                            (temporary, works today)
-  "api"      -> POST {API_URL}/sensor-nodes/{node_id}/images (the contract way)
+                                                            (fallback when the API is down)
   Photos are saved in captures/pending/ first and retried until they upload.
 
 The parts run separately: if the camera fails, telemetry keeps flowing.
@@ -25,9 +25,9 @@ The parts run separately: if the camera fails, telemetry keeps flowing.
 Run (PowerShell, Python 3):
     .venv\\Scripts\\Activate.ps1
     pip install opencv-python paho-mqtt requests
-    python node_gateway.py               # bridge + camera
-    python node_gateway.py --no-camera   # bridge only
-    python node_gateway.py --test        # take one test photo and exit
+    python Nodegateway.py                # bridge + camera
+    python Nodegateway.py --no-camera    # bridge only
+    python Nodegateway.py --test         # take one test photo and exit
 
 Keys in bridge_secrets.py (same folder, do NOT commit it):
     SUPABASE_SERVICE_KEY = "eyJ..."
@@ -39,9 +39,9 @@ Keys in bridge_secrets.py (same folder, do NOT commit it):
 Security (CTIP-50, F-14 and F-15, 4 Nov 2026):
   - F-14: connects to the team's own Mosquitto broker over TLS (port 8883)
     with a username and password. The broker only lets each node publish
-    to its own topic (infra/mosquitto/acl).
-    Until that broker is ready, USE_TEAM_BROKER = False keeps using the old
-    public broker (no TLS, no login). F-14 stays open while it is False.
+    to its own topic (infra/mosquitto/acl). This is the default
+    (USE_TEAM_BROKER = True). Setting it to False goes back to the old public
+    broker (no TLS, no login) and reopens F-14: only for a quick test.
   - F-15: only node IDs listed in REGISTERED_NODES are accepted, only the
     trigger sources in ALLOWED_SOURCES, at most MAX_PHOTOS_PER_MINUTE photos
     in total, and readings outside SENSOR_LIMITS are dropped.
@@ -61,13 +61,13 @@ import paho.mqtt.client as mqtt
 import requests
 
 # ================================================================ Settings
-MODE = "api"        # telemetry: "supabase" now, "api" when POST /telemetry works
-IMAGE_MODE = "api"  # images:    "supabase" now, "api" when POST /sensor-nodes/{id}/images works
+MODE = "api"        # telemetry: "api" (POST /telemetry), or "supabase" if the API is down
+IMAGE_MODE = "api"  # images:    "api" (POST /sensor-nodes/{id}/images), or "supabase" if the API is down
 IMAGE_BUCKET = "sensor-images"
 
-# F-14 switch. False = old public broker (no TLS, no login) until the team broker is ready.
-# True = team Mosquitto broker on this laptop (TLS + login). Needs MQTT_USER /
-# MQTT_PASSWORD in bridge_secrets.py and ca.crt in this folder.
+# F-14 switch. True = team Mosquitto broker on this laptop (TLS + login), the default.
+# Needs MQTT_USER / MQTT_PASSWORD in bridge_secrets.py and ca.crt in this folder.
+# False = old public broker (no TLS, no login): reopens F-14, only for a quick test.
 USE_TEAM_BROKER = True
 
 if USE_TEAM_BROKER:
@@ -75,7 +75,7 @@ if USE_TEAM_BROKER:
     BROKER = "localhost"    # Mosquitto runs on this same laptop
     PORT = 8883             # TLS port
 else:
-    BROKER = "broker.hivemq.com"   # TEMPORARY: public broker, no TLS, no login
+    BROKER = "broker.hivemq.com"   # public broker, no TLS, no login (test only, see above)
     PORT = 1883
 CA_CERT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ca.crt")  # copy of infra/mosquitto/certs/ca.crt
 TELEMETRY_TOPIC = "nodes/+/telemetry"
@@ -213,7 +213,7 @@ def explain(code, text):
     if code == 401:
         return "bad key. Check bridge_secrets.py"
     if code == 501:
-        return "POST /telemetry is not built yet. Use MODE = \"supabase\""
+        return "this API does not have the route. Check API_URL, or use MODE = \"supabase\""
     if "23503" in text or "foreign key" in text:
         return "node_id is not registered in sensor_nodes. Put a real node UUID in secrets.h"
     if "22P02" in text:

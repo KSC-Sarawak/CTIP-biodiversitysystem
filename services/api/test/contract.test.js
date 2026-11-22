@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { routes } from '../src/permissions.js';
 
-// The contract is the single source of truth (CLAUDE.md, "contract first").
+// The contract is "the single source of truth for the API" (README, packages/api-contract).
 // Every route the API answers must be written down there, so a new endpoint
 // cannot slip in without its contract change and its two approvals.
 // The YAML is read as text: each path is a 2-space key under `paths:`, and

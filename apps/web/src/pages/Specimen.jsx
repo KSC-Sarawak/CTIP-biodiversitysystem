@@ -17,6 +17,7 @@ import { can } from "../../../shared/permissions.js";
 import { lastUpdated, nameOf, plantVisits, shownCoords, tagUrl, visiblePlants } from "../../../shared/selectors.js";
 import { HIDDEN_LOCATION_NOTE, HIDE_LOCATION_LABEL, REDUCED_LOCATION_NOTE, hideLocationRule } from "../../../shared/data.js";
 import { fmtDate, fmtDateTime, label } from "../../../shared/utils.js";
+import { SENSOR_FIELDS, fixedRanges, rangeState, rangeText } from "../../../shared/sensorLimits.js";
 
 const height = (cm) => (cm == null ? "-" : cm >= 100 ? `${(cm / 100).toFixed(cm % 10 ? 2 : 1)} m` : `${cm} cm`);
 
@@ -903,16 +904,34 @@ function HeightChart({ visits }) {
   );
 }
 
+// The node guarding this plant: its latest reading against the fixed stable range,
+// the same range the database alert rule and the Monitoring page use.
+// Per-node limits (node.thresholds) are not used, and are null on most nodes.
 function Sensor({ db, node }) {
-  const rows = db.telemetry[node.id] || [];
+  const rows = db.telemetry?.[node.id] || [];
   const last = rows.at(-1);
+  const ranges = fixedRanges(db);
+  const fields = Object.entries(SENSOR_FIELDS);
   return (
     <div className="glass pad">
       <p className="row between wrap"><b>{node.name}</b><Chip value={node.status} /></p>
       {last ? (
-        <p>Latest reading: <Mono>{last.temperature}°C</Mono> · soil moisture <Mono>{last.soil_moisture}%</Mono> <span className="mute small">({fmtDateTime(last.ts)})</span></p>
+        <p>
+          Latest reading <span className="mute small">({fmtDateTime(last.ts)})</span>:{" "}
+          {fields.map(([f, { label: name, unit }], i) => {
+            const state = rangeState(last, f, ranges);
+            return (
+              <span key={f}>
+                {i > 0 && " · "}{name.toLowerCase()} <Mono>{last[f] == null ? "-" : `${last[f]}${unit === "%" ? "%" : ` ${unit}`}`}</Mono>
+                {state && <b className="warntext"> {state === "high" ? "above" : "below"} range</b>}
+              </span>
+            );
+          })}
+        </p>
       ) : <p className="mute">No readings yet.</p>}
-      <p className="mute small">Alert limits: {node.thresholds.temp_max}°C max, {node.thresholds.moisture_min}% soil moisture min.</p>
+      <p className="mute small">
+        Alert range: {fields.map(([f, { label: name, unit }]) => `${name.toLowerCase()} ${rangeText(ranges[f], unit)}`).join(" · ")}.
+      </p>
       <a className="btn ghost" href="#/monitoring"><Icon name="activity" size={16} /> Open Monitoring</a>
     </div>
   );

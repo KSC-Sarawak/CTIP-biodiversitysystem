@@ -57,7 +57,7 @@ describe('Mobile Enhancements Test Suite', () => {
       ],
     };
 
-    // plantView respects CLAUDE.md: plants without GPS fixes retain null coordinates
+    // plantView never makes up a location: a plant without a GPS fix keeps null coordinates
     const plant = plantView(mockDb, mockDb.plants[0]);
     assert.equal(plant.lat, null, 'Plant without GPS must not have synthetic coordinates');
     assert.equal(plant.lng, null, 'Plant without GPS must not have synthetic coordinates');

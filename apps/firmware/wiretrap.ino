@@ -11,7 +11,7 @@
  * Camera trigger (NOT telemetry, not in the contract):  nodes/{NODE_ID}/trigger
  *   { "ts": "...Z", "source": "tripwire", "deflection": 1520 }
  *   { "ts": "...Z", "source": "motion" }
- * capture.py on the laptop listens to this topic and takes a webcam photo.
+ * Nodegateway.py on the laptop listens to this topic and takes a webcam photo.
  *
  * Libraries (Arduino Library Manager):
  *   - "DHT sensor library" by Adafruit
