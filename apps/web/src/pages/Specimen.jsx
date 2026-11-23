@@ -412,7 +412,8 @@ export default function Specimen({ qr }) {
                 )}
               </>
             ) : (
-              <p className="mute">{plant.lat == null ? "Location not captured when this plant was recorded." : HIDDEN_LOCATION_NOTE}</p>
+              // RBAC D9: a visitor gets no coordinates for a protected plant, so check the flag before "not captured" (same as the app).
+              <p className="mute">{(!staff && plant.endangered) || plant.location_reduced || plant.lat != null ? HIDDEN_LOCATION_NOTE : "Location not captured when this plant was recorded."}</p>
             )}
           </section>
           {staff && (
