@@ -203,7 +203,7 @@ This runs on the laptop itself, so it does **not** test the firewall. The ESP32 
 | `temperature` 9999 | Gateway: `skipped, temperature=9999 is outside -10..60` |
 | Trigger `source` not `motion`/`tripwire` | Gateway skips it |
 
-All of these passed in Claude's Linux test with the same config on 8 Nov.
+All of these passed in a Linux test with the same config on 8 Nov.
 
 ---
 

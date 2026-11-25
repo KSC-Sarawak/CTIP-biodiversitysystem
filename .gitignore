@@ -177,5 +177,5 @@ Thumbs.db
 # Graphify
 graphify-out/
 
-# Claude
+# Local editor and assistant settings
 .claude/

@@ -1,6 +1,6 @@
 // apps/web/tests/agent-jira-traceability.spec.js
 // Automated Jira Acceptance Criteria & Requirements Test Suite
-// Directly traced to Jira User Stories in Jira.csv (CTIP-32, CTIP-34, CTIP-72, CTIP-73, CTIP-39, CTIP-78, CTIP-65, CTIP-33, CTIP-30)
+// Directly traced to Jira User Stories (CTIP-32, CTIP-34, CTIP-72, CTIP-73, CTIP-39, CTIP-78, CTIP-65, CTIP-33, CTIP-30)
 // Powered by Playwright + Local Ollama (Zero Gemini/Cloud Tokens Consumed)
 import { test, expect } from "@playwright/test";
 import { auditWithOllama, checkOllamaServer } from "./helpers/ollama.js";

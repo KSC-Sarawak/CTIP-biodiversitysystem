@@ -10,8 +10,7 @@ When sources disagree and nobody has made a decision, the higher one wins:
 
 1. **Client scope** (`docs/Project Scope-2.pdf`)
 2. **System Design Proposal** (`docs/COS30049CTIP - System Design Proposal[DRAFT].pdf`)
-3. **Later team decisions**: Nicole's role table for IoT (quoted in
-   `docs/updates/rick-extra-CTIP-security-fix.md`), the threat model
+3. **Later team decisions**: Nicole's role table for IoT, the threat model
    (`docs/security/threat-modelling.md`), Jira tickets
 
 Where the team **deliberately decided** something on 19 Nov 2026, the
@@ -679,7 +678,7 @@ plus handler checks) and **database** (Supabase RLS policies and triggers).
   API (`POST /specimens/:id/publish`, officer only) and the **web** tag page
   (`apps/web/src/pages/Specimen.jsx`).
 - Done on **mobile** too (`apps/mobile/pages/PlantPage.js`, `PlantReview.js`, `Review.js`, `Records.js`,
-  `Notifications.js`); see `docs/updates/rick-fix-officer-tag-plant-page.md`.
+  `Notifications.js`).
 
 ### 14. Revisits while an observation is waiting (D19), added 21 Nov 2026
 - Done: the API no longer refuses a new observation while another of the plant is waiting
